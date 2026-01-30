@@ -12,7 +12,7 @@ namespace Heimdall.Server
 {
 	internal static class ContentEndpoints
 	{
-		private const string ActionHeader = "X-Heimdall-content-Action";
+		private const string ActionHeader = "X-Heimdall-Content-Action";
 		private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
 

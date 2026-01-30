@@ -1,8 +1,8 @@
 ﻿(function (global) {
     "use strict";
 
-    const DEFAULT_ENDPOINT = "/__Heimdall/content/actions";
-    const CSRF_ENDPOINT = "/__Heimdall/csrf";
+    const DEFAULT_ENDPOINT = "/__heimdall/content/actions";
+    const CSRF_ENDPOINT = "/__heimdall/csrf";
     const ACTION_HEADER = "X-Heimdall-Content-Action";
     const CSRF_HEADER = "RequestVerificationToken";
 
@@ -75,7 +75,6 @@
     }
 
     function truthyAttr(el, name, defaultValue) {
-
         const v = getAttr(el, name);
         if (v == null)
             return !!defaultValue;
@@ -95,9 +94,9 @@
             if (Object.prototype.hasOwnProperty.call(obj, k)) {
                 if (!Array.isArray(obj[k]))
                     obj[k] = [obj[k]];
-
                 obj[k].push(v);
-            } else {
+            }
+            else {
                 obj[k] = v;
             }
         }
@@ -157,9 +156,8 @@
                     }
                 });
 
-                if (!res.ok) {
+                if (!res.ok)
                     throw new Error(`CSRF token fetch failed: ${res.status}`);
-                }
 
                 const data = await res.json();
                 csrfToken = data.requestToken;
@@ -185,12 +183,11 @@
     async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
         options = options || {};
 
-        const endpoint = options.endpoint || Waaagh.config.endpoint;
+        const endpoint = options.endpoint || Heimdall.config.endpoint;
         const targetEl = resolveTarget(options.target, options.fallbackTarget || null);
         const swap = options.swap || "inner";
         const credentials = options.credentials || "same-origin";
 
-        // Get CSRF token
         const token = await ensureCsrfToken();
 
         const headers = {
@@ -213,15 +210,14 @@
             credentials
         });
 
-        // Handle CSRF token expiration/validation failure
         if (res.status === 400 && shouldRetry) {
             const text = await safeText(res);
-            // Check if this looks like a CSRF validation error
-            if (text && (text.toLowerCase().includes("antiforgery") ||
+            if (text && (
+                text.toLowerCase().includes("antiforgery") ||
                 text.toLowerCase().includes("csrf") ||
-                text.toLowerCase().includes("validation"))) {
+                text.toLowerCase().includes("validation")
+            )) {
                 clearCsrfToken();
-                // Retry once with a fresh token
                 return _invokeWithRetry(actionId, payload, options, false);
             }
         }
@@ -236,7 +232,8 @@
 
         const html = await res.text();
 
-        if (targetEl) setHtml(targetEl, html, swap);
+        if (targetEl)
+            setHtml(targetEl, html, swap);
 
         if (typeof options.onSuccess === "function") {
             options.onSuccess({ html, target: targetEl, response: res });
@@ -248,10 +245,10 @@
     function bootLoads() {
         const nodes = document.querySelectorAll("[heimdall-content-load]");
         for (const el of nodes) {
-            if (el.__waaaghLoaded)
+            if (el.__heimdallLoaded)
                 continue;
 
-            el.__waaaghLoaded = true;
+            el.__heimdallLoaded = true;
 
             const actionId = getAttr(el, "heimdall-content-load");
             if (!actionId)
@@ -261,16 +258,17 @@
             const swap = getAttr(el, "heimdall-content-swap") || "inner";
             const payload = payloadFromElement(el);
 
-            invoke(actionId, payload, { target, swap, fallbackTarget: el }).catch(err => console.error(err));
+            invoke(actionId, payload, { target, swap, fallbackTarget: el })
+                .catch(err => console.error(err));
         }
     }
 
     async function handleClick(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-click]") : null;
-        if (!el)
-            return;
+        const el = e.target && e.target.closest
+            ? e.target.closest("[heimdall-click]")
+            : null;
 
-        if (e.defaultPrevented)
+        if (!el || e.defaultPrevented)
             return;
 
         if (e.button != null && e.button !== 0)
@@ -312,7 +310,8 @@
         finally {
             if (shouldDisable) {
                 el.removeAttribute("aria-busy");
-                if (!wasDisabled) el.removeAttribute("disabled");
+                if (!wasDisabled)
+                    el.removeAttribute("disabled");
             }
         }
     }
@@ -321,7 +320,7 @@
         bootLoads();
     }
 
-    const Waaagh = {
+    const Heimdall = {
         invoke,
         boot,
         onReady,
@@ -331,11 +330,11 @@
         }
     };
 
-    global.Waaagh = Waaagh;
+    global.Heimdall = Heimdall;
 
     onReady(() => {
-        if (!document.__waaaghClickInstalled) {
-            document.__waaaghClickInstalled = true;
+        if (!document.__heimdallClickInstalled) {
+            document.__heimdallClickInstalled = true;
             document.addEventListener("click", handleClick, true);
         }
 
