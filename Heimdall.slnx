@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Heimdall.Server/Heimdall.Server.csproj" />
+  <Project Path="Heimdall.Web/Heimdall.Web.csproj" />
+</Solution>
