@@ -2,14 +2,104 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>Home</title>
-    <script src="_content/Heimdall.Web/heimdall.js"></script>
+    <title 
+           heimdall-content-load="Home.Title"
+           heimdall-content-swap="inner">
+            Loading…
+    </title>
+
+    <link rel="stylesheet" href="/bootstrap.min.css" />
+    <script src="/_content/Heimdall.Web/heimdall.js"></script>
 </head>
 <body>
-    <h1 heimdall-content-load="Home.GetTitle"
-        heimdall-content-swap="inner">
-        Loading…
-    </h1>
+    <div class="container py-3">
+       
 
+        <h1 class="mb-4"
+            heimdall-content-load="Home.Header"
+            heimdall-content-swap="inner">
+            Loading…
+        </h1>
+
+        <div class="d-flex align-items-center justify-content-between mb-3">
+            <div>
+                <h2 class="h3 mb-0">Weather</h2>
+                <div class="text-muted">Showin da data an shtuff.</div>
+            </div>
+
+            <div class="btn-group" role="group" aria-label="Pagination">
+                <button type="button"
+                        class="btn btn-outline-primary"
+                        heimdall-click="Home.PagedTable"
+                        heimdall-content-target="#weatherBody"
+                        heimdall-content-swap="inner"
+                        heimdall-payload='{"page":0,"pageSize":5}'>
+                    Page 1
+                </button>
+
+                <button type="button"
+                        class="btn btn-outline-primary"
+                        heimdall-click="Home.PagedTable"
+                        heimdall-content-target="#weatherBody"
+                        heimdall-content-swap="inner"
+                        heimdall-payload='{"page":1,"pageSize":5}'>
+                    Page 2
+                </button>
+
+                <button type="button"
+                        class="btn btn-outline-primary"
+                        heimdall-click="Home.PagedTable"
+                        heimdall-content-target="#weatherBody"
+                        heimdall-content-swap="inner"
+                        heimdall-payload='{"page":2,"pageSize":5}'>
+                    Page 3
+                </button>
+            </div>
+        </div>
+
+        <div class="card shadow-sm">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span class="fw-semibold">Forecast</span>
+
+                <button type="button"
+                        class="btn btn-sm btn-outline-secondary"
+                        heimdall-click="Home.PagedTable"
+                        heimdall-content-target="#weatherBody"
+                        heimdall-content-swap="inner"
+                        heimdall-payload-from='self'
+                        data-page="0"
+                        data-pageSize="5"
+                        >
+                    Refresh
+                </button>
+            </div>
+
+            <div class="card-body p-0">
+                <table class="table table-hover mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 140px;">Date</th>
+                            <th style="width: 120px;" aria-label="Temperature in Celsius">Temp (C)</th>
+                            <th style="width: 120px;" aria-label="Temperature in Fahrenheit">Temp (F)</th>
+                            <th>Summary</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="weatherBody"
+                           heimdall-content-load="Home.PagedTable"
+                           heimdall-content-target="#weatherBody"
+                           heimdall-content-swap="inner"
+                           heimdall-payload='{"page":0,"pageSize":5}'>
+                        <tr>
+                            <td colspan="4" class="p-4 text-center text-muted">
+                                <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+                                Loader…
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
