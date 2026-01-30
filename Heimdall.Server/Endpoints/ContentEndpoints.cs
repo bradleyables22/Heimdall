@@ -18,7 +18,7 @@ namespace Heimdall.Server
 
 		internal static WebApplication MapHeimdallContentEndpoints(this WebApplication app) 
 		{
-			app.MapPost("__heimdall/content/actions", async (HttpContext ctx, ContentRegistry registry) =>
+			app.MapPost("__heimdall/v1/content/actions", async (HttpContext ctx, ContentRegistry registry) =>
 			{
 				var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
 				await antiforgery.ValidateRequestAsync(ctx);
@@ -40,14 +40,14 @@ namespace Heimdall.Server
 
 				var html = await UnwrapHtmlAsync(raw);
 
-				ctx.Response.ContentType = "text/html; charset=utf-8";
+                using var sw = new StringWriter();
+                html.WriteTo(sw, HtmlEncoder.Default);
 
-				await using var writer = new StreamWriter(ctx.Response.Body);
-				html.WriteTo(writer, HtmlEncoder.Default);
-				await writer.FlushAsync();
-
-				return Results.Empty;
-			});
+                return Results.Text(
+                    sw.ToString(),
+                    contentType: "text/html; charset=utf-8"
+                );
+            });
 			return app;
 		}
 

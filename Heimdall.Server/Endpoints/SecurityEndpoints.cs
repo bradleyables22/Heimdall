@@ -10,7 +10,7 @@ namespace Heimdall.Server.Endpoints
 	{
 		internal static WebApplication MapHeimdallSecurityEndpoints(this WebApplication app) 
 		{
-			app.MapGet("__heimdall/csrf", (HttpContext ctx) =>
+			app.MapGet("__heimdall/v1/csrf", (HttpContext ctx) =>
 			{
 				var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
 				var tokens = antiforgery.GetAndStoreTokens(ctx);

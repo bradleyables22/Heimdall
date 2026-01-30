@@ -2,104 +2,233 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title 
-           heimdall-content-load="Home.Title"
-           heimdall-content-swap="inner">
-            Loading…
-    </title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Heimdall Playground</title>
 
     <link rel="stylesheet" href="/bootstrap.min.css" />
     <script src="/_content/Heimdall.Web/heimdall.js"></script>
+
+    <script>
+        // 1-based client state (intentional)
+        window.AppState = {
+            weather: { page: 1, pageSize: 5 }
+            // counter removed: server owns it now
+        };
+
+        Heimdall.config.debug = true;
+    </script>
 </head>
-<body>
-    <div class="container py-3">
-       
 
-        <h1 class="mb-4"
-            heimdall-content-load="Home.Header"
-            heimdall-content-swap="inner">
-            Loading…
-        </h1>
+<body class="bg-body-tertiary">
 
-        <div class="d-flex align-items-center justify-content-between mb-3">
-            <div>
-                <h2 class="h3 mb-0">Weather</h2>
-                <div class="text-muted">Showin da data an shtuff.</div>
-            </div>
+    <!-- HERO -->
+    <header class="py-5 bg-white border-bottom">
+        <div class="container text-center">
+            <h1 class="display-5 fw-semibold mb-2"
+                heimdall-content-load="Home.Title">
+                Loading…
+            </h1>
 
-            <div class="btn-group" role="group" aria-label="Pagination">
-                <button type="button"
-                        class="btn btn-outline-primary"
-                        heimdall-click="Home.PagedTable"
-                        heimdall-content-target="#weatherBody"
-                        heimdall-content-swap="inner"
-                        heimdall-payload='{"page":0,"pageSize":5}'>
-                    Page 1
-                </button>
+            <p class="lead text-muted mb-0"
+               heimdall-content-load="Home.Header">
+                Loading…
+            </p>
 
-                <button type="button"
-                        class="btn btn-outline-primary"
-                        heimdall-click="Home.PagedTable"
-                        heimdall-content-target="#weatherBody"
-                        heimdall-content-swap="inner"
-                        heimdall-payload='{"page":1,"pageSize":5}'>
-                    Page 2
-                </button>
-
-                <button type="button"
-                        class="btn btn-outline-primary"
-                        heimdall-click="Home.PagedTable"
-                        heimdall-content-target="#weatherBody"
-                        heimdall-content-swap="inner"
-                        heimdall-payload='{"page":2,"pageSize":5}'>
-                    Page 3
-                </button>
+            <div class="mt-3 small text-muted">
+                Heimdall.js v<span id="heimdallJsVer">?</span>
             </div>
         </div>
+    </header>
 
-        <div class="card shadow-sm">
-            <div class="card-header d-flex align-items-center justify-content-between">
-                <span class="fw-semibold">Forecast</span>
+    <main class="container py-4">
 
-                <button type="button"
-                        class="btn btn-sm btn-outline-secondary"
-                        heimdall-click="Home.PagedTable"
-                        heimdall-content-target="#weatherBody"
-                        heimdall-content-swap="inner"
-                        heimdall-payload-from='self'
-                        data-page="0"
-                        data-pageSize="5"
-                        >
-                    Refresh
-                </button>
+        <!-- WEATHER -->
+        <section class="mb-4">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <div>
+                    <h2 class="h4 mb-0">Weather</h2>
+                    <div class="text-muted">
+                        State-driven:
+                        <code>AppState.weather</code>
+                        <span class="ms-2 badge text-bg-light border"
+                              id="weatherStateBadge">
+                            page 1 • 5 rows
+                        </span>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                    <select class="form-select form-select-sm"
+                            style="width:130px"
+                            onchange="
+                              AppState.weather.pageSize = parseInt(this.value, 10);
+                              AppState.weather.page = 1;
+                              Heimdall.invoke('Home.PagedTable', AppState.weather, { target:'#weatherBody' });
+                              HeimdallUi.syncWeather();
+                            ">
+                        <option value="5" selected>5 rows</option>
+                        <option value="10">10 rows</option>
+                        <option value="15">15 rows</option>
+                    </select>
+
+                    <div class="btn-group" role="group">
+                        <button class="btn btn-outline-primary"
+                                data-weather-page="1"
+                                onclick="AppState.weather.page = 1; HeimdallUi.syncWeather();"
+                                heimdall-content-click="Home.PagedTable"
+                                heimdall-content-target="#weatherBody"
+                                heimdall-payload-ref="AppState.weather">
+                            1
+                        </button>
+
+                        <button class="btn btn-outline-primary"
+                                data-weather-page="2"
+                                onclick="AppState.weather.page = 2; HeimdallUi.syncWeather();"
+                                heimdall-content-click="Home.PagedTable"
+                                heimdall-content-target="#weatherBody"
+                                heimdall-payload-ref="AppState.weather">
+                            2
+                        </button>
+
+                        <button class="btn btn-outline-primary"
+                                data-weather-page="3"
+                                onclick="AppState.weather.page = 3; HeimdallUi.syncWeather();"
+                                heimdall-content-click="Home.PagedTable"
+                                heimdall-content-target="#weatherBody"
+                                heimdall-payload-ref="AppState.weather">
+                            3
+                        </button>
+                    </div>
+
+                    <button class="btn btn-sm btn-outline-secondary"
+                            heimdall-content-click="Home.PagedTable"
+                            heimdall-content-target="#weatherBody"
+                            heimdall-payload-ref="AppState.weather">
+                        Refresh
+                    </button>
+                </div>
             </div>
 
-            <div class="card-body p-0">
-                <table class="table table-hover mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width: 140px;">Date</th>
-                            <th style="width: 120px;" aria-label="Temperature in Celsius">Temp (C)</th>
-                            <th style="width: 120px;" aria-label="Temperature in Fahrenheit">Temp (F)</th>
-                            <th>Summary</th>
-                        </tr>
-                    </thead>
+            <div class="card shadow-sm">
+                <div class="card-body p-0">
+                    <table class="table table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Date</th>
+                                <th>Temp (C)</th>
+                                <th>Temp (F)</th>
+                                <th>Summary</th>
+                            </tr>
+                        </thead>
 
-                    <tbody id="weatherBody"
-                           heimdall-content-load="Home.PagedTable"
-                           heimdall-content-target="#weatherBody"
-                           heimdall-content-swap="inner"
-                           heimdall-payload='{"page":0,"pageSize":5}'>
-                        <tr>
-                            <td colspan="4" class="p-4 text-center text-muted">
-                                <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
-                                Loader…
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+                        <tbody id="weatherBody"
+                               heimdall-content-load="Home.PagedTable"
+                               heimdall-content-target="#weatherBody"
+                               heimdall-payload-ref="AppState.weather">
+                            <tr>
+                                <td colspan="4" class="p-4 text-center text-muted">
+                                    Loading…
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
-        </div>
-    </div>
+        </section>
+
+        <!-- COUNTER (SERVER-DRIVEN) -->
+        <section class="mb-4">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h3 class="h5 mb-1">Counter</h3>
+                    <div class="text-muted mb-3">
+                        Backend-driven:
+                        <code>Session</code>
+                        <span class="ms-2 badge text-bg-light border"
+                              id="counterStateBadge">…</span>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-success"
+                                heimdall-content-click="Home.CounterOp"
+                                heimdall-content-target="#counterBox"
+                                heimdall-payload='{"op":"inc","step":1}'>
+                            +1
+                        </button>
+
+                        <button class="btn btn-outline-success"
+                                heimdall-content-click="Home.CounterOp"
+                                heimdall-content-target="#counterBox"
+                                heimdall-payload='{"op":"dec","step":1}'>
+                            -1
+                        </button>
+
+                        <button class="btn btn-outline-secondary"
+                                heimdall-content-click="Home.CounterOp"
+                                heimdall-content-target="#counterBox"
+                                heimdall-payload='{"op":"reset"}'>
+                            Reset
+                        </button>
+
+                        <button class="btn btn-sm btn-outline-secondary ms-auto"
+                                heimdall-content-click="Home.CounterShow"
+                                heimdall-content-target="#counterBox">
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div id="counterBox"
+                         class="mt-3 p-3 border rounded bg-body"
+                         heimdall-content-load="Home.CounterShow"
+                         heimdall-content-target="#counterBox">
+                        Loading…
+                    </div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <footer class="py-4 text-center text-muted small">
+        Heimdall Playground
+    </footer>
+
+    <script>
+        document.getElementById("heimdallJsVer").textContent =
+            window.Heimdall?.version ?? "unknown";
+
+        window.HeimdallUi = {
+            syncWeather() {
+                const badge = document.getElementById("weatherStateBadge");
+                badge.textContent =
+                    `page ${AppState.weather.page} • ${AppState.weather.pageSize} rows`;
+
+                document.querySelectorAll("[data-weather-page]").forEach(b => {
+                    const p = parseInt(b.dataset.weatherPage, 10);
+                    const active = p === AppState.weather.page;
+                    b.classList.toggle("btn-primary", active);
+                    b.classList.toggle("btn-outline-primary", !active);
+                    b.toggleAttribute("disabled", active);
+                });
+            },
+
+            // server pushes the value; we just read it from the rendered fragment
+            syncCounterFromDom() {
+                const el = document.querySelector("#counterBox [data-counter-value]");
+                if (!el) return;
+                document.getElementById("counterStateBadge").textContent = el.dataset.counterValue;
+            }
+        };
+
+        HeimdallUi.syncWeather();
+
+        // initial counter sync after first load fragment renders
+        document.addEventListener("heimdall:after", e => {
+            if (e.detail.actionId === "Home.PagedTable") HeimdallUi.syncWeather();
+            if (e.detail.actionId === "Home.CounterShow" || e.detail.actionId === "Home.CounterOp")
+                HeimdallUi.syncCounterFromDom();
+        });
+    </script>
+
 </body>
 </html>
