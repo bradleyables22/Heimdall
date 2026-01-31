@@ -1,4 +1,4 @@
-﻿namespace Heimdall.Example.Raw.Home.Models
+﻿namespace Heimdall.Example.Raw.Heimdall.Pages.Home.Models
 {
     public class WeatherForecast
     {

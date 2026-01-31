@@ -14,7 +14,7 @@ builder.Services.AddSession(o =>
 });
 var app = builder.Build();
 
-app.UseDefaultFiles();
+//app.UseDefaultFiles();
 
 app.UseAntiforgery();
 app.UseCors();
@@ -25,6 +25,12 @@ app.MapStaticAssets();
 app.UseStaticFiles();
 app.UseSession();
 app.UseHeimdall();
+app.MapHeimdallPage(options=>
+{
+    options.Pattern = "/";
+    options.RelativePath = "Heimdall/Pages/Home/index.html";
+});
+
 app.Run();
 
 

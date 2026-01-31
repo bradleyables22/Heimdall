@@ -634,7 +634,8 @@
 
         const isAnchor = el.tagName === "A";
         const preventDefault = truthyAttr(el, "heimdall-prevent-default", isAnchor);
-        if (preventDefault) e.preventDefault();
+        if (preventDefault)
+            e.preventDefault();
 
         await runActionFromElement(el, actionId, "click");
     }

@@ -1,10 +1,10 @@
-﻿using Heimdall.Example.Raw.Home.Models;
+﻿using Heimdall.Example.Raw.Heimdall.Pages.Home.Models;
 using Heimdall.Server;
 using Microsoft.AspNetCore.Html;
 using System.Net;
 using System.Text;
 
-namespace Heimdall.Example.Raw.Home
+namespace Heimdall.Example.Raw.Heimdall.Pages.Home
 {
 	public static class Home
 	{
