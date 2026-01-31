@@ -36,17 +36,12 @@ namespace Heimdall.Server
 
 				var args = await BindArgumentsAsync(ctx, method);
 
-				object? raw = method.Invoke(null, args);
+				IHtmlContent? raw = (IHtmlContent?)method.Invoke(null, args);
 
-				var html = await UnwrapHtmlAsync(raw);
+				if (raw is null)
+					return Results.NoContent();
 
-                using var sw = new StringWriter();
-                html.WriteTo(sw, HtmlEncoder.Default);
-
-                return Results.Text(
-                    sw.ToString(),
-                    contentType: "text/html; charset=utf-8"
-                );
+				return Results.Content(raw?.ToString(),"text/html; charset=utf-8");
             });
 			return app;
 		}
@@ -120,14 +115,5 @@ namespace Heimdall.Server
 
 			return args;
 		}
-		private static async ValueTask<IHtmlContent> UnwrapHtmlAsync(object? raw)
-			=> raw switch
-			{
-				IHtmlContent h => h,
-				Task<IHtmlContent> t => await t,
-				ValueTask<IHtmlContent> vt => await vt.AsTask(),
-				_ => throw new InvalidOperationException(
-					"Unexpected return type (should have been validated).")
-			};
 	}
 }
