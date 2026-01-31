@@ -9,14 +9,18 @@
     <script src="/_content/Heimdall.Web/heimdall.js"></script>
 
     <script>
-        // 1-based client state (intentional)
-        window.AppState = {
-            weather: { page: 1, pageSize: 5 }
-            // counter removed: server owns it now
-        };
-
         Heimdall.config.debug = true;
     </script>
+
+    <style>
+        .demo-box {
+            min-height: 56px;
+        }
+
+        .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        }
+    </style>
 </head>
 
 <body class="bg-body-tertiary">
@@ -42,75 +46,112 @@
 
     <main class="container py-4">
 
-        <!-- WEATHER -->
         <section class="mb-4">
-            <div class="d-flex align-items-center justify-content-between mb-3">
+            <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
                 <div>
                     <h2 class="h4 mb-0">Weather</h2>
                     <div class="text-muted">
-                        State-driven:
-                        <code>AppState.weather</code>
-                        <span class="ms-2 badge text-bg-light border"
-                              id="weatherStateBadge">
-                            page 1 • 5 rows
-                        </span>
+                        Demonstrates:
+                        <span class="badge text-bg-light border">submit</span>
+                        <span class="badge text-bg-light border">change</span>
+                        <span class="badge text-bg-light border">input</span>
+                        <span class="badge text-bg-light border">keydown</span>
+                        <span class="badge text-bg-light border">click</span>
                     </div>
                 </div>
 
-                <div class="d-flex align-items-center gap-2 flex-wrap">
-                    <select class="form-select form-select-sm"
-                            style="width:130px"
-                            onchange="
-                              AppState.weather.pageSize = parseInt(this.value, 10);
-                              AppState.weather.page = 1;
-                              Heimdall.invoke('Home.PagedTable', AppState.weather, { target:'#weatherBody' });
-                              HeimdallUi.syncWeather();
-                            ">
-                        <option value="5" selected>5 rows</option>
-                        <option value="10">10 rows</option>
-                        <option value="15">15 rows</option>
-                    </select>
-
-                    <div class="btn-group" role="group">
-                        <button class="btn btn-outline-primary"
-                                data-weather-page="1"
-                                onclick="AppState.weather.page = 1; HeimdallUi.syncWeather();"
-                                heimdall-content-click="Home.PagedTable"
-                                heimdall-content-target="#weatherBody"
-                                heimdall-payload-ref="AppState.weather">
-                            1
-                        </button>
-
-                        <button class="btn btn-outline-primary"
-                                data-weather-page="2"
-                                onclick="AppState.weather.page = 2; HeimdallUi.syncWeather();"
-                                heimdall-content-click="Home.PagedTable"
-                                heimdall-content-target="#weatherBody"
-                                heimdall-payload-ref="AppState.weather">
-                            2
-                        </button>
-
-                        <button class="btn btn-outline-primary"
-                                data-weather-page="3"
-                                onclick="AppState.weather.page = 3; HeimdallUi.syncWeather();"
-                                heimdall-content-click="Home.PagedTable"
-                                heimdall-content-target="#weatherBody"
-                                heimdall-payload-ref="AppState.weather">
-                            3
-                        </button>
-                    </div>
-
-                    <button class="btn btn-sm btn-outline-secondary"
-                            heimdall-content-click="Home.PagedTable"
-                            heimdall-content-target="#weatherBody"
-                            heimdall-payload-ref="AppState.weather">
-                        Refresh
-                    </button>
+                <div class="small text-muted">
+                    Tip: type in search (debounced), press Enter (keydown), change rows, click pages.
                 </div>
             </div>
 
             <div class="card shadow-sm">
-                <div class="card-body p-0">
+                <div class="card-body">
+
+                    <form id="weatherForm"
+                          class="row g-2 align-items-end"
+                          heimdall-content-submit="Home.WeatherTable"
+                          heimdall-content-target="#weatherBody"
+                          heimdall-content-swap="inner"
+                          heimdall-payload-from="closest-form">
+
+                        <input type="hidden" name="page" value="1" />
+
+                        <div class="col-12 col-md-5">
+                            <label class="form-label mb-1">Search summaries</label>
+                            <input class="form-control"
+                                   name="q"
+                                   placeholder="e.g. warm, freezing, mild…"
+                                   heimdall-content-input="Home.WeatherTable"
+                                   heimdall-content-target="#weatherBody"
+                                   heimdall-content-swap="inner"
+                                   heimdall-payload-from="closest-form"
+                                   heimdall-debounce="250"
+                                   oninput="this.form.page.value = '1';"
+                                   heimdall-content-keydown="Home.WeatherTable"
+                                   heimdall-key="Enter"
+                                   heimdall-prevent-default="true" />
+                            <div class="form-text">
+                                <span class="mono">input</span> trigger is debounced; <span class="mono">keydown</span> Enter fires immediately.
+                            </div>
+                        </div>
+
+                        <div class="col-6 col-md-2">
+                            <label class="form-label mb-1">Rows</label>
+                            <select class="form-select"
+                                    name="pageSize"
+                                    heimdall-content-change="Home.WeatherTable"
+                                    heimdall-content-target="#weatherBody"
+                                    heimdall-content-swap="inner"
+                                    heimdall-payload-from="closest-form"
+                                    onchange="this.form.page.value='1';">
+                                <option value="5" selected>5</option>
+                                <option value="10">10</option>
+                                <option value="15">15</option>
+                            </select>
+                            <div class="form-text"><span class="mono">change</span> trigger</div>
+                        </div>
+
+                        <div class="col-6 col-md-5 d-flex gap-2 justify-content-md-end flex-wrap">
+                            <!-- Page buttons: submit with a page value (still uses submit trigger on the form) -->
+                            <div class="btn-group" role="group" aria-label="Pagination">
+                                <button type="submit" class="btn btn-outline-primary"
+                                        name="page" value="1">
+                                    1
+                                </button>
+                                <button type="submit" class="btn btn-outline-primary"
+                                        name="page" value="2">
+                                    2
+                                </button>
+                                <button type="submit" class="btn btn-outline-primary"
+                                        name="page" value="3">
+                                    3
+                                </button>
+                            </div>
+
+                            <!-- Explicit click trigger (same action, still uses closest-form payload) -->
+                            <button type="button" class="btn btn-outline-secondary"
+                                    heimdall-content-click="Home.WeatherTable"
+                                    heimdall-content-target="#weatherBody"
+                                    heimdall-content-swap="inner"
+                                    heimdall-payload-from="closest-form">
+                                Refresh
+                            </button>
+
+                            <button type="button" class="btn btn-outline-danger"
+                                    onclick="document.querySelector('#weatherForm input[name=q]').value=''; document.querySelector('#weatherForm input[name=page]').value='1';"
+                                    heimdall-content-click="Home.WeatherTable"
+                                    heimdall-content-target="#weatherBody"
+                                    heimdall-content-swap="inner"
+                                    heimdall-payload-from="closest-form">
+                                Clear
+                            </button>
+                        </div>
+                    </form>
+
+                </div>
+
+                <div class="table-responsive">
                     <table class="table table-hover mb-0">
                         <thead class="table-light">
                             <tr>
@@ -122,9 +163,10 @@
                         </thead>
 
                         <tbody id="weatherBody"
-                               heimdall-content-load="Home.PagedTable"
+                               heimdall-content-load="Home.WeatherTable"
                                heimdall-content-target="#weatherBody"
-                               heimdall-payload-ref="AppState.weather">
+                               heimdall-content-swap="inner"
+                               heimdall-payload-from="#weatherForm">
                             <tr>
                                 <td colspan="4" class="p-4 text-center text-muted">
                                     Loading…
@@ -133,33 +175,210 @@
                         </tbody>
                     </table>
                 </div>
+
+                <div class="card-footer small text-muted">
+                    Rendered by <span class="mono">Home.WeatherTable</span> (server HTML fragment).
+                </div>
             </div>
         </section>
 
-        <!-- COUNTER (SERVER-DRIVEN) -->
         <section class="mb-4">
             <div class="card shadow-sm">
                 <div class="card-body">
-                    <h3 class="h5 mb-1">Counter</h3>
+                    <h2 class="h4 mb-1">Save on blur</h2>
                     <div class="text-muted mb-3">
-                        Backend-driven:
-                        <code>Session</code>
-                        <span class="ms-2 badge text-bg-light border"
-                              id="counterStateBadge">…</span>
+                        Demonstrates: <span class="badge text-bg-light border">blur</span>
                     </div>
 
-                    <div class="d-flex gap-2">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label mb-1">Display name</label>
+                            <input class="form-control"
+                                   name="displayName"
+                                   placeholder="Type, then click away…"
+                                   heimdall-content-blur="Home.ProfileSave"
+                                   heimdall-content-target="#profileSaved"
+                                   heimdall-content-swap="inner"
+                                   heimdall-payload-from="closest-form" />
+                            <div class="form-text">
+                                Triggers on <span class="mono">focusout</span> (bubbling blur).
+                            </div>
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <form class="d-flex gap-2 align-items-end">
+                                <div class="flex-grow-1">
+                                    <label class="form-label mb-1">Favorite animal</label>
+                                    <input class="form-control"
+                                           name="favoriteAnimal"
+                                           placeholder="e.g. goat, deer, cattle…"
+                                           heimdall-content-blur="Home.ProfileSave"
+                                           heimdall-content-target="#profileSaved"
+                                           heimdall-content-swap="inner"
+                                           heimdall-payload-from="closest-form" />
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div id="profileSaved" class="mt-3 p-3 border rounded bg-body demo-box text-muted">
+                        Saved values will appear here…
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-4">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h2 class="h4 mb-1">Hover preview</h2>
+                    <div class="text-muted mb-3">
+                        Demonstrates: <span class="badge text-bg-light border">hover</span>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2">
+                        <button type="button" class="btn btn-outline-info"
+                                data-topic="caching"
+                                heimdall-content-hover="Home.HoverCard"
+                                heimdall-hover-delay="200"
+                                heimdall-content-target="#hoverCard"
+                                heimdall-content-swap="inner"
+                                heimdall-payload-from="self">
+                            Hover: caching
+                        </button>
+
+                        <button type="button" class="btn btn-outline-info"
+                                data-topic="csrf"
+                                heimdall-content-hover="Home.HoverCard"
+                                heimdall-hover-delay="200"
+                                heimdall-content-target="#hoverCard"
+                                heimdall-content-swap="inner"
+                                heimdall-payload-from="self">
+                            Hover: csrf
+                        </button>
+
+                        <button type="button" class="btn btn-outline-info"
+                                data-topic="swap"
+                                heimdall-content-hover="Home.HoverCard"
+                                heimdall-hover-delay="200"
+                                heimdall-content-target="#hoverCard"
+                                heimdall-content-swap="inner"
+                                heimdall-payload-from="self">
+                            Hover: swap
+                        </button>
+                    </div>
+
+                    <div id="hoverCard" class="mt-3 p-3 border rounded bg-body demo-box text-muted">
+                        Hover one of the buttons above…
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-4">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h2 class="h4 mb-1">Lazy widget</h2>
+                    <div class="text-muted mb-3">
+                        Demonstrates: <span class="badge text-bg-light border">visible</span>
+                    </div>
+
+                    <p class="text-muted mb-3">
+                        This placeholder will render real HTML only when it becomes visible.
+                    </p>
+
+                    <div id="lazyStats"
+                         class="p-3 border rounded bg-body demo-box text-muted"
+                         heimdall-content-visible="Home.LazyStats"
+                         heimdall-visible-once="true"
+                         heimdall-content-target="#lazyStats"
+                         heimdall-content-swap="inner">
+                        Scroll until I’m visible…
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-4">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h2 class="h4 mb-1">Infinite activity</h2>
+                    <div class="text-muted mb-3">
+                        Demonstrates: <span class="badge text-bg-light border">scroll</span>
+                        (append with <span class="mono">swap="beforeend"</span>)
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-12 col-lg-5">
+                            <div class="small text-muted mb-2">
+                                Scroll near the bottom to load more.
+                            </div>
+
+                            <div id="activityBox"
+                                 style="height:260px; overflow:auto;"
+                                 data-cursor="0"
+                                 data-batch="10"
+                                 heimdall-content-load="Home.ActivityMore"
+                                 heimdall-content-scroll="Home.ActivityMore"
+                                 heimdall-content-target="#activityList"
+                                 heimdall-content-swap="beforeend"
+                                 heimdall-scroll-threshold="90"
+                                 heimdall-payload-from="self">
+                                <ul id="activityList" class="list-group list-group-flush"></ul>
+                            </div>
+
+                            <div class="mt-2 d-flex gap-2">
+                                <button type="button" class="btn btn-outline-secondary btn-sm"
+                                        onclick="document.getElementById('activityBox').dataset.cursor='0'; document.getElementById('activityList').innerHTML='';"
+                                        heimdall-content-click="Home.ActivityMore"
+                                        heimdall-content-target="#activityList"
+                                        heimdall-content-swap="beforeend"
+                                        heimdall-payload-from="#activityBox">
+                                    Load first batch
+                                </button>
+
+                                <button type="button" class="btn btn-outline-danger btn-sm"
+                                        onclick="document.getElementById('activityBox').dataset.cursor='0'; document.getElementById('activityList').innerHTML='';">
+                                    Reset
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="col-12 col-lg-7">
+                            <div class="small text-muted mb-2">Notes:</div>
+                            <ul class="small text-muted mb-0">
+                                <li>The scroll trigger runs on the scroll container (<span class="mono">#activityBox</span>).</li>
+                                <li>The action appends HTML into <span class="mono">#activityList</span> via <span class="mono">beforeend</span>.</li>
+                                <li>Server returns a tiny marker element with <span class="mono">data-next-cursor</span>; JS updates the container cursor on <span class="mono">heimdall:after</span>.</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+
+        <section class="mb-4">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <h2 class="h4 mb-1">Counter (server-owned)</h2>
+                    <div class="text-muted mb-3">
+                        Demonstrates: <span class="badge text-bg-light border">load</span>
+                        <span class="badge text-bg-light border">click</span>
+                    </div>
+
+                    <div class="d-flex gap-2 flex-wrap">
                         <button class="btn btn-success"
                                 heimdall-content-click="Home.CounterOp"
                                 heimdall-content-target="#counterBox"
-                                heimdall-payload='{"op":"inc","step":1}'>
+                                heimdall-payload='{"op":"inc","step":"1"}'>
                             +1
                         </button>
 
                         <button class="btn btn-outline-success"
                                 heimdall-content-click="Home.CounterOp"
                                 heimdall-content-target="#counterBox"
-                                heimdall-payload='{"op":"dec","step":1}'>
+                                heimdall-payload='{"op":"dec","step":"1"}'>
                             -1
                         </button>
 
@@ -178,10 +397,15 @@
                     </div>
 
                     <div id="counterBox"
-                         class="mt-3 p-3 border rounded bg-body"
+                         class="mt-3 p-3 border rounded bg-body demo-box"
                          heimdall-content-load="Home.CounterShow"
                          heimdall-content-target="#counterBox">
                         Loading…
+                    </div>
+
+                    <div class="small text-muted mt-2">
+                        Counter value is read from <span class="mono">data-counter-value</span>.
+                        <span class="ms-2 badge text-bg-light border" id="counterBadge">…</span>
                     </div>
                 </div>
             </div>
@@ -197,36 +421,33 @@
         document.getElementById("heimdallJsVer").textContent =
             window.Heimdall?.version ?? "unknown";
 
-        window.HeimdallUi = {
-            syncWeather() {
-                const badge = document.getElementById("weatherStateBadge");
-                badge.textContent =
-                    `page ${AppState.weather.page} • ${AppState.weather.pageSize} rows`;
+        function syncCounterBadgeFromDom() {
+            const el = document.querySelector("#counterBox [data-counter-value]");
+            if (!el) return;
+            document.getElementById("counterBadge").textContent = el.dataset.counterValue;
+        }
 
-                document.querySelectorAll("[data-weather-page]").forEach(b => {
-                    const p = parseInt(b.dataset.weatherPage, 10);
-                    const active = p === AppState.weather.page;
-                    b.classList.toggle("btn-primary", active);
-                    b.classList.toggle("btn-outline-primary", !active);
-                    b.toggleAttribute("disabled", active);
-                });
-            },
+        // When activity appends, update the cursor based on marker returned by server
+        function syncActivityCursorFromDom(detail) {
+            if (!detail || !detail.target) return;
+            // only for our activity action
+            if (detail.actionId !== "Home.ActivityMore") return;
 
-            // server pushes the value; we just read it from the rendered fragment
-            syncCounterFromDom() {
-                const el = document.querySelector("#counterBox [data-counter-value]");
-                if (!el) return;
-                document.getElementById("counterStateBadge").textContent = el.dataset.counterValue;
-            }
-        };
+            const box = document.getElementById("activityBox");
+            const marker = document.querySelector("#activityList [data-next-cursor]:last-child");
+            if (!box || !marker) return;
 
-        HeimdallUi.syncWeather();
+            const next = marker.dataset.nextCursor;
+            if (next != null) box.dataset.cursor = next;
 
-        // initial counter sync after first load fragment renders
+            // marker is just metadata; remove it so list looks clean
+            marker.remove();
+        }
+
         document.addEventListener("heimdall:after", e => {
-            if (e.detail.actionId === "Home.PagedTable") HeimdallUi.syncWeather();
-            if (e.detail.actionId === "Home.CounterShow" || e.detail.actionId === "Home.CounterOp")
-                HeimdallUi.syncCounterFromDom();
+            const a = e.detail?.actionId;
+            if (a === "Home.CounterShow" || a === "Home.CounterOp") syncCounterBadgeFromDom();
+            if (a === "Home.ActivityMore") syncActivityCursorFromDom(e.detail);
         });
     </script>
 

@@ -4,20 +4,40 @@
     // ============================================================
     // Heimdall.js (v1)
     // - Content actions: POST /__heimdall/v1/content/actions
-    // - CSRF token:      GET  /__heimdall/v1/security/csrf
+    // - CSRF token:      GET  /__heimdall/v1/csrf
     // - Attributes:
+    //   Triggers:
     //   * heimdall-content-load="Action.Id"
     //   * heimdall-content-click="Action.Id"
+    //   * heimdall-content-change="Action.Id"
+    //   * heimdall-content-input="Action.Id"
+    //   * heimdall-content-submit="Action.Id"
+    //   * heimdall-content-keydown="Action.Id"
+    //   * heimdall-content-blur="Action.Id"         (implemented via focusout delegation)
+    //   * heimdall-content-hover="Action.Id"        (implemented via mouseover delegation + delay)
+    //   * heimdall-content-visible="Action.Id"      (IntersectionObserver)
+    //   * heimdall-content-scroll="Action.Id"       (non-bubbling; per-element listener)
+    //
+    //   Common:
     //   * heimdall-content-target="#selector" (or element)
     //   * heimdall-content-swap="inner|outer|beforeend|afterbegin"
-    //   * heimdall-content-disable="true|false"
-    //   * heimdall-prevent-default="true|false" (esp anchors)
+    //   * heimdall-content-disable="true|false"      (default varies by trigger)
+    //   * heimdall-prevent-default="true|false"      (anchors; submit; some keydown)
+    //
+    //   Payload:
     //   * heimdall-payload='{"json":1}'
     //   * heimdall-payload-from="closest-form|self|#formSelector|ref:Path.To.Obj"
     //   * heimdall-payload-ref="Path.To.Obj"
+    //
+    //   Trigger options:
+    //   * heimdall-debounce="ms"                     (input/change)
+    //   * heimdall-key="Enter|Escape|...|13"         (keydown)
+    //   * heimdall-hover-delay="ms"                  (hover)
+    //   * heimdall-visible-once="true|false"         (visible)
+    //   * heimdall-scroll-threshold="px"             (scroll)
     // ============================================================
 
-    const VERSION = "1.0.0";
+    const VERSION = "1.1.0";
     const API_VERSION = 1;
 
     const DEFAULT_BASE_PATH = "/__heimdall";
@@ -104,6 +124,15 @@
             return false;
 
         return !!defaultValue;
+    }
+
+    function intAttr(el, name, defaultValue) {
+        const v = getAttr(el, name);
+        if (v == null || v === "")
+            return defaultValue;
+
+        const n = parseInt(v, 10);
+        return Number.isFinite(n) ? n : defaultValue;
     }
 
     function formDataToObject(fd) {
@@ -203,6 +232,41 @@
             // eslint-disable-next-line no-console
             console.debug(`[Heimdall ${VERSION}]`, ...args);
         }
+    }
+
+    function isTextLikeInput(el) {
+        if (!el || el.nodeType !== 1) return false;
+        const tag = el.tagName;
+        if (tag === "TEXTAREA") return true;
+        if (tag !== "INPUT") return false;
+
+        const type = (el.getAttribute("type") || "text").toLowerCase();
+        // text-ish types where input events are common
+        return (
+            type === "text" ||
+            type === "search" ||
+            type === "email" ||
+            type === "url" ||
+            type === "tel" ||
+            type === "password" ||
+            type === "number"
+        );
+    }
+
+    function matchesKeySpec(e, spec) {
+        if (!spec) return true;
+
+        const s = String(spec).trim();
+        if (!s) return true;
+
+        // Numeric keyCode
+        if (/^\d+$/.test(s)) {
+            const code = parseInt(s, 10);
+            return (e.keyCode === code) || (e.which === code);
+        }
+
+        // Named key
+        return String(e.key || "").toLowerCase() === s.toLowerCase();
     }
 
     // CSRF token caching
@@ -338,7 +402,68 @@
         return html;
     }
 
+    // -----------------------------
+    // Unified trigger execution
+    // -----------------------------
+
+    const DEFAULT_DISABLE_BY_TRIGGER = {
+        load: false,
+        click: true,
+        change: false,
+        input: false,
+        submit: true,
+        keydown: false,
+        blur: false,
+        hover: false,
+        visible: false,
+        scroll: false
+    };
+
+    function getCommonOptions(el) {
+        const target = getAttr(el, "heimdall-content-target") || el;
+        const swap = getAttr(el, "heimdall-content-swap") || "inner";
+        const payload = payloadFromElement(el);
+        return { target, swap, payload };
+    }
+
+    async function runActionFromElement(el, actionId, triggerName, extraOptions) {
+        if (!el || !actionId)
+            return;
+
+        if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
+            return;
+
+        const { target, swap, payload } = getCommonOptions(el);
+
+        // default disable varies by trigger; attribute can override
+        const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
+        const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
+
+        let wasDisabled = false;
+        if (shouldDisable) {
+            wasDisabled = el.hasAttribute("disabled");
+            el.setAttribute("disabled", "disabled");
+            el.setAttribute("aria-busy", "true");
+        }
+
+        const opts = Object.assign({ target, swap, fallbackTarget: el }, extraOptions || {});
+        try {
+            await invoke(actionId, payload, opts);
+        } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(err);
+        } finally {
+            if (shouldDisable) {
+                el.removeAttribute("aria-busy");
+                if (!wasDisabled) el.removeAttribute("disabled");
+            }
+        }
+    }
+
+    // -----------------------------
     // Boot: auto-load scanning (subtree-friendly)
+    // -----------------------------
+
     function bootLoads(root) {
         const scope = root && isElement(root) ? root : document;
         const nodes = scope.querySelectorAll("[heimdall-content-load]");
@@ -352,21 +477,143 @@
             if (!actionId)
                 continue;
 
-            const target = getAttr(el, "heimdall-content-target") || el;
-            const swap = getAttr(el, "heimdall-content-swap") || "inner";
-            const payload = payloadFromElement(el);
+            runActionFromElement(el, actionId, "load").catch(() => { /* already logged */ });
+        }
+    }
 
-            invoke(actionId, payload, { target, swap, fallbackTarget: el })
-                .catch(err => {
-                    // eslint-disable-next-line no-console
-                    console.error(err);
-                });
+    // -----------------------------
+    // Visible trigger (IntersectionObserver)
+    // -----------------------------
+
+    let _visibleObserver = null;
+
+    function ensureVisibleObserver() {
+        if (_visibleObserver)
+            return _visibleObserver;
+
+        if (!("IntersectionObserver" in global)) {
+            _visibleObserver = { observe() { }, unobserve() { } };
+            return _visibleObserver;
+        }
+
+        _visibleObserver = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting)
+                    continue;
+
+                const el = entry.target;
+                const actionId = getAttr(el, "heimdall-content-visible");
+                if (!actionId)
+                    continue;
+
+                // if configured once, unobserve before invoking (prevents repeat)
+                const once = truthyAttr(el, "heimdall-visible-once", true);
+                if (once) {
+                    try { _visibleObserver.unobserve(el); } catch { /* ignore */ }
+                }
+
+                runActionFromElement(el, actionId, "visible").catch(() => { /* logged */ });
+            }
+        }, {
+            root: null,
+            rootMargin: Heimdall.config.visibleRootMargin || "0px",
+            threshold: Heimdall.config.visibleThreshold || 0
+        });
+
+        return _visibleObserver;
+    }
+
+    function bootVisible(root) {
+        const scope = root && isElement(root) ? root : document;
+        const nodes = scope.querySelectorAll("[heimdall-content-visible]");
+
+        const obs = ensureVisibleObserver();
+        for (const el of nodes) {
+            if (el.__heimdallVisibleBound)
+                continue;
+            el.__heimdallVisibleBound = true;
+
+            // if someone wants re-arming, they can remove attribute and re-add;
+            // this is intentionally simple.
+            try { obs.observe(el); } catch { /* ignore */ }
+        }
+    }
+
+    // -----------------------------
+    // Scroll trigger (non-bubbling; per element)
+    // -----------------------------
+
+    const _scrollState = new WeakMap(); // el -> { ticking, lastFire }
+
+    function isNearScrollEnd(el, thresholdPx) {
+        // Allow both element scroll containers and the document scrolling element
+        const target = (el === document.body || el === document.documentElement)
+            ? (document.scrollingElement || document.documentElement)
+            : el;
+
+        if (!target) return false;
+
+        const scrollTop = target.scrollTop;
+        const clientHeight = target.clientHeight;
+        const scrollHeight = target.scrollHeight;
+
+        return (scrollTop + clientHeight) >= (scrollHeight - thresholdPx);
+    }
+
+    function attachScroll(el) {
+        if (el.__heimdallScrollBound)
+            return;
+        el.__heimdallScrollBound = true;
+
+        const handler = () => {
+            const state = _scrollState.get(el) || { ticking: false, lastFire: 0 };
+            if (state.ticking) return;
+
+            state.ticking = true;
+            _scrollState.set(el, state);
+
+            // rAF throttle
+            requestAnimationFrame(() => {
+                state.ticking = false;
+
+                const threshold = intAttr(el, "heimdall-scroll-threshold", Heimdall.config.scrollThresholdPx || 120);
+                const minInterval = Heimdall.config.scrollMinIntervalMs || 250;
+
+                if (!isNearScrollEnd(el, threshold))
+                    return;
+
+                const now = Date.now();
+                if ((now - state.lastFire) < minInterval)
+                    return;
+                state.lastFire = now;
+
+                const actionId = getAttr(el, "heimdall-content-scroll");
+                if (!actionId) return;
+
+                runActionFromElement(el, actionId, "scroll").catch(() => { /* logged */ });
+            });
+        };
+
+        el.addEventListener("scroll", handler, { passive: true });
+    }
+
+    function bootScroll(root) {
+        const scope = root && isElement(root) ? root : document;
+        const nodes = scope.querySelectorAll("[heimdall-content-scroll]");
+        for (const el of nodes) {
+            attachScroll(el);
         }
     }
 
     function boot(root) {
         bootLoads(root);
+        bootVisible(root);
+        bootScroll(root);
     }
+
+    // -----------------------------
+    // Delegated triggers (bubbling)
+    // -----------------------------
 
     // Click handling (delegated)
     async function handleClick(e) {
@@ -374,54 +621,217 @@
             ? e.target.closest("[heimdall-content-click]")
             : null;
 
-        if (!el)
-            return;
-        if (e.defaultPrevented)
-            return;
+        if (!el) return;
+        if (e.defaultPrevented) return;
 
-        if (e.button != null && e.button !== 0)
-            return; // left click only
-        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
-            return;
-
-        if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
-            return;
+        if (e.button != null && e.button !== 0) return; // left click only
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
 
         const actionId = getAttr(el, "heimdall-content-click");
-        if (!actionId)
-            return;
+        if (!actionId) return;
 
         const isAnchor = el.tagName === "A";
         const preventDefault = truthyAttr(el, "heimdall-prevent-default", isAnchor);
         if (preventDefault) e.preventDefault();
 
-        const target = getAttr(el, "heimdall-content-target") || el;
-        const swap = getAttr(el, "heimdall-content-swap") || "inner";
-        const payload = payloadFromElement(el);
+        await runActionFromElement(el, actionId, "click");
+    }
 
-        const shouldDisable = truthyAttr(el, "heimdall-content-disable", true);
+    // Change handling (delegated)
+    async function handleChange(e) {
+        const el = e.target && e.target.closest
+            ? e.target.closest("[heimdall-content-change]")
+            : null;
 
-        let wasDisabled = false;
-        if (shouldDisable) {
-            wasDisabled = el.hasAttribute("disabled");
-            el.setAttribute("disabled", "disabled");
-            el.setAttribute("aria-busy", "true");
+        if (!el) return;
+        if (e.defaultPrevented) return;
+
+        const actionId = getAttr(el, "heimdall-content-change");
+        if (!actionId) return;
+
+        // Optional debounce for change (uncommon, but useful for some widgets)
+        const ms = intAttr(el, "heimdall-debounce", 0);
+        if (ms > 0) {
+            scheduleDebounced(el, "change", ms, () => {
+                runActionFromElement(el, actionId, "change").catch(() => { /* logged */ });
+            });
+            return;
         }
 
-        try {
-            await invoke(actionId, payload, { target, swap, fallbackTarget: el });
-        } catch (err) {
-            // eslint-disable-next-line no-console
-            console.error(err);
-        } finally {
-            if (shouldDisable) {
-                el.removeAttribute("aria-busy");
-                if (!wasDisabled) el.removeAttribute("disabled");
-            }
+        await runActionFromElement(el, actionId, "change");
+    }
+
+    // Input handling (delegated + debounced)
+    const _debouncers = new WeakMap(); // el -> Map(key, timeoutId)
+
+    function scheduleDebounced(el, key, ms, fn) {
+        let map = _debouncers.get(el);
+        if (!map) {
+            map = new Map();
+            _debouncers.set(el, map);
+        }
+
+        const prev = map.get(key);
+        if (prev) clearTimeout(prev);
+
+        const tid = setTimeout(() => {
+            map.delete(key);
+            fn();
+        }, ms);
+
+        map.set(key, tid);
+    }
+
+    async function handleInput(e) {
+        const el = e.target && e.target.closest
+            ? e.target.closest("[heimdall-content-input]")
+            : null;
+
+        if (!el) return;
+        if (e.defaultPrevented) return;
+
+        const actionId = getAttr(el, "heimdall-content-input");
+        if (!actionId) return;
+
+        // Default debounce for input unless user overrides
+        const ms = intAttr(el, "heimdall-debounce", Heimdall.config.inputDebounceMs || 250);
+
+        // For non-text-like inputs (e.g. range), still debounce but allow 0 if user wants immediate
+        if (ms > 0) {
+            scheduleDebounced(el, "input", ms, () => {
+                runActionFromElement(el, actionId, "input").catch(() => { /* logged */ });
+            });
+            return;
+        }
+
+        await runActionFromElement(el, actionId, "input");
+    }
+
+    // Submit handling (delegated)
+    async function handleSubmit(e) {
+        const form = e.target && e.target.closest
+            ? e.target.closest("[heimdall-content-submit]")
+            : null;
+
+        if (!form) return;
+        if (e.defaultPrevented) return;
+
+        const actionId = getAttr(form, "heimdall-content-submit");
+        if (!actionId) return;
+
+        const preventDefault = truthyAttr(form, "heimdall-prevent-default", true);
+        if (preventDefault) e.preventDefault();
+
+        await runActionFromElement(form, actionId, "submit");
+    }
+
+    // Keydown handling (delegated)
+    async function handleKeydown(e) {
+        const el = e.target && e.target.closest
+            ? e.target.closest("[heimdall-content-keydown]")
+            : null;
+
+        if (!el) return;
+        if (e.defaultPrevented) return;
+
+        const actionId = getAttr(el, "heimdall-content-keydown");
+        if (!actionId) return;
+
+        // If a key is specified, only fire when it matches
+        const keySpec = getAttr(el, "heimdall-key");
+        if (keySpec && !matchesKeySpec(e, keySpec))
+            return;
+
+        // By default: prevent default on Enter inside text-like inputs to avoid form submit + action double-fire
+        const wantsPreventDefault = truthyAttr(
+            el,
+            "heimdall-prevent-default",
+            (String(keySpec || "").toLowerCase() === "enter") && isTextLikeInput(e.target)
+        );
+
+        if (wantsPreventDefault) e.preventDefault();
+
+        await runActionFromElement(el, actionId, "keydown");
+    }
+
+    // Blur handling (delegated via focusout, which bubbles)
+    async function handleFocusOut(e) {
+        const el = e.target && e.target.closest
+            ? e.target.closest("[heimdall-content-blur]")
+            : null;
+
+        if (!el) return;
+        if (e.defaultPrevented) return;
+
+        const actionId = getAttr(el, "heimdall-content-blur");
+        if (!actionId) return;
+
+        await runActionFromElement(el, actionId, "blur");
+    }
+
+    // Hover handling (delegated via mouseover + relatedTarget check)
+    const _hoverTimers = new WeakMap(); // el -> timeoutId
+
+    function isRealMouseEnter(e, el) {
+        // mouseover fires when moving within children; treat as enter only if coming from outside el
+        const from = e.relatedTarget;
+        return !(from && (from === el || (el.contains && el.contains(from))));
+    }
+
+    async function handleMouseOver(e) {
+        const el = e.target && e.target.closest
+            ? e.target.closest("[heimdall-content-hover]")
+            : null;
+
+        if (!el) return;
+        if (e.defaultPrevented) return;
+        if (!isRealMouseEnter(e, el)) return;
+
+        const actionId = getAttr(el, "heimdall-content-hover");
+        if (!actionId) return;
+
+        const delay = intAttr(el, "heimdall-hover-delay", Heimdall.config.hoverDelayMs || 150);
+
+        // clear any prior pending hover invoke
+        const prev = _hoverTimers.get(el);
+        if (prev) clearTimeout(prev);
+
+        if (delay > 0) {
+            const tid = setTimeout(() => {
+                _hoverTimers.delete(el);
+                runActionFromElement(el, actionId, "hover").catch(() => { /* logged */ });
+            }, delay);
+            _hoverTimers.set(el, tid);
+            return;
+        }
+
+        await runActionFromElement(el, actionId, "hover");
+    }
+
+    // Cancel hover invoke if leaving before delay
+    async function handleMouseOut(e) {
+        const el = e.target && e.target.closest
+            ? e.target.closest("[heimdall-content-hover]")
+            : null;
+
+        if (!el) return;
+
+        // Only treat as leaving the element if we're going to somewhere outside
+        const to = e.relatedTarget;
+        if (to && (to === el || (el.contains && el.contains(to))))
+            return;
+
+        const tid = _hoverTimers.get(el);
+        if (tid) {
+            clearTimeout(tid);
+            _hoverTimers.delete(el);
         }
     }
 
+    // -----------------------------
     // MutationObserver: auto boot for swapped-in DOM
+    // -----------------------------
+
     function installObserver() {
         if (!Heimdall.config.observeDom)
             return;
@@ -493,7 +903,17 @@
 
             observeDom: true,
             debug: false,
-            credentials: "same-origin"
+            credentials: "same-origin",
+
+            // Trigger tuning
+            inputDebounceMs: 250,
+            hoverDelayMs: 150,
+            scrollThresholdPx: 120,
+            scrollMinIntervalMs: 250,
+
+            // Visible tuning
+            visibleRootMargin: "0px",
+            visibleThreshold: 0
         }
     };
 
@@ -501,9 +921,25 @@
 
     // Startup
     onReady(() => {
-        if (!document.__heimdallClickInstalled) {
-            document.__heimdallClickInstalled = true;
+        // Delegated listeners (install once)
+        if (!document.__heimdallDelegatesInstalled) {
+            document.__heimdallDelegatesInstalled = true;
+
+            // capture phase for click helps with nested handlers; keep your original behavior
             document.addEventListener("click", handleClick, true);
+
+            // bubble phase is fine for the rest
+            document.addEventListener("change", handleChange, false);
+            document.addEventListener("input", handleInput, false);
+            document.addEventListener("submit", handleSubmit, false);
+            document.addEventListener("keydown", handleKeydown, false);
+
+            // focusout bubbles (blur does not)
+            document.addEventListener("focusout", handleFocusOut, false);
+
+            // mouseover/out bubble (mouseenter/leave do not)
+            document.addEventListener("mouseover", handleMouseOver, false);
+            document.addEventListener("mouseout", handleMouseOut, false);
         }
 
         // initial scan
