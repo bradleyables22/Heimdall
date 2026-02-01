@@ -6,30 +6,29 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Heimdall.Server
 {
-	public sealed class HeimdallPageOptions
-	{
-		public string Pattern { get; set; } = string.Empty;
-		public string RelativePath { get; set; } = string.Empty;
-	}
-
 	public static class HeimdallPageCollection
 	{
-		public static RouteHandlerBuilder MapHeimdallPage(
-			this IEndpointRouteBuilder app,
-			Action<HeimdallPageOptions> configure)
+		/// <summary>
+		/// Adds an endpoint that serves a static HTML page from the wwwroot folder
+		/// </summary>
+		/// <param name="app"></param>
+		/// <param name="configure"></param>
+		/// <returns></returns>
+		/// <exception cref="InvalidOperationException"></exception>
+		public static RouteHandlerBuilder MapHeimdallPage(this IEndpointRouteBuilder app, Action<HeimdallPageSettings> configure)
 		{
-			var options = new HeimdallPageOptions();
-			configure(options);
-
-			if (string.IsNullOrWhiteSpace(options.Pattern))
+			var settings = new HeimdallPageSettings();
+			configure(settings);
+			
+			if (string.IsNullOrWhiteSpace(settings.Pattern))
 				throw new InvalidOperationException("Pattern is required.");
 
-			if (string.IsNullOrWhiteSpace(options.RelativePath))
+			if (string.IsNullOrWhiteSpace(settings.RelativePath))
 				throw new InvalidOperationException("RelativePath is required.");
 
-			var rel = options.RelativePath.Replace('\\', '/').TrimStart('/');
+			var rel = settings.RelativePath.Replace('\\', '/').TrimStart('/');
 
-			var b = app.MapGet(options.Pattern, async (HttpContext ctx) =>
+			var b = app.MapGet(settings.Pattern, async (HttpContext ctx) =>
 			{
 				var env = ctx.RequestServices.GetRequiredService<IWebHostEnvironment>();
 				var file = env.WebRootFileProvider.GetFileInfo(rel);

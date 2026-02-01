@@ -4,7 +4,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAntiforgery();
 builder.Services.AddCors();
-builder.Services.AddHeimdall();
+builder.Services.AddHeimdall(options => options.EnableDetailedErrors = false);
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddSession(o =>
 {
@@ -25,10 +25,10 @@ app.MapStaticAssets();
 app.UseStaticFiles();
 app.UseSession();
 app.UseHeimdall();
-app.MapHeimdallPage(options=>
+app.MapHeimdallPage(settings=>
 {
-    options.Pattern = "/";
-    options.RelativePath = "Heimdall/Pages/Home/index.html";
+    settings.Pattern = "/";
+    settings.RelativePath = "Heimdall/Pages/Home/index.html";
 });
 
 app.Run();

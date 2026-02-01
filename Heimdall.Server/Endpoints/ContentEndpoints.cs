@@ -4,8 +4,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using System.Reflection;
-using System.Text.Encodings.Web;
 using System.Text.Json;
 
 namespace Heimdall.Server
@@ -18,34 +18,64 @@ namespace Heimdall.Server
 
 		internal static WebApplication MapHeimdallContentEndpoints(this WebApplication app) 
 		{
-			app.MapPost("__heimdall/v1/content/actions", async (HttpContext ctx, ContentRegistry registry) =>
+			app.MapPost("__heimdall/v1/content/actions",
+		async (HttpContext ctx, ContentRegistry registry, IOptions<HeimdallServiceSettings> options) =>
+		{
+			var settings = options.Value;
+
+			var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+			await antiforgery.ValidateRequestAsync(ctx);
+
+			if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) ||
+				string.IsNullOrWhiteSpace(values))
 			{
-				var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-				await antiforgery.ValidateRequestAsync(ctx);
+				return Results.BadRequest($"Missing {ActionHeader} header.");
+			}
 
-				if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) ||
-					string.IsNullOrWhiteSpace(values))
-				{
-					return Results.BadRequest($"Missing {ActionHeader} header.");
-				}
+			var methodId = values.ToString();
 
-				var methodId = values.ToString();
+			if (!registry.TryGet(methodId, out var method))
+				return Results.NotFound($"Unknown action '{methodId}'.");
 
-				if (!registry.TryGet(methodId, out var method))
-					return Results.NotFound($"Unknown action '{methodId}'.");
-
+			try
+			{
 				var args = await BindArgumentsAsync(ctx, method);
 
 				IHtmlContent? raw = (IHtmlContent?)method.Invoke(null, args);
 
+
 				if (raw is null)
 					return Results.NoContent();
 
-				return Results.Content(raw?.ToString(),"text/html; charset=utf-8");
-            });
+				return Results.Content(RenderHtml(raw), "text/html; charset=utf-8");
+			}
+			catch (Exception ex)
+			{
+				if (settings.EnableDetailedErrors)
+				{
+					var msg = ex is TargetInvocationException tie && tie.InnerException != null
+						? tie.InnerException.ToString()
+						: ex.ToString();
+
+					return Results.Problem(
+						detail: msg,
+						title: "Heimdall action invocation failed",
+						statusCode: StatusCodes.Status500InternalServerError);
+				}
+
+				return Results.Problem(
+					title: "Heimdall action invocation failed",
+					statusCode: StatusCodes.Status500InternalServerError);
+			}
+		});
 			return app;
 		}
-
+		private static string RenderHtml(IHtmlContent content)
+		{
+			using var sw = new StringWriter();
+			content.WriteTo(sw, System.Text.Encodings.Web.HtmlEncoder.Default);
+			return sw.ToString();
+		}
 		private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, MethodInfo method)
 		{
 			var parameters = method.GetParameters();
