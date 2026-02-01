@@ -35,6 +35,7 @@
     //   * heimdall-hover-delay="ms"                  (hover)
     //   * heimdall-visible-once="true|false"         (visible)
     //   * heimdall-scroll-threshold="px"             (scroll)
+    //   * heimdall-poll="ms"                         (load polling)
     // ============================================================
 
     const VERSION = "1.1.0";
@@ -46,6 +47,7 @@
 
     const ACTION_HEADER = "X-Heimdall-Content-Action";
     const CSRF_HEADER = "RequestVerificationToken";
+
 
     function isElement(x) {
         return x && x.nodeType === 1;
@@ -610,6 +612,7 @@
         bootLoads(root);
         bootVisible(root);
         bootScroll(root);
+        bootPoll(root);
     }
 
     // Click handling (delegated)
@@ -854,6 +857,95 @@
             _hoverTimers.delete(el);
         }
     }
+
+    const _pollState = new WeakMap(); // el -> { timerId, inFlight }
+
+    function attachPoll(el) {
+        if (el.__heimdallPollBound)
+            return;
+        el.__heimdallPollBound = true;
+
+        const intervalMs = intAttr(el, "heimdall-poll", 0);
+        if (!intervalMs || intervalMs <= 0)
+            return;
+
+        // We reuse the load action to keep MVP simple.
+        const actionId = getAttr(el, "heimdall-content-load");
+        if (!actionId) {
+            if (Heimdall.config.debug) {
+                // eslint-disable-next-line no-console
+                console.warn(`[Heimdall ${VERSION}] heimdall-poll set but no heimdall-content-load found.`, el);
+            }
+            return;
+        }
+
+        const state = { timerId: null, inFlight: false };
+        _pollState.set(el, state);
+
+        const tick = async () => {
+            // Stop if element no longer exists in DOM (covers swaps/removals)
+            if (!el.isConnected) {
+                stopPoll(el);
+                return;
+            }
+
+            //stop if tab not in view
+            if (document.hidden) 
+                return;
+            // no overlap
+            if (state.inFlight)
+                return;
+
+            state.inFlight = true;
+            try {
+                await runActionFromElement(el, actionId, "load", { reason: "poll" });
+            } finally {
+                state.inFlight = false;
+            }
+        };
+
+        const schedule = () => {
+            if (!el.isConnected) {
+                stopPoll(el);
+                return;
+            }
+
+            const st = _pollState.get(el);
+            if (!st)
+                return;
+
+            clearTimeout(st.timerId);
+            st.timerId = setTimeout(async () => {
+                try {
+                    await tick();
+                } catch {
+                    // runActionFromElement already logs
+                } finally {
+                    schedule(); // keep looping
+                }
+            }, intervalMs);
+        };
+
+        schedule();
+    }
+
+    function stopPoll(el) {
+        const st = _pollState.get(el);
+        if (!st)
+            return;
+        clearTimeout(st.timerId);
+        _pollState.delete(el);
+        el.__heimdallPollBound = false;
+    }
+
+    function bootPoll(root) {
+        const scope = root && isElement(root) ? root : document;
+        const nodes = scope.querySelectorAll("[heimdall-poll]");
+        for (const el of nodes) {
+            attachPoll(el);
+        }
+    }
+
 
     function installObserver() {
         if (!Heimdall.config.observeDom)
