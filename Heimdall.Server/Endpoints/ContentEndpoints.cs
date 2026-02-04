@@ -1,4 +1,5 @@
 ﻿
+using Heimdall.Server.Helpers;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Html;
@@ -18,6 +19,7 @@ namespace Heimdall.Server
 
 		internal static WebApplication MapHeimdallContentEndpoints(this WebApplication app) 
 		{
+
 			app.MapPost("__heimdall/v1/content/actions",
 		async (HttpContext ctx, ContentRegistry registry, IOptions<HeimdallServiceSettings> options) =>
 		{
@@ -47,7 +49,7 @@ namespace Heimdall.Server
 				if (raw is null)
 					return Results.NoContent();
 
-				return Results.Content(RenderHtml(raw), "text/html; charset=utf-8");
+				return Results.Content(raw.RenderHtml(), "text/html; charset=utf-8");
 			}
 			catch (Exception ex)
 			{
@@ -69,12 +71,6 @@ namespace Heimdall.Server
 			}
 		});
 			return app;
-		}
-		private static string RenderHtml(IHtmlContent content)
-		{
-			using var sw = new StringWriter();
-			content.WriteTo(sw, System.Text.Encodings.Web.HtmlEncoder.Default);
-			return sw.ToString();
 		}
 		private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, MethodInfo method)
 		{

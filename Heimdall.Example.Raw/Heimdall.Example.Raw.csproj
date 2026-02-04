@@ -7,10 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Scriban" Version="6.5.2" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Heimdall.Server\Heimdall.Server.csproj" />
     <ProjectReference Include="..\Heimdall.Web\Heimdall.Web.csproj" />
   </ItemGroup>
-	<PropertyGroup>
+	<!--<PropertyGroup>
 		<HeimdallReconstructRoot>Heimdall\Pages</HeimdallReconstructRoot>
 		<HeimdallReconstructEnabled>true</HeimdallReconstructEnabled>
 	</PropertyGroup>
@@ -24,5 +28,5 @@
 		<MakeDir Directories="$(ProjectDir)wwwroot\$(HeimdallReconstructRoot)" />
 
 		<Copy SourceFiles="@(HeimdallReconstructFiles)" DestinationFiles="@(HeimdallReconstructFiles->'$(ProjectDir)wwwroot\$(HeimdallReconstructRoot)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-	</Target>
+	</Target>-->
 </Project>

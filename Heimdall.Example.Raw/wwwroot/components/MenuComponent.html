@@ -1,0 +1,45 @@
+﻿
+<div class="p-2">
+    <button class="btn btn-primary text-uppercase"
+            type="button"
+            data-bs-toggle="offcanvas"
+            data-bs-target="#leftMenu"
+            aria-controls="leftMenu">
+        <i class="bi bi-grid"></i> Menu
+    </button>
+</div>
+<div class="offcanvas offcanvas-start"
+     tabindex="-1"
+     id="leftMenu"
+     aria-labelledby="leftMenuLabel">
+    <div class="offcanvas-header">
+        <h5 class="offcanvas-title" id="leftMenuLabel">
+            <i class="bi bi-grid"></i> Navigation
+        </h5>
+        <button type="button"
+                class="btn-close"
+                data-bs-dismiss="offcanvas"
+                aria-label="Close"></button>
+    </div>
+
+    <div class="offcanvas-body">
+        <div class="list-group">
+
+            <a class="list-group-item list-group-item-action {{ if active == "home" }}active{{ end }}"
+               href="/">
+                <i class="bi bi-house me-2"></i> Home
+            </a>
+
+            <a class="list-group-item list-group-item-action {{ if active == "dashboard" }}active{{ end }}"
+               href="/dashboard">
+                <i class="bi bi-speedometer2 me-2"></i> Dashboard
+            </a>
+
+            <a class="list-group-item list-group-item-action {{ if active == "settings" }}active{{ end }}"
+               href="/settings">
+                <i class="bi bi-gear me-2"></i> Settings
+            </a>
+
+        </div>
+    </div>
+</div>

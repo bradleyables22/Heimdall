@@ -1,3 +1,4 @@
+using Heimdall.Example.Raw.Heimdall.Layouts;
 using Heimdall.Server;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -21,9 +22,27 @@ app.UseHeimdall();
 app.MapHeimdallPage(settings=>
 {
     settings.Pattern = "/";
-    settings.RelativePath = "Heimdall/Pages/Home/index.html";
+    settings.PagePath = "index.html";
+    settings.LayoutPath = "layouts/mainlayout.html";
+    settings.LayoutPlaceholder = "{{page}}";
+    settings.LayoutComponents.Add("{{MenuComponent}}", (sp, ctx) => MainLayout.RenderMenu(ctx, "/"));
 });
-
+app.MapHeimdallPage(settings =>
+{
+    settings.Pattern = "/dashboard";
+    settings.PagePath = "index.html";
+    settings.LayoutPath = "layouts/mainlayout.html";
+    settings.LayoutPlaceholder = "{{page}}";
+    settings.LayoutComponents.Add("{{MenuComponent}}", (sp, ctx) => MainLayout.RenderMenu(ctx, "/dashboard"));
+});
+app.MapHeimdallPage(settings =>
+{
+    settings.Pattern = "/settings";
+    settings.PagePath = "index.html";
+    settings.LayoutPath = "layouts/mainlayout.html";
+    settings.LayoutPlaceholder = "{{page}}";
+    settings.LayoutComponents.Add("{{MenuComponent}}", (sp, ctx) => MainLayout.RenderMenu(ctx, "/settings"));
+});
 app.Run();
 
 

@@ -1,46 +1,121 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using Heimdall.Server.Helpers;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using System.Text;
 
 namespace Heimdall.Server
 {
-	public static class HeimdallPageCollection
-	{
-		/// <summary>
-		/// Adds an endpoint that serves a static HTML page from the wwwroot folder
-		/// </summary>
-		/// <param name="app"></param>
-		/// <param name="configure"></param>
-		/// <returns></returns>
-		/// <exception cref="InvalidOperationException"></exception>
-		public static RouteHandlerBuilder MapHeimdallPage(this IEndpointRouteBuilder app, Action<HeimdallPageSettings> configure)
-		{
-			var settings = new HeimdallPageSettings();
-			configure(settings);
-			
-			if (string.IsNullOrWhiteSpace(settings.Pattern))
-				throw new InvalidOperationException("Pattern is required.");
+    public static class HeimdallPageCollection
+    {
+        public static RouteHandlerBuilder MapHeimdallPage(
+            this IEndpointRouteBuilder app,
+            Action<HeimdallPageSettings> configure)
+        {
+            var settings = new HeimdallPageSettings();
+            configure(settings);
 
-			if (string.IsNullOrWhiteSpace(settings.RelativePath))
-				throw new InvalidOperationException("RelativePath is required.");
+            if (string.IsNullOrWhiteSpace(settings.Pattern))
+                throw new InvalidOperationException("Pattern is required.");
 
-			var rel = settings.RelativePath.Replace('\\', '/').TrimStart('/');
+            if (string.IsNullOrWhiteSpace(settings.PagePath))
+                throw new InvalidOperationException("PagePath is required.");
 
-			var b = app.MapGet(settings.Pattern, async (HttpContext ctx) =>
-			{
-				var env = ctx.RequestServices.GetRequiredService<IWebHostEnvironment>();
-				var file = env.WebRootFileProvider.GetFileInfo(rel);
+            if (!string.IsNullOrWhiteSpace(settings.LayoutPath) &&
+                string.IsNullOrWhiteSpace(settings.LayoutPlaceholder))
+                throw new InvalidOperationException("LayoutPlaceholder is required when LayoutPath is set.");
 
-				if (!file.Exists)
-					return Results.NotFound();
+            
 
-				return Results.File(file.PhysicalPath!, "text/html; charset=utf-8");
-			});
+            var pageRel = HeimdallHelpers.NormalizeWebRootPath(settings.PagePath);
+            var layoutRel = string.IsNullOrWhiteSpace(settings.LayoutPath)
+                ? null
+                : HeimdallHelpers.NormalizeWebRootPath(settings.LayoutPath);
 
-			b.ExcludeFromDescription();
-			return b;
-		}
-	}
+            var b = app.MapGet(settings.Pattern, async (HttpContext ctx) =>
+            {
+                var env = ctx.RequestServices.GetRequiredService<IWebHostEnvironment>();
+                var webRoot = env.WebRootFileProvider;
+
+                IFileInfo pageFile = webRoot.GetFileInfo(pageRel);
+                if (!pageFile.Exists)
+                    return Results.NotFound();
+
+                // Fast path: no layout
+                if (layoutRel is null)
+                    return Results.File(pageFile.PhysicalPath!, "text/html; charset=utf-8");
+
+                IFileInfo layoutFile = webRoot.GetFileInfo(layoutRel);
+                if (!layoutFile.Exists)
+                    return Results.Problem($"Layout not found: {settings.LayoutPath}", statusCode: 500);
+
+                static async Task<string> ReadFileAsync(IFileInfo file, CancellationToken ct)
+                {
+                    await using var stream = file.CreateReadStream();
+                    using var reader = new StreamReader(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+                    return await reader.ReadToEndAsync(ct);
+                }
+
+                var ct = ctx.RequestAborted;
+
+                var layoutTask = ReadFileAsync(layoutFile, ct);
+                var pageTask = ReadFileAsync(pageFile, ct);
+                await Task.WhenAll(layoutTask, pageTask);
+
+                var layoutHtml = layoutTask.Result;
+                var pageHtml = pageTask.Result;
+
+                if (!layoutHtml.Contains(settings.LayoutPlaceholder, StringComparison.Ordinal))
+                {
+                    return Results.Problem(
+                        $"Layout placeholder not found. Expected: {settings.LayoutPlaceholder}",
+                        statusCode: 500);
+                }
+
+                // 1) Inject page
+                var fullHtml = layoutHtml.Replace(settings.LayoutPlaceholder, pageHtml, StringComparison.Ordinal);
+
+                // 2) Inject layout components (prerendered placeholders)
+                if (settings.LayoutComponents.Count > 0)
+                {
+                    var sp = ctx.RequestServices;
+
+                    foreach (var (placeholder, renderer) in settings.LayoutComponents)
+                    {
+                        if (string.IsNullOrWhiteSpace(placeholder) || renderer is null)
+                            continue;
+
+                        // Optional: only render if the placeholder exists in the HTML
+                        if (!fullHtml.Contains(placeholder, StringComparison.OrdinalIgnoreCase))
+                            continue;
+
+                        IHtmlContent html;
+                        try
+                        {
+                            html = renderer(sp,ctx) ?? HtmlString.Empty;
+                        }
+                        catch (Exception ex)
+                        {
+                            return Results.Problem(
+                                $"Error rendering layout component '{placeholder}': {ex.Message}",
+                                statusCode: 500);
+                        }
+
+                        var renderedHtml = html.RenderHtml();
+                        fullHtml = fullHtml.Replace(placeholder, renderedHtml, StringComparison.OrdinalIgnoreCase);
+                    }
+                }
+
+                return Results.Text(fullHtml, "text/html; charset=utf-8");
+            });
+
+            b.ExcludeFromDescription();
+            return b;
+        }
+
+    }
 }
