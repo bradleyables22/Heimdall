@@ -47,5 +47,11 @@ namespace Heimdall.Example.Raw.Heimdall.Layouts
 
             return new HtmlString(html);
         }
+
+        [ContentInvocation]
+        public static IHtmlContent ServerTime()
+        {
+            return new HtmlString($"Server Time: {System.DateTime.Now} UTC");
+        }
     }
 }
