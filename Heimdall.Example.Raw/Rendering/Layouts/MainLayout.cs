@@ -1,15 +1,16 @@
 ﻿using Heimdall.Server;
 using Microsoft.AspNetCore.Html;
 using Scriban;
+using System.Reflection.Metadata.Ecma335;
 
-namespace Heimdall.Example.Raw.Heimdall.Layouts
+namespace Heimdall.Example.Raw.Rendering.Layouts
 {
     public static class MainLayout
     {
         [ContentInvocation]
         public static IHtmlContent RenderMenu(HttpContext ctx,string? pathName)
         {
-            var path = pathName.ToLowerInvariant() ?? "/";
+            var path = pathName?.ToLowerInvariant() ?? "/";
 
             var active = path switch
             {
@@ -52,6 +53,11 @@ namespace Heimdall.Example.Raw.Heimdall.Layouts
         public static IHtmlContent ServerTime()
         {
             return new HtmlString($"Server Time: {System.DateTime.Now} UTC");
+        }
+        [ContentInvocation]
+        public static IHtmlContent Clear()
+        {
+            return new HtmlString("");
         }
     }
 }

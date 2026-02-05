@@ -1,10 +1,15 @@
-using Heimdall.Example.Raw.Heimdall.Layouts;
+using Heimdall.Example.Raw.Rendering.Layouts;
+using Heimdall.Example.Raw.Utilities.BackgroundServices;
 using Heimdall.Server;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAntiforgery();
 builder.Services.AddCors();
+
+builder.Services.AddSingleton<NoteService>();
+builder.Services.AddHostedService<DummyNoteLoader>();
+
 builder.Services.AddHeimdall(options => options.EnableDetailedErrors = true);
 var app = builder.Build();
 

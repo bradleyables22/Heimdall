@@ -20,57 +20,74 @@ namespace Heimdall.Server
 		internal static WebApplication MapHeimdallContentEndpoints(this WebApplication app) 
 		{
 
-			app.MapPost("__heimdall/v1/content/actions",
-		async (HttpContext ctx, ContentRegistry registry, IOptions<HeimdallServiceSettings> options) =>
-		{
-			var settings = options.Value;
-
-			var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-			await antiforgery.ValidateRequestAsync(ctx);
-
-			if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) ||
-				string.IsNullOrWhiteSpace(values))
+            app.MapPost("__heimdall/v1/content/actions", async (HttpContext ctx, ContentRegistry registry, IOptions<HeimdallServiceSettings> options) =>
 			{
-				return Results.BadRequest($"Missing {ActionHeader} header.");
-			}
+				var settings = options.Value;
 
-			var methodId = values.ToString();
+				var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+				await antiforgery.ValidateRequestAsync(ctx);
 
-			if (!registry.TryGet(methodId, out var method))
-				return Results.NotFound($"Unknown action '{methodId}'.");
-
-			try
-			{
-				var args = await BindArgumentsAsync(ctx, method);
-
-				IHtmlContent? raw = (IHtmlContent?)method.Invoke(null, args);
-
-
-				if (raw is null)
-					return Results.NoContent();
-
-				return Results.Content(raw.RenderHtml(), "text/html; charset=utf-8");
-			}
-			catch (Exception ex)
-			{
-				if (settings.EnableDetailedErrors)
+				if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) ||
+					string.IsNullOrWhiteSpace(values))
 				{
-					var msg = ex is TargetInvocationException tie && tie.InnerException != null
-						? tie.InnerException.ToString()
-						: ex.ToString();
+					return Results.BadRequest($"Missing {ActionHeader} header.");
+				}
+
+				var methodId = values.ToString();
+
+				if (!registry.TryGet(methodId, out var method))
+					return Results.NotFound($"Unknown action '{methodId}'.");
+
+				try
+				{
+					var args = await BindArgumentsAsync(ctx, method);
+
+					object? invokeResult = method.Invoke(null, args);
+
+					if (invokeResult is null)
+						return Results.NoContent();
+
+					IHtmlContent? raw = invokeResult switch
+					{
+						IHtmlContent html => html,
+
+						Task<IHtmlContent> taskHtml => await taskHtml,
+
+						ValueTask<IHtmlContent> vtaskHtml => await vtaskHtml,
+
+						// If someone returns Task (non-generic) or some other type, fail loudly
+						_ => throw new InvalidOperationException(
+								$"Heimdall action '{methodId}' returned unsupported type '{invokeResult.GetType().FullName}'. " +
+								"Expected IHtmlContent, Task<IHtmlContent>, or ValueTask<IHtmlContent>.")
+					};
+
+					if (raw is null)
+						return Results.NoContent();
+
+					return Results.Content(raw.RenderHtml(), "text/html; charset=utf-8");
+				}
+				catch (Exception ex)
+				{
+					if (settings.EnableDetailedErrors)
+					{
+						var msg = ex is TargetInvocationException tie && tie.InnerException != null
+							? tie.InnerException.ToString()
+							: ex.ToString();
+
+						return Results.Problem(
+							detail: msg,
+							title: "Heimdall action invocation failed",
+							statusCode: StatusCodes.Status500InternalServerError);
+					}
 
 					return Results.Problem(
-						detail: msg,
 						title: "Heimdall action invocation failed",
 						statusCode: StatusCodes.Status500InternalServerError);
 				}
+			});
 
-				return Results.Problem(
-					title: "Heimdall action invocation failed",
-					statusCode: StatusCodes.Status500InternalServerError);
-			}
-		});
-			return app;
+            return app;
+
 		}
 		private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, MethodInfo method)
 		{
