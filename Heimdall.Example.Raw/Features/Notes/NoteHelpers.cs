@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Html;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 
 namespace Heimdall.Example.Raw.Features.Notes
 {
@@ -30,23 +31,33 @@ namespace Heimdall.Example.Raw.Features.Notes
             var updated = note.UpdatedAt?.ToLocalTime().ToString("g");
 
             var meta = updated is null ? $"Created {Encoder.Encode(created)}" : $"Updated {Encoder.Encode(updated)}";
+            var rowId = $"note-row-{id}";
 
-            var htmlContent = $"""
-                <tr id="{id}-row">
-                  <td class="text-nowrap small text-muted">{Encoder.Encode(created)}</td>
-                  <td class="fw-semibold">{title}</td>
-                  <td class="text-muted">{body}</td>
+            // Build JSON payload for ShowRemoveModal (expects noteID)
+            // Use JsonSerializer so it's real JSON.
+            var payloadObj = new { noteID = id };
+            var payloadJson = JsonSerializer.Serialize(payloadObj);
+
+            var htmlContent = $$$"""
+                <tr id="{{{rowId}}}">
+                  <td class="text-nowrap small text-muted">{{{created}}}</td>
+                  <td class="fw-semibold">{{{title}}}</td>
+                  <td class="text-muted">{{{body}}}</td>
                   <td class="text-end text-nowrap">
-                    <button class="btn btn-sm btn-outline-primary">
+                    <button class="btn btn-sm btn-outline-primary" type="button">
                       Edit
                     </button>
 
-                    <button class="btn btn-sm btn-outline-danger">
+                    <button type="button" class="btn btn-sm btn-outline-danger"
+                            heimdall-content-click="Home.ShowRemoveModal"
+                            heimdall-content-target="#modalHost"
+                            heimdall-content-swap="inner"
+                            heimdall-payload='{{{payloadJson}}}'>
                       Delete
                     </button>
                   </td>
                 </tr>
-            """;
+                """;
             return new HtmlString(htmlContent);
         }
     }

@@ -57,7 +57,10 @@ namespace Heimdall.Example.Raw.Rendering.Layouts
         [ContentInvocation]
         public static IHtmlContent Clear()
         {
-            return new HtmlString("");
+            return HtmlString.Empty;
         }
+
+
+
     }
 }

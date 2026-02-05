@@ -1,4 +1,6 @@
 ﻿using Heimdall.Example.Raw.Features.Notes;
+using Heimdall.Example.Raw.Rendering.Layouts;
+using Heimdall.Example.Raw.Rendering.Shared;
 using Heimdall.Example.Raw.Utilities.Models;
 using Heimdall.Server;
 using Microsoft.AspNetCore.Html;
@@ -26,7 +28,9 @@ namespace Heimdall.Example.Raw.Rendering.Home
                   </td>
                 </tr>";
 
-             return new HtmlString($@"
+            return new HtmlString($@"
+                <div id=""modalHost""></div>
+
                 <table class=""table table-hover"">
                     <thead>{header}</thead>
                     <tbody id=""notes-body"">
@@ -76,6 +80,88 @@ namespace Heimdall.Example.Raw.Rendering.Home
                 </tr>");
 
             return b;
+        }
+
+        [ContentInvocation]
+        public static IHtmlContent ShowRemoveModal(IServiceProvider sp, NoteIdRequest req)
+        {
+            var noteID = req.NoteID;
+
+            var model = new ConfirmModalModel
+            {
+                ModalId = "confirm-remove-modal",
+                Title = "Delete note?",
+                Message = "This cannot be undone. Are you sure you want to delete this note?",
+
+                CancelText = "Cancel",
+                ConfirmText = "Delete",
+                ConfirmButtonClass = "btn-danger",
+
+                ActionId = "Home.RemoveAsync",
+                Target = $"#note-row-{noteID}",  
+                Swap = "outer",
+                PayloadJson = JsonSerializer.Serialize(new NoteIdRequest { NoteID = noteID }),
+
+                Disable = true
+            };
+
+            return ConfirmModal.Render(sp, model);
+        }
+
+
+        public static async Task<IHtmlContent> AddAsync(NoteService noteService, NoteIdRequest req)
+        {
+            var ok = await noteService.DeleteAsync(req.NoteID);
+            var rowSelector = $"#note-row-{req.NoteID}";
+            if (ok)
+            {
+
+                return new HtmlString($$"""
+                    <template heimdall-oob="true"
+                              heimdall-content-target="#modalHost"
+                              heimdall-content-swap="inner"></template>
+
+                    <template heimdall-oob="true"
+                              heimdall-content-target="{{rowSelector}}"
+                              heimdall-content-swap="outer"></template>
+                    """);
+            }
+
+            return new HtmlString($$"""
+                    <template heimdall-oob="true"
+                              heimdall-content-target="#modal-body"
+                              heimdall-content-swap="inner">
+                        <p class="text-danger text-center">Failed to delete the note. Please try again later.</p>
+                    </template>
+                    """);
+        }
+
+        [ContentInvocation]
+        public static async Task<IHtmlContent> RemoveAsync(NoteService noteService, NoteIdRequest req)
+        {
+            var ok = await noteService.DeleteAsync(req.NoteID);
+            var rowSelector = $"#note-row-{req.NoteID}";
+            if (ok)
+            {
+
+                return new HtmlString($$"""
+                    <template heimdall-oob="true"
+                              heimdall-content-target="#modalHost"
+                              heimdall-content-swap="inner"></template>
+
+                    <template heimdall-oob="true"
+                              heimdall-content-target="{{rowSelector}}"
+                              heimdall-content-swap="outer"></template>
+                    """);
+            }
+
+            return new HtmlString($$"""
+                    <template heimdall-oob="true"
+                              heimdall-content-target="#modal-body"
+                              heimdall-content-swap="inner">
+                        <p class="text-danger text-center">Failed to delete the note. Please try again later.</p>
+                    </template>
+                    """);
         }
 
     }

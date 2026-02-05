@@ -38,6 +38,20 @@
     //   * heimdall-poll="ms"                         (load polling)
     // ============================================================
 
+    // ============================================================
+    // OOB (Out-of-band swaps)
+    //
+    // Convention:
+    //   Any node with heimdall-oob="true" is an instruction:
+    //     heimdall-content-target="#selector"
+    //     heimdall-content-swap="inner|outer|beforeend|afterbegin"
+    //   Payload HTML is the node's innerHTML (use <template> recommended).
+    //
+    // Example:
+    //   <template heimdall-oob="true" heimdall-content-target="#modalHost" heimdall-content-swap="inner"></template>
+    //   <template heimdall-oob="true" heimdall-content-target="#row-123" heimdall-content-swap="outer"></template>
+    // ============================================================
+
     const VERSION = "1.1.0";
     const API_VERSION = 1;
 
@@ -313,8 +327,88 @@
         csrfToken = null;
         csrfTokenPromise = null;
     }
+    function matchesAllowedTarget(selector, sourceEl) {
+        const rule = Heimdall.config.oobAllowedTargets;
 
-    // Invoke (content action)
+        if (!rule) return true; // allow all by default
+
+        if (Array.isArray(rule)) {
+            return rule.includes(selector);
+        }
+
+        if (typeof rule === "function") {
+            try {
+                return !!rule(selector, sourceEl);
+            } catch {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Processes OOB nodes and returns { html: remainingHtml, applied: count }
+    function processOob(html, sourceEl) {
+        if (!Heimdall.config.oobEnabled)
+            return { html, applied: 0 };
+
+        // Fast-path: avoid parsing most responses
+        if (!html || html.indexOf("heimdall-oob") === -1)
+            return { html, applied: 0 };
+
+        const container = document.createElement("div");
+        container.innerHTML = html;
+
+        const oobs = container.querySelectorAll("[heimdall-oob='true']");
+        if (!oobs || oobs.length === 0)
+            return { html, applied: 0 };
+
+        let applied = 0;
+
+        for (const oobEl of oobs) {
+            const targetSel = getAttr(oobEl, "heimdall-content-target");
+            if (!targetSel) {
+                dbg("OOB missing heimdall-content-target; skipping", oobEl);
+                oobEl.remove();
+                continue;
+            }
+
+            if (!matchesAllowedTarget(targetSel, sourceEl)) {
+                if (Heimdall.config.debug) {
+                    // eslint-disable-next-line no-console
+                    console.warn(`[Heimdall ${VERSION}] OOB target not allowed: '${targetSel}'.`);
+                }
+                oobEl.remove();
+                continue;
+            }
+
+            const swap = (getAttr(oobEl, "heimdall-content-swap") || "inner").toLowerCase();
+            const targetEl = resolveTarget(targetSel, null);
+
+            if (!targetEl) {
+                dbg("OOB target not found; skipping", targetSel);
+                oobEl.remove();
+                continue;
+            }
+
+            const payloadHtml = oobEl.innerHTML || "";
+            setHtml(targetEl, payloadHtml, swap);
+            applied++;
+
+            // If observeDom is off, newly injected triggers won't be wired unless we boot manually.
+            if (!Heimdall.config.observeDom) {
+                try {
+                    boot(targetEl);
+                } catch { /* ignore */ }
+            }
+
+            // Remove instruction so it won't be part of the normal swap output.
+            oobEl.remove();
+        }
+
+        return { html: container.innerHTML, applied };
+    }
+
     async function invoke(actionId, payload, options) {
         return _invokeWithRetry(actionId, payload, options, true);
     }
@@ -322,10 +416,13 @@
     async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
         options = options || {};
 
-        const endpoint = options.endpoint || Heimdall.config.endpoints.contentActions;
+        const endpointBase = options.endpoint || Heimdall.config.endpoints.contentActions;
         const targetEl = resolveTarget(options.target, options.fallbackTarget || null);
         const swap = options.swap || "inner";
         const credentials = options.credentials || Heimdall.config.credentials || "same-origin";
+
+        const url = new URL(endpointBase, global.location?.origin || undefined);
+        url.searchParams.set("action", actionId);
 
         const token = await ensureCsrfToken();
 
@@ -340,75 +437,107 @@
                 headers[k] = options.headers[k];
         }
 
-        // Payload can be an object or null. We JSON.stringify it.
         let body = "{}";
+
         try {
             body = payload == null ? "{}" : JSON.stringify(payload);
         } catch (e) {
-            // JSON stringify can fail (circular refs). Provide a good error.
             const err = new Error(`Heimdall payload is not JSON-serializable for action '${actionId}'.`);
             err.cause = e;
             emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: 0, error: err });
-            throw err;
+            throw err; // dev error
         }
 
-        const started = (global.performance && performance.now) ? performance.now() : Date.now();
-        emit("heimdall:before", { actionId, payload, target: targetEl, swap, endpoint });
+        const started = performance.now();
+        emit("heimdall:before", { actionId, payload, target: targetEl, swap, endpoint: url.toString() });
 
-        dbg("invoke ->", actionId, { endpoint, swap, target: targetEl });
+        dbg("invoke ->", actionId, { endpoint: url.toString(), swap, target: targetEl });
 
-        const res = await fetch(endpoint, {
-            method: "POST",
-            headers,
-            body,
-            credentials
-        });
+        let res;
 
-        // Retry once if we *likely* failed CSRF validation.
+        try {
+            res = await fetch(url.toString(), {
+                method: "POST",
+                headers,
+                body,
+                credentials
+            });
+        }
+        catch (networkErr) {
+            const result = {
+                ok: false,
+                status: 0,
+                error: networkErr.message,
+                response: null,
+                html: null,
+                ms: performance.now() - started
+            };
+
+            emit("heimdall:error", { actionId, payload, target: targetEl, swap, error: networkErr });
+
+            return result;
+        }
+
+        // CSRF retry
         if (res.status === 400 && shouldRetry) {
             const text = await safeText(res);
             const lower = (text || "").toLowerCase();
-            if (lower.includes("antiforgery") || lower.includes("csrf") || lower.includes("validation")) {
+
+            if (lower.includes("csrf") || lower.includes("antiforgery")) {
                 dbg("csrf validation suspected; retrying once with fresh token");
                 clearCsrfToken();
                 return _invokeWithRetry(actionId, payload, options, false);
             }
         }
 
-        if (!res.ok) {
-            const text = await safeText(res);
-            const err = new Error(`Heimdall failed (${res.status}): ${text || res.statusText}`);
-            err.status = res.status;
-            err.body = text;
+        let html = await safeText(res);
+        const ms = performance.now() - started;
 
-            emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: res.status, body: text, error: err });
-            dbg("invoke <- ERROR", actionId, res.status, text || res.statusText);
-            throw err;
+        // Apply OOB before normal swap (only on OK responses by default)
+        if (res.ok) {
+            const oob = processOob(html, options && options.sourceEl ? options.sourceEl : null);
+            html = oob.html;
         }
 
-        const html = await res.text();
-
-        if (targetEl) {
+        if (res.ok && targetEl) {
             setHtml(targetEl, html, swap);
-        } else if (Heimdall.config.debug) {
-            // eslint-disable-next-line no-console
-            console.warn(`[Heimdall ${VERSION}] Target not found for action '${actionId}'. HTML returned but not swapped.`);
+
+            // If observeDom is off, newly injected triggers won't be wired unless we boot manually.
+            if (!Heimdall.config.observeDom) {
+                try {
+                    boot(targetEl);
+                } catch { /* ignore */ }
+            }
         }
 
-        const ended = (global.performance && performance.now) ? performance.now() : Date.now();
-        const ms = Math.max(0, ended - started);
+        const result = {
+            ok: res.ok,
+            status: res.status,
+            html: res.ok ? html : null,
+            error: res.ok ? null : html,
+            response: res,
+            ms
+        };
 
-        emit("heimdall:after", { actionId, payload, target: targetEl, swap, endpoint, status: res.status, ms, html });
-
-        if (typeof options.onSuccess === "function") {
-            options.onSuccess({ html, target: targetEl, response: res, ms });
+        if (!res.ok) {
+            emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: res.status, body: html });
+        }
+        else {
+            emit("heimdall:after", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, ms, html });
         }
 
-        dbg("invoke <-", actionId, { status: res.status, ms });
+        if (typeof options.onSuccess === "function" && res.ok) {
+            options.onSuccess(result);
+        }
 
-        return html;
+        if (typeof options.onError === "function" && !res.ok) {
+            options.onError(result);
+        }
+
+        dbg("invoke <-", actionId, result);
+
+        return result;
     }
-
 
     const DEFAULT_DISABLE_BY_TRIGGER = {
         load: false,
@@ -450,7 +579,8 @@
             el.setAttribute("aria-busy", "true");
         }
 
-        const opts = Object.assign({ target, swap, fallbackTarget: el }, extraOptions || {});
+        // NOTE: pass sourceEl through so OOB allow-lists can make decisions
+        const opts = Object.assign({ target, swap, fallbackTarget: el, sourceEl: el }, extraOptions || {});
         try {
             await invoke(actionId, payload, opts);
         } catch (err) {
@@ -509,7 +639,7 @@
                         _visibleObserver.unobserve(el);
                     } catch {
                         /* ignore */
-}
+                    }
                 }
 
                 runActionFromElement(el, actionId, "visible").catch(() => { /* logged */ });
@@ -539,7 +669,7 @@
                 obs.observe(el);
             } catch {
                 /* ignore */
-}
+            }
         }
     }
 
@@ -889,9 +1019,10 @@
                 return;
             }
 
-            //stop if tab not in view
-            if (document.hidden) 
+            // stop if tab not in view
+            if (document.hidden)
                 return;
+
             // no overlap
             if (state.inFlight)
                 return;
@@ -1029,7 +1160,15 @@
 
             // Visible tuning
             visibleRootMargin: "0px",
-            visibleThreshold: 0
+            visibleThreshold: 0,
+
+            // OOB (Out-of-band swaps)
+            oobEnabled: true,
+
+            // If null => allow all OOB targets.
+            // Recommended for prod: allowlist “outlets”, e.g. ["#modalHost", "#toastHost"].
+            // You can also supply a function: (selector, sourceEl) => boolean
+            oobAllowedTargets: null
         }
     };
 
@@ -1041,7 +1180,7 @@
         if (!document.__heimdallDelegatesInstalled) {
             document.__heimdallDelegatesInstalled = true;
 
-            // capture phase for click helps with nested handlers; 
+            // capture phase for click helps with nested handlers;
             document.addEventListener("click", handleClick, true);
 
             // bubble phase is fine for the rest
