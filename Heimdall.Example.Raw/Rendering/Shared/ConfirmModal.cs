@@ -13,7 +13,7 @@ namespace Heimdall.Example.Raw.Rendering.Shared
             var templatePath = Path.Combine(
                 env.WebRootPath,
                 "components",
-                "ConfirmModal.html"
+                "ConfirmModal.Template.html"
             );
 
             if (!File.Exists(templatePath))

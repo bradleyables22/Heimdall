@@ -14,19 +14,4 @@
     <ProjectReference Include="..\Heimdall.Server\Heimdall.Server.csproj" />
     <ProjectReference Include="..\Heimdall.Web\Heimdall.Web.csproj" />
   </ItemGroup>
-	<!--<PropertyGroup>
-		<HeimdallReconstructRoot>Heimdall\Pages</HeimdallReconstructRoot>
-		<HeimdallReconstructEnabled>true</HeimdallReconstructEnabled>
-	</PropertyGroup>
-
-	<ItemGroup Condition="'$(HeimdallReconstructEnabled)' == 'true'">
-		<HeimdallReconstructFiles Include="Heimdall\Pages\**\*.html;Heimdall\Pages\**\*.css;Heimdall\Pages\**\*.js;Heimdall\Pages\**\*.map"/>
-	</ItemGroup>
-	<Target Name="Heimdall_ReconstructToWwwroot" BeforeTargets="Build" Condition="'$(HeimdallReconstructEnabled)' == 'true'">
-
-
-		<MakeDir Directories="$(ProjectDir)wwwroot\$(HeimdallReconstructRoot)" />
-
-		<Copy SourceFiles="@(HeimdallReconstructFiles)" DestinationFiles="@(HeimdallReconstructFiles->'$(ProjectDir)wwwroot\$(HeimdallReconstructRoot)\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
-	</Target>-->
 </Project>

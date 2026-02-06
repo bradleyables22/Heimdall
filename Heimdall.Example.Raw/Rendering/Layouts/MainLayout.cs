@@ -25,7 +25,7 @@ namespace Heimdall.Example.Raw.Rendering.Layouts
                    .GetRequiredService<IWebHostEnvironment>()
                    .WebRootPath,
                 "components",
-                "MenuComponent.html"
+                "MenuComponent.Template.html"
             );
 
             var templateText = File.ReadAllText(templatePath);

@@ -107,25 +107,30 @@ namespace Heimdall.Example.Raw.Rendering.Home
 
             return ConfirmModal.Render(sp, model);
         }
+		//[ContentInvocation]
+		//public static IHtmlContent ShowRemoveModal(IServiceProvider sp)
+		//{
+			
+		//}
 
-
-        public static async Task<IHtmlContent> AddAsync(NoteService noteService, NoteIdRequest req)
+		[ContentInvocation]
+        public static async Task<IHtmlContent> AddAsync(NoteService noteService, CreateNoteRequest req)
         {
-            var ok = await noteService.DeleteAsync(req.NoteID);
-            var rowSelector = $"#note-row-{req.NoteID}";
-            if (ok)
-            {
+            var note = await noteService.CreateAsync(req.Title, req.Content);
+            var rowSelector = $"#note-row-{note.Id}";
+            //if (ok)
+            //{
 
-                return new HtmlString($$"""
-                    <template heimdall-oob="true"
-                              heimdall-content-target="#modalHost"
-                              heimdall-content-swap="inner"></template>
+            //    return new HtmlString($$"""
+            //        <template heimdall-oob="true"
+            //                  heimdall-content-target="#modalHost"
+            //                  heimdall-content-swap="inner"></template>
 
-                    <template heimdall-oob="true"
-                              heimdall-content-target="{{rowSelector}}"
-                              heimdall-content-swap="outer"></template>
-                    """);
-            }
+            //        <template heimdall-oob="true"
+            //                  heimdall-content-target="{{rowSelector}}"
+            //                  heimdall-content-swap="outer"></template>
+            //        """);
+            //}
 
             return new HtmlString($$"""
                     <template heimdall-oob="true"
