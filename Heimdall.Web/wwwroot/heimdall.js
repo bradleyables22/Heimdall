@@ -20,7 +20,7 @@
     //
     //   Common:
     //   * heimdall-content-target="#selector" (or element)
-    //   * heimdall-content-swap="inner|outer|beforeend|afterbegin"
+    //   * heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
     //   * heimdall-content-disable="true|false"      (default varies by trigger)
     //   * heimdall-prevent-default="true|false"      (anchors; submit; some keydown)
     //
@@ -39,17 +39,28 @@
     // ============================================================
 
     // ============================================================
-    // OOB (Out-of-band swaps)
+    // OOB (Out-of-band swaps) via <Invocation>
     //
-    // Convention:
-    //   Any node with heimdall-oob="true" is an instruction:
-    //     heimdall-content-target="#selector"
-    //     heimdall-content-swap="inner|outer|beforeend|afterbegin"
-    //   Payload HTML is the node's innerHTML (use <template> recommended).
+    // Convention (explicit):
+    //   Any <Invocation> node in the response is treated as an instruction.
+    //   It will NOT be rendered into the normal swap output.
+    //
+    // Required attributes:
+    //   * heimdall-content-target="#selector"
+    //
+    // Optional:
+    //   * heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
+    //
+    // Payload:
+    //   The Invocation node's innerHTML becomes the payload HTML used for the swap.
     //
     // Example:
-    //   <template heimdall-oob="true" heimdall-content-target="#modalHost" heimdall-content-swap="inner"></template>
-    //   <template heimdall-oob="true" heimdall-content-target="#row-123" heimdall-content-swap="outer"></template>
+    //   <Invocation heimdall-content-target="#modalHost" heimdall-content-swap="inner">
+    //     <div class="modal">...</div>
+    //   </Invocation>
+    //
+    // Security:
+    //   Any <script> tags in server HTML are stripped and never executed.
     // ============================================================
 
     const VERSION = "1.1.0";
@@ -98,6 +109,10 @@
 
     function setHtml(targetEl, html, swap) {
         const mode = (swap || "inner").toLowerCase();
+
+        // NEW: allow explicit no-op swaps
+        if (mode === "none")
+            return;
 
         switch (mode) {
             case "outer":
@@ -250,6 +265,42 @@
         }
     }
 
+    // NEW: Strip scripts (XSS safety). We do not execute scripts from server HTML.
+    function stripScriptsFromContainer(container) {
+        if (!container)
+            return;
+        const scripts = container.querySelectorAll("script");
+        for (const s of scripts)
+            s.remove();
+    }
+
+    // NEW: Strip all Invocation tags so they never render as content.
+    function stripInvocations(container) {
+        if (!container)
+            return;
+        const invs = container.querySelectorAll("invocation");
+        for (const inv of invs)
+            inv.remove();
+    }
+
+    // NEW: sanitize HTML for non-OK responses (or any time we want "no apply")
+    function sanitizeHtmlNoApply(html) {
+        if (!html)
+            return html;
+
+        // fast-path: if neither scripts nor invocation are present, return as-is
+        const hasScript = html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1;
+        const hasInv = html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1;
+        if (!hasScript && !hasInv)
+            return html;
+
+        const container = document.createElement("div");
+        container.innerHTML = html;
+        stripScriptsFromContainer(container);
+        stripInvocations(container);
+        return container.innerHTML;
+    }
+
     function isTextLikeInput(el) {
         if (!el || el.nodeType !== 1)
             return false;
@@ -327,6 +378,7 @@
         csrfToken = null;
         csrfTokenPromise = null;
     }
+
     function matchesAllowedTarget(selector, sourceEl) {
         const rule = Heimdall.config.oobAllowedTargets;
 
@@ -347,29 +399,39 @@
         return true;
     }
 
-    // Processes OOB nodes and returns { html: remainingHtml, applied: count }
+    // Processes <Invocation> nodes and returns { html: remainingHtml, applied: count }
     function processOob(html, sourceEl) {
-        if (!Heimdall.config.oobEnabled)
-            return { html, applied: 0 };
+        // Fast-path: skip parsing if no Invocation and no scripts
+        const hasInv = html && (html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1);
+        const hasScript = html && (html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1);
 
-        // Fast-path: avoid parsing most responses
-        if (!html || html.indexOf("heimdall-oob") === -1)
+        if (!hasInv && !hasScript)
             return { html, applied: 0 };
 
         const container = document.createElement("div");
-        container.innerHTML = html;
+        container.innerHTML = html || "";
 
-        const oobs = container.querySelectorAll("[heimdall-oob='true']");
-        if (!oobs || oobs.length === 0)
-            return { html, applied: 0 };
+        // Always strip scripts (security)
+        stripScriptsFromContainer(container);
+
+        const invocations = container.querySelectorAll("invocation");
+        if (!invocations || invocations.length === 0) {
+            return { html: container.innerHTML, applied: 0 };
+        }
+
+        // If OOB disabled, still strip directives so they never render
+        if (!Heimdall.config.oobEnabled) {
+            stripInvocations(container);
+            return { html: container.innerHTML, applied: 0 };
+        }
 
         let applied = 0;
 
-        for (const oobEl of oobs) {
-            const targetSel = getAttr(oobEl, "heimdall-content-target");
+        for (const invEl of invocations) {
+            const targetSel = getAttr(invEl, "heimdall-content-target");
             if (!targetSel) {
-                dbg("OOB missing heimdall-content-target; skipping", oobEl);
-                oobEl.remove();
+                dbg("Invocation missing heimdall-content-target; stripping", invEl);
+                invEl.remove();
                 continue;
             }
 
@@ -378,32 +440,35 @@
                     // eslint-disable-next-line no-console
                     console.warn(`[Heimdall ${VERSION}] OOB target not allowed: '${targetSel}'.`);
                 }
-                oobEl.remove();
+                invEl.remove();
                 continue;
             }
 
-            const swap = (getAttr(oobEl, "heimdall-content-swap") || "inner").toLowerCase();
+            const swap = (getAttr(invEl, "heimdall-content-swap") || "inner").toLowerCase();
             const targetEl = resolveTarget(targetSel, null);
 
             if (!targetEl) {
-                dbg("OOB target not found; skipping", targetSel);
-                oobEl.remove();
+                dbg("Invocation target not found; stripping", targetSel);
+                invEl.remove();
                 continue;
             }
 
-            const payloadHtml = oobEl.innerHTML || "";
-            setHtml(targetEl, payloadHtml, swap);
-            applied++;
+            // swap="none" => intentionally no-op but still strip directive
+            if (swap !== "none") {
+                const payloadHtml = invEl.innerHTML || "";
+                setHtml(targetEl, payloadHtml, swap);
+                applied++;
 
-            // If observeDom is off, newly injected triggers won't be wired unless we boot manually.
-            if (!Heimdall.config.observeDom) {
-                try {
-                    boot(targetEl);
-                } catch { /* ignore */ }
+                // If observeDom is off, newly injected triggers won't be wired unless we boot manually.
+                if (!Heimdall.config.observeDom) {
+                    try {
+                        boot(targetEl);
+                    } catch { /* ignore */ }
+                }
             }
 
-            // Remove instruction so it won't be part of the normal swap output.
-            oobEl.remove();
+            // Remove directive so it won't be part of the normal swap output.
+            invEl.remove();
         }
 
         return { html: container.innerHTML, applied };
@@ -497,6 +562,9 @@
         if (res.ok) {
             const oob = processOob(html, options && options.sourceEl ? options.sourceEl : null);
             html = oob.html;
+        } else {
+            // Even on errors: strip scripts + invocations so they never render
+            html = sanitizeHtmlNoApply(html);
         }
 
         if (res.ok && targetEl) {
@@ -839,7 +907,7 @@
         // Default debounce for input unless user overrides
         const ms = intAttr(el, "heimdall-debounce", Heimdall.config.inputDebounceMs || 250);
 
-        // For non-text-like inputs (e.g. range), still debounce but allow 0 
+        // For non-text-like inputs (e.g. range), still debounce but allow 0
         if (ms > 0) {
             scheduleDebounced(el, "input", ms, () => {
                 runActionFromElement(el, actionId, "input").catch(() => { /* logged */ });

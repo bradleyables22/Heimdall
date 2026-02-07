@@ -150,22 +150,22 @@ namespace Heimdall.Example.Raw.Rendering.Home
             {
 
                 return new HtmlString($$"""
-                    <template heimdall-oob="true"
+                    <invocation
                               heimdall-content-target="#modalHost"
-                              heimdall-content-swap="inner"></template>
+                              heimdall-content-swap="inner"></invocation>
 
-                    <template heimdall-oob="true"
+                    <invocation
                               heimdall-content-target="{{rowSelector}}"
-                              heimdall-content-swap="outer"></template>
+                              heimdall-content-swap="outer"></invocation>
                     """);
             }
 
             return new HtmlString($$"""
-                    <template heimdall-oob="true"
+                    <invocation
                               heimdall-content-target="#modal-body"
                               heimdall-content-swap="inner">
                         <p class="text-danger text-center">Failed to delete the note. Please try again later.</p>
-                    </template>
+                    </invocation>
                     """);
         }
 
