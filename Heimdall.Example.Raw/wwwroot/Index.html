@@ -1,13 +1,19 @@
 ﻿
 <div class="container">
+
+    <div id="modalHost"></div>
     <div class="row mb-2 mt-4">
         <div class="col-md-3">
-            <div class="btn btn-sm btn-success">
+            <button class="btn btn-sm btn-success"
+                    type="button"
+                    heimdall-content-click="Home.ShowCreateModal"
+                    heimdall-content-target="#modalHost"
+                    heimdall-content-swap="inner">
                 New Note
-            </div>
+            </button>
         </div>
     </div>
-    
+
     <div class="row">
         <div class="col-md-12">
             <div Heimdall-content-load="Home.RenderTable"

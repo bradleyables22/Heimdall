@@ -2,8 +2,9 @@
      heimdall-content-click="MainLayout.Clear"
     heimdall-content-target="#modalHost"
     heimdall-content-swap="inner"
+     onclick="event.stopPropagation()"
      >
-    <div class="modal-dialog modal-dialog-centered" role="document">
+    <div class="modal-dialog modal-dialog-centered" role="document" onclick="event.stopPropagation()">
         <div class="modal-content shadow">
             <div class="modal-header">
                 <h5 class="modal-title">{{ title }}</h5>
@@ -11,12 +12,13 @@
                         heimdall-content-click="MainLayout.Clear"
                         heimdall-content-target="#modalHost"
                         heimdall-content-swap="inner"
+                        onclick="event.stopPropagation()"
                         >
 
                 </button>
             </div>
 
-            <div id="modal-body" class="modal-body">
+            <div id="modal-body" class="modal-body" onclick="event.stopPropagation()">
                 <p class="mb-0">{{ message }}</p>
 
                 {{ if error_html && error_html != "" }}
@@ -26,7 +28,7 @@
                 {{ end }}
             </div>
 
-            <div id="modal-footer" class="modal-footer">
+            <div id="modal-footer" class="modal-footer" onclick="event.stopPropagation()">
                 <button type="button"
                         class="btn btn-secondary"
                         heimdall-content-click="MainLayout.Clear"

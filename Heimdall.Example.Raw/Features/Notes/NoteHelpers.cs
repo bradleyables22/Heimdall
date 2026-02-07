@@ -44,10 +44,6 @@ namespace Heimdall.Example.Raw.Features.Notes
                   <td class="fw-semibold">{{{title}}}</td>
                   <td class="text-muted">{{{body}}}</td>
                   <td class="text-end text-nowrap">
-                    <button class="btn btn-sm btn-outline-primary" type="button">
-                      Edit
-                    </button>
-
                     <button type="button" class="btn btn-sm btn-outline-danger"
                             heimdall-content-click="Home.ShowRemoveModal"
                             heimdall-content-target="#modalHost"

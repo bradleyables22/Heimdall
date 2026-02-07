@@ -1,0 +1,109 @@
+﻿<!-- Backdrop (click-to-close ONLY) -->
+<div class="modal-backdrop fade show"
+     heimdall-content-click="{{ close_action_id }}"
+     heimdall-content-target="#modalHost"
+     heimdall-content-swap="inner">
+</div>
+
+<!-- Modal -->
+<div class="modal fade show d-block"
+     id="{{ modal_id }}"
+     tabindex="-1"
+     aria-hidden="true"
+     role="dialog">
+
+    <div class="modal-dialog modal-dialog-centered {{ if modal_size && modal_size != "" }}{{ modal_size }}{{ end }}"
+         role="document">
+
+        <div class="modal-content shadow">
+            <div class="modal-header">
+                <h5 class="modal-title">{{ title }}</h5>
+
+                <button type="button"
+                        class="btn-close"
+                        aria-label="Close"
+                        heimdall-content-click="{{ close_action_id }}"
+                        heimdall-content-target="#modalHost"
+                        heimdall-content-swap="inner">
+                </button>
+            </div>
+
+            <form id="{{ form_id }}"
+                  class="m-0"
+                  heimdall-content-submit="{{ submit_action_id }}"
+                  heimdall-content-target="#modalHost"
+                  heimdall-content-swap="inner"
+                  heimdall-payload-from="closest-form"
+                  {{ if disable_on_submit }} heimdall-content-disable="true" {{ end }}
+                  {{ if payload_json && payload_json != "" }} heimdall-payload='{{ payload_json }}' {{ end }}>
+
+                <div class="modal-body">
+
+                    {{ if message && message != "" }}
+                    <p class="mb-3">{{ message }}</p>
+                    {{ end }}
+
+                    {{ if error_html && error_html != "" }}
+                    <div class="alert alert-danger mb-3" role="alert">
+                        {{ error_html }}
+                    </div>
+                    {{ end }}
+
+                    {{ if fields && fields.size > 0 }}
+                    {{ for f in fields }}
+                    <div class="mb-3">
+                        <label class="form-label" for="{{ f.id }}">{{ f.label }}</label>
+
+                        {{ if f.type == "textarea" }}
+                        <textarea class="form-control {{ if f.error && f.error != "" }}is-invalid{{ end }}"
+                                  id="{{ f.id }}"
+                                  name="{{ f.name }}"
+                                  rows="{{ if f.rows && f.rows > 0 }}{{ f.rows }}{{ else }}4{{ end }}"
+                                  {{ if f.placeholder && f.placeholder != "" }} placeholder="{{ f.placeholder }}" {{ end }}
+                                  {{ if f.required }} required{{ end }}>{{ f.value }}</textarea>
+                        {{ else }}
+                        <input class="form-control {{ if f.error && f.error != "" }}is-invalid{{ end }}"
+                               id="{{ f.id }}"
+                               name="{{ f.name }}"
+                               type="{{ if f.type && f.type != "" }}{{ f.type }}{{ else }}text{{ end }}"
+                               value="{{ f.value }}"
+                               {{ if f.placeholder && f.placeholder != "" }} placeholder="{{ f.placeholder }}" {{ end }}
+                               {{ if f.required }} required{{ end }} />
+                        {{ end }}
+
+                        {{ if f.hint && f.hint != "" }}
+                        <div class="form-text">{{ f.hint }}</div>
+                        {{ end }}
+
+                        {{ if f.error && f.error != "" }}
+                        <div class="invalid-feedback d-block">{{ f.error }}</div>
+                        {{ end }}
+                    </div>
+                    {{ end }}
+                    {{ end }}
+
+                    {{ if body_html && body_html != "" }}
+                    {{ body_html }}
+                    {{ end }}
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button"
+                            class="btn btn-secondary"
+                            heimdall-content-click="{{ close_action_id }}"
+                            heimdall-content-target="#modalHost"
+                            heimdall-content-swap="inner">
+                        {{ if cancel_text && cancel_text != "" }}{{ cancel_text }}{{ else }}Cancel{{ end }}
+                    </button>
+
+                    <button type="submit"
+                            class="btn {{ if submit_button_class && submit_button_class != "" }}{{ submit_button_class }}{{ else }}btn-primary{{ end }}">
+                        {{ if submit_text && submit_text != "" }}{{ submit_text }}{{ else }}Save{{ end }}
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+</div>

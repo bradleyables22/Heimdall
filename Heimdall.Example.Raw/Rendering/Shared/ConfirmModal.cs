@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Html;
+﻿using Heimdall.Server;
+using Microsoft.AspNetCore.Html;
 using Scriban;
 using Scriban.Runtime;
 
@@ -54,8 +55,14 @@ namespace Heimdall.Example.Raw.Rendering.Shared
 
             return new HtmlString(html);
         }
+        [ContentInvocation]
+        public static IHtmlContent Close()
+        {
+            return new HtmlString(@"<invocation heimdall-content-target=""#modalHost"" heimdall-content-swap=""inner""></invocation>");
+        }
 
     }
+
     public sealed class ConfirmModalModel
     {
         public string ModalId { get; set; } = default!;
