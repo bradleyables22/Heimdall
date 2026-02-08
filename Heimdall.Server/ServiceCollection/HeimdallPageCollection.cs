@@ -11,8 +11,22 @@ using System.Text;
 namespace Heimdall.Server
 {
     public static class HeimdallPageCollection
-    {
-        public static RouteHandlerBuilder MapHeimdallPage(
+	{
+		/// <summary>
+        /// Registers an HTML-first Heimdall page as an endpoint in the ASP.NET routing system.
+        /// </summary>
+        /// <param name="app">
+        /// The endpoint route builder used to register the route.
+        /// </param>
+        /// <param name="configure">
+        /// A configuration delegate that defines how the page is rendered, including
+        /// the route pattern, source HTML files, layout behavior, and dynamic layout components.
+        /// </param>
+        /// <returns>
+        /// A <see cref="RouteHandlerBuilder"/> allowing additional endpoint configuration
+        /// such as authorization, filters, and metadata.
+        /// </returns>
+		public static RouteHandlerBuilder MapHeimdallPage(
             this IEndpointRouteBuilder app,
             Action<HeimdallPageSettings> configure)
         {

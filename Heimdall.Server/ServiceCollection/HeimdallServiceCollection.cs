@@ -7,6 +7,29 @@ namespace Heimdall.Server
 {
 	public static class HeimdallServiceCollection
 	{
+		/// <summary>
+/// Registers Heimdall services and infrastructure with the dependency injection container.
+/// 
+/// This method enables Heimdall's HTML-first rendering pipeline, server actions,
+/// page mapping, and supporting services. It is intended to be called once during
+/// application startup.
+/// </summary>
+/// <param name="services">
+/// The service collection to which Heimdall services will be added.
+/// </param>
+/// <param name="configure">
+/// An optional configuration delegate used to customize Heimdall service behavior,
+/// such as feature flags, defaults, or global settings.
+/// </param>
+/// <param name="assemblies">
+/// Optional assemblies to scan for Heimdall-related components such as server actions,
+/// page definitions, or other attributed types.
+/// If omitted, Heimdall will use its default discovery behavior.
+/// </param>
+/// <returns>
+/// The same <see cref="IServiceCollection"/> instance, allowing fluent chaining
+/// of additional service registrations.
+/// </returns>
 		public static IServiceCollection AddHeimdall( this IServiceCollection services, Action<HeimdallServiceSettings>? configure = null, params Assembly[]? assemblies)
 		{
 			if (configure != null)
@@ -27,7 +50,20 @@ namespace Heimdall.Server
 
 			return services;
 		}
-
+		/// <summary>
+		/// Enables Heimdall within the ASP.NET request pipeline.
+		/// 
+		/// This method finalizes Heimdall setup by registering its middleware,
+		/// endpoints, and supporting infrastructure required to serve Heimdall
+		/// pages and server actions at runtime.
+		/// </summary>
+		/// <param name="app">
+		/// The <see cref="WebApplication"/> instance used to configure the request pipeline.
+		/// </param>
+		/// <returns>
+		/// The same <see cref="WebApplication"/> instance, allowing fluent
+		/// pipeline configuration.
+		/// </returns>
 		public static WebApplication UseHeimdall(this WebApplication app) 
 		{
 			app.MapHeimdallSecurityEndpoints();
