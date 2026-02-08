@@ -5,7 +5,9 @@
     // Heimdall.js (v1)
     // - Content actions: POST /__heimdall/v1/content/actions
     // - CSRF token:      GET  /__heimdall/v1/csrf
-    // - Attributes:
+    // - Bifrost (SSE):   GET  /__heimdall/v1/bifrost?topic=...
+    //
+    // Attributes:
     //   Triggers:
     //   * heimdall-content-load="Action.Id"
     //   * heimdall-content-click="Action.Id"
@@ -36,6 +38,14 @@
     //   * heimdall-visible-once="true|false"         (visible)
     //   * heimdall-scroll-threshold="px"             (scroll)
     //   * heimdall-poll="ms"                         (load polling)
+    //
+    //   Bifrost (SSE):
+    //   * heimdall-sse="job:123"                     (topic only; URL is built for you)
+    //     (alias: heimdall-sse-topic="job:123")
+    //   * heimdall-sse-target="#selector"            (default: element itself)
+    //   * heimdall-sse-swap="inner|outer|beforeend|afterbegin|none" (default: none)
+    //   * heimdall-sse-event="heimdall"              (default: heimdall)
+    //   * heimdall-sse-disable="true|false"          (default: false)
     // ============================================================
 
     // ============================================================
@@ -63,12 +73,13 @@
     //   Any <script> tags in server HTML are stripped and never executed.
     // ============================================================
 
-    const VERSION = "1.2.0";
+    const VERSION = "1.3.0";
     const API_VERSION = 1;
 
     const DEFAULT_BASE_PATH = "/__heimdall";
     const DEFAULT_CONTENT_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/content/actions`;
     const DEFAULT_CSRF_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/csrf`;
+    const DEFAULT_BIFROST_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/bifrost`;
 
     const ACTION_HEADER = "X-Heimdall-Content-Action";
     const CSRF_HEADER = "RequestVerificationToken";
@@ -437,7 +448,7 @@
             try {
                 const res = await fetch(Heimdall.config.endpoints.csrf, {
                     method: "GET",
-                    credentials: Heimdall.config.credentials || "same-origin",
+                    credentials: "same-origin",
                     headers: { "X-Requested-With": "XMLHttpRequest" }
                 });
 
@@ -483,6 +494,10 @@
         return true;
     }
 
+    // ============================================================
+    // Content Actions
+    // ============================================================
+
     async function invoke(actionId, payload, options) {
         return _invokeWithRetry(actionId, payload, options, true);
     }
@@ -493,7 +508,6 @@
         const endpointBase = options.endpoint || Heimdall.config.endpoints.contentActions;
         const targetEl = resolveTarget(options.target, options.fallbackTarget || null);
         const swap = options.swap || "inner";
-        const credentials = options.credentials || Heimdall.config.credentials || "same-origin";
 
         const url = new URL(endpointBase, global.location?.origin || undefined);
         url.searchParams.set("action", actionId);
@@ -534,7 +548,7 @@
                 method: "POST",
                 headers,
                 body,
-                credentials
+                credentials: "same-origin"
             });
         } catch (networkErr) {
             const result = {
@@ -628,14 +642,15 @@
         blur: false,
         hover: false,
         visible: false,
-        scroll: false
+        scroll: false,
+        sse: false
     };
 
     function getCommonOptions(el, triggerName) {
         const target = getAttr(el, "heimdall-content-target") || el;
         const swap = getAttr(el, "heimdall-content-swap") || "inner";
 
-        //  defaults to form payload if caller didn’t specify payload attributes.
+        // defaults to form payload if caller didn’t specify payload attributes.
         let payload = payloadFromElement(el);
         if ((payload == null) && triggerName === "submit") {
             if (el && el.tagName === "FORM") {
@@ -700,6 +715,10 @@
         }
     }
 
+    // ============================================================
+    // Visible trigger (IntersectionObserver)
+    // ============================================================
+
     let _visibleObserver = null;
 
     function ensureVisibleObserver() {
@@ -756,6 +775,10 @@
             }
         }
     }
+
+    // ============================================================
+    // Scroll trigger
+    // ============================================================
 
     const _scrollState = new WeakMap(); // el -> { ticking, lastFire }
 
@@ -820,12 +843,446 @@
         }
     }
 
+    // ============================================================
+    // Polling
+    // ============================================================
+
+    const _pollState = new WeakMap(); // el -> { timerId, inFlight }
+
+    function attachPoll(el) {
+        if (el.__heimdallPollBound)
+            return;
+        el.__heimdallPollBound = true;
+
+        const intervalMs = intAttr(el, "heimdall-poll", 0);
+        if (!intervalMs || intervalMs <= 0)
+            return;
+
+        const actionId = getAttr(el, "heimdall-content-load");
+        if (!actionId) {
+            if (Heimdall.config.debug) {
+                // eslint-disable-next-line no-console
+                console.warn(`[Heimdall ${VERSION}] heimdall-poll set but no heimdall-content-load found.`, el);
+            }
+            return;
+        }
+
+        const state = { timerId: null, inFlight: false };
+        _pollState.set(el, state);
+
+        const tick = async () => {
+            if (!el.isConnected) {
+                stopPoll(el);
+                return;
+            }
+
+            if (document.hidden)
+                return;
+
+            if (state.inFlight)
+                return;
+
+            state.inFlight = true;
+            try {
+                await runActionFromElement(el, actionId, "load", { reason: "poll" });
+            } finally {
+                state.inFlight = false;
+            }
+        };
+
+        const schedule = () => {
+            if (!el.isConnected) {
+                stopPoll(el);
+                return;
+            }
+
+            const st = _pollState.get(el);
+            if (!st)
+                return;
+
+            clearTimeout(st.timerId);
+            st.timerId = setTimeout(async () => {
+                try {
+                    await tick();
+                } catch {
+                    // runActionFromElement already logs
+                } finally {
+                    schedule();
+                }
+            }, intervalMs);
+        };
+
+        schedule();
+    }
+
+    function stopPoll(el) {
+        const st = _pollState.get(el);
+        if (!st)
+            return;
+        clearTimeout(st.timerId);
+        _pollState.delete(el);
+        el.__heimdallPollBound = false;
+    }
+
+    function bootPoll(root) {
+        const scope = root && isElement(root) ? root : document;
+        const nodes = scope.querySelectorAll("[heimdall-poll]");
+        for (const el of nodes) {
+            attachPoll(el);
+        }
+    }
+
+    // ============================================================
+    // Bifrost SSE
+    // ============================================================
+
+    const _sseByElement = new WeakMap(); // el -> state
+    const _sseStates = new Set();        // strong refs for sweeping cleanup
+
+    function getSseTopic(el) {
+        // Preferred: heimdall-sse="topic"
+        const t1 = getAttr(el, "heimdall-sse");
+        if (t1 && t1.trim())
+            return t1.trim();
+
+        // Alias: heimdall-sse-topic="topic"
+        const t2 = getAttr(el, "heimdall-sse-topic");
+        if (t2 && t2.trim())
+            return t2.trim();
+
+        return null;
+    }
+
+    function buildBifrostUrl(topic) {
+        const base = Heimdall.config.endpoints && Heimdall.config.endpoints.bifrost
+            ? Heimdall.config.endpoints.bifrost
+            : DEFAULT_BIFROST_ENDPOINT;
+
+        const url = new URL(base, global.location?.origin || undefined);
+        url.searchParams.set("topic", topic);
+        return url.toString();
+    }
+
+    function closeSseState(state, reason) {
+        if (!state)
+            return;
+
+        state.closed = true;
+
+        try {
+            if (state.es) state.es.close();
+        } catch { /* ignore */ }
+
+        try {
+            _sseByElement.delete(state.el);
+        } catch { /* ignore */ }
+
+        try {
+            _sseStates.delete(state);
+        } catch { /* ignore */ }
+
+        emit("heimdall:sse-close", {
+            topic: state.topic,
+            url: state.url,
+            reason: reason || "closed",
+            el: state.el
+        });
+
+        dbg("sse closed", { topic: state.topic, reason: reason || "closed" });
+    }
+
+    function attachSse(el) {
+        if (!el || !isElement(el))
+            return;
+
+        const disable = truthyAttr(el, "heimdall-sse-disable", false);
+        if (disable) {
+            const prev = _sseByElement.get(el);
+            if (prev) closeSseState(prev, "disabled");
+            return;
+        }
+
+        const topic = getSseTopic(el);
+        if (!topic)
+            return;
+
+        // If already bound with same topic, do nothing.
+        const existing = _sseByElement.get(el);
+        if (existing) {
+            if (existing.topic === topic && !existing.closed)
+                return;
+
+            // Topic changed => reconnect
+            closeSseState(existing, "topic-changed");
+        }
+
+        // Guard: EventSource availability
+        if (!("EventSource" in global)) {
+            if (Heimdall.config.debug) {
+                // eslint-disable-next-line no-console
+                console.warn(`[Heimdall ${VERSION}] EventSource not available in this browser; SSE disabled.`, el);
+            }
+            return;
+        }
+
+        const url = buildBifrostUrl(topic);
+        const eventName = (getAttr(el, "heimdall-sse-event") || Heimdall.config.sseEventName || "heimdall").trim();
+        const target = getAttr(el, "heimdall-sse-target") || el;
+        const swap = (getAttr(el, "heimdall-sse-swap") || Heimdall.config.sseDefaultSwap || "none").toLowerCase();
+
+        const state = {
+            el,
+            topic,
+            url,
+            eventName,
+            target,
+            swap,
+            es: null,
+            closed: false,
+            openedAt: Date.now(),
+            lastMessageAt: 0
+        };
+
+        _sseByElement.set(el, state);
+        _sseStates.add(state);
+
+        let es;
+        try {
+            // Same-origin only. Cookies will flow for same-origin EventSource.
+            es = new EventSource(url);
+        } catch (e) {
+            emit("heimdall:sse-error", { topic, url, el, error: e });
+            if (Heimdall.config.debug) {
+                // eslint-disable-next-line no-console
+                console.error(`[Heimdall ${VERSION}] SSE connect failed`, e);
+            }
+            closeSseState(state, "connect-failed");
+            return;
+        }
+
+        state.es = es;
+
+        es.onopen = () => {
+            state.lastMessageAt = Date.now();
+            emit("heimdall:sse-open", { topic, url, el });
+            dbg("sse open", { topic, url });
+        };
+
+        // Prefer named event
+        es.addEventListener(eventName, (ev) => {
+            if (state.closed)
+                return;
+            if (!state.el || !state.el.isConnected) {
+                closeSseState(state, "disconnected");
+                return;
+            }
+
+            state.lastMessageAt = Date.now();
+
+            const data = (ev && ev.data != null) ? String(ev.data) : "";
+            const targetEl = resolveTarget(state.target, state.el);
+            const swapMode = state.swap || "none";
+
+            // Apply OOB first, then optional main swap.
+            let html = data;
+
+            try {
+                const oob = processOob(html, state.el);
+                html = oob.html;
+            } catch (e) {
+                emit("heimdall:sse-error", { topic: state.topic, url: state.url, el: state.el, error: e });
+                if (Heimdall.config.debug) {
+                    // eslint-disable-next-line no-console
+                    console.error(`[Heimdall ${VERSION}] SSE OOB processing error`, e);
+                }
+                return;
+            }
+
+            // Main swap (optional; defaults to none)
+            if (swapMode !== "none" && targetEl) {
+                const mainTpl = parseHtmlToTemplate(html);
+                stripInvocationsFromFragment(mainTpl.content);
+
+                const { didApply, appliedRoot } = applySwap(targetEl, mainTpl.content, swapMode);
+
+                if (didApply && !Heimdall.config.observeDom) {
+                    try {
+                        boot(appliedRoot || targetEl);
+                    } catch { /* ignore */ }
+                }
+            }
+
+            emit("heimdall:sse-message", {
+                topic: state.topic,
+                url: state.url,
+                id: ev && ev.lastEventId ? String(ev.lastEventId) : null,
+                bytes: data ? data.length : 0,
+                el: state.el
+            });
+        });
+
+        // Fallback: if server uses default "message" events (no "event:" line)
+        es.onmessage = (ev) => {
+            if (eventName !== "message")
+                return; // user asked for named events; ignore generic unless configured
+            // If configured to listen to "message", addEventListener above won't fire; handle it here.
+            // This branch will only run if heimdall-sse-event="message" or config.sseEventName="message".
+        };
+
+        es.onerror = (e) => {
+            // EventSource auto-reconnects. We just surface the event.
+            emit("heimdall:sse-error", { topic, url, el, error: e });
+            if (Heimdall.config.debug) {
+                // eslint-disable-next-line no-console
+                console.warn(`[Heimdall ${VERSION}] SSE error (auto-reconnect expected)`, { topic, url }, e);
+            }
+        };
+    }
+
+    function bootSse(root) {
+        const scope = root && isElement(root) ? root : document;
+
+        // Support either attribute; primary is heimdall-sse
+        const nodes = scope.querySelectorAll("[heimdall-sse],[heimdall-sse-topic]");
+        for (const el of nodes) {
+            attachSse(el);
+        }
+    }
+
+    // Single sweeper to clean up removed nodes / (optional) pause-when-hidden
+    let _sseSweepInstalled = false;
+
+    function installSseSweeper() {
+        if (_sseSweepInstalled)
+            return;
+        _sseSweepInstalled = true;
+
+        const sweepIntervalMs = Heimdall.config.sseSweepIntervalMs || 5000;
+
+        setInterval(() => {
+            for (const state of Array.from(_sseStates)) {
+                if (!state || state.closed)
+                    continue;
+
+                // Element removed => close
+                if (!state.el || !state.el.isConnected) {
+                    closeSseState(state, "disconnected");
+                    continue;
+                }
+
+                // Optional: pause when hidden (close; will reconnect on next boot/visibility)
+                if (Heimdall.config.ssePauseWhenHidden && document.hidden) {
+                    closeSseState(state, "hidden");
+                    continue;
+                }
+
+                // If attribute was toggled off after bind, respect it
+                if (truthyAttr(state.el, "heimdall-sse-disable", false)) {
+                    closeSseState(state, "disabled");
+                    continue;
+                }
+
+                // If topic changed, reconnect on next boot pass (MutationObserver or enhancedload)
+                const currentTopic = getSseTopic(state.el);
+                if (currentTopic && currentTopic !== state.topic) {
+                    closeSseState(state, "topic-changed");
+                    continue;
+                }
+            }
+
+            // If we paused due to hidden, reconnect when visible again by booting document
+            if (!document.hidden && Heimdall.config.ssePauseWhenHidden) {
+                try { bootSse(document); } catch { /* ignore */ }
+            }
+        }, sweepIntervalMs);
+
+        if (Heimdall.config.ssePauseWhenHidden) {
+            document.addEventListener("visibilitychange", () => {
+                if (!document.hidden) {
+                    try { bootSse(document); } catch { /* ignore */ }
+                }
+            });
+        }
+    }
+
+    // Programmatic API (small + stable)
+    function sseConnect(topic, options) {
+        options = options || {};
+        const el = options.element || document.body;
+
+        if (!isElement(el))
+            throw new Error("Heimdall.sse.connect requires an element (options.element).");
+
+        // Temporarily apply config-like overrides via state object (without mutating DOM)
+        const tmp = document.createElement("div");
+        // We won't insert tmp; we use element binding semantics against a real element.
+        // Instead, we allow connect() to use a hidden registry entry.
+        // For simplicity and predictability, we piggyback the element-based system:
+        // set attributes, attach, then restore.
+        const prev = {
+            sse: el.getAttribute("heimdall-sse"),
+            sseTopic: el.getAttribute("heimdall-sse-topic"),
+            tgt: el.getAttribute("heimdall-sse-target"),
+            swp: el.getAttribute("heimdall-sse-swap"),
+            evt: el.getAttribute("heimdall-sse-event"),
+            dis: el.getAttribute("heimdall-sse-disable")
+        };
+
+        try {
+            el.setAttribute("heimdall-sse", String(topic || "").trim());
+            if (options.target) el.setAttribute("heimdall-sse-target", options.target);
+            if (options.swap) el.setAttribute("heimdall-sse-swap", options.swap);
+            if (options.event) el.setAttribute("heimdall-sse-event", options.event);
+            if (options.disable != null) el.setAttribute("heimdall-sse-disable", options.disable ? "true" : "false");
+
+            attachSse(el);
+
+            const state = _sseByElement.get(el);
+            return {
+                close: () => closeSseState(state, "manual"),
+                get topic() { return state ? state.topic : null; },
+                get url() { return state ? state.url : null; }
+            };
+        } finally {
+            // Restore original attributes
+            if (prev.sse == null) el.removeAttribute("heimdall-sse"); else el.setAttribute("heimdall-sse", prev.sse);
+            if (prev.sseTopic == null) el.removeAttribute("heimdall-sse-topic"); else el.setAttribute("heimdall-sse-topic", prev.sseTopic);
+            if (prev.tgt == null) el.removeAttribute("heimdall-sse-target"); else el.setAttribute("heimdall-sse-target", prev.tgt);
+            if (prev.swp == null) el.removeAttribute("heimdall-sse-swap"); else el.setAttribute("heimdall-sse-swap", prev.swp);
+            if (prev.evt == null) el.removeAttribute("heimdall-sse-event"); else el.setAttribute("heimdall-sse-event", prev.evt);
+            if (prev.dis == null) el.removeAttribute("heimdall-sse-disable"); else el.setAttribute("heimdall-sse-disable", prev.dis);
+        }
+    }
+
+    function sseDisconnect(element) {
+        const el = resolveTarget(element, null);
+        if (!el) return;
+
+        const state = _sseByElement.get(el);
+        if (state) closeSseState(state, "manual");
+    }
+
+    function sseDisconnectAll() {
+        for (const state of Array.from(_sseStates)) {
+            closeSseState(state, "manual-all");
+        }
+    }
+
+    // ============================================================
+    // boot()
+    // ============================================================
+
     function boot(root) {
         bootLoads(root);
         bootVisible(root);
         bootScroll(root);
         bootPoll(root);
+        bootSse(root);
     }
+
+    // ============================================================
+    // Delegated handlers
+    // ============================================================
 
     // Click handling (delegated)
     async function handleClick(e) {
@@ -951,6 +1408,28 @@
         await runActionFromElement(form, actionId, "submit");
     }
 
+    function normalizeKeySpec(spec) {
+        return String(spec || "").trim();
+    }
+
+    function matchesKeySpec(e, spec) {
+        const s = normalizeKeySpec(spec);
+        if (!s) return true;
+
+        // Allow numeric (keyCode) for compatibility
+        if (/^\d+$/.test(s)) {
+            const code = parseInt(s, 10);
+            // keyCode is deprecated but still available in many browsers
+            // fall back to which
+            const kc = (e.keyCode != null ? e.keyCode : e.which);
+            return kc === code;
+        }
+
+        // Allow "Enter", "Escape", etc.
+        // e.key matches the actual key name
+        return String(e.key || "").toLowerCase() === s.toLowerCase();
+    }
+
     // Keydown handling (delegated)
     async function handleKeydown(e) {
         const el = e.target && e.target.closest
@@ -1061,91 +1540,9 @@
         }
     }
 
-    // Polling
-    const _pollState = new WeakMap(); // el -> { timerId, inFlight }
-
-    function attachPoll(el) {
-        if (el.__heimdallPollBound)
-            return;
-        el.__heimdallPollBound = true;
-
-        const intervalMs = intAttr(el, "heimdall-poll", 0);
-        if (!intervalMs || intervalMs <= 0)
-            return;
-
-        const actionId = getAttr(el, "heimdall-content-load");
-        if (!actionId) {
-            if (Heimdall.config.debug) {
-                // eslint-disable-next-line no-console
-                console.warn(`[Heimdall ${VERSION}] heimdall-poll set but no heimdall-content-load found.`, el);
-            }
-            return;
-        }
-
-        const state = { timerId: null, inFlight: false };
-        _pollState.set(el, state);
-
-        const tick = async () => {
-            if (!el.isConnected) {
-                stopPoll(el);
-                return;
-            }
-
-            if (document.hidden)
-                return;
-
-            if (state.inFlight)
-                return;
-
-            state.inFlight = true;
-            try {
-                await runActionFromElement(el, actionId, "load", { reason: "poll" });
-            } finally {
-                state.inFlight = false;
-            }
-        };
-
-        const schedule = () => {
-            if (!el.isConnected) {
-                stopPoll(el);
-                return;
-            }
-
-            const st = _pollState.get(el);
-            if (!st)
-                return;
-
-            clearTimeout(st.timerId);
-            st.timerId = setTimeout(async () => {
-                try {
-                    await tick();
-                } catch {
-                    // runActionFromElement already logs
-                } finally {
-                    schedule();
-                }
-            }, intervalMs);
-        };
-
-        schedule();
-    }
-
-    function stopPoll(el) {
-        const st = _pollState.get(el);
-        if (!st)
-            return;
-        clearTimeout(st.timerId);
-        _pollState.delete(el);
-        el.__heimdallPollBound = false;
-    }
-
-    function bootPoll(root) {
-        const scope = root && isElement(root) ? root : document;
-        const nodes = scope.querySelectorAll("[heimdall-poll]");
-        for (const el of nodes) {
-            attachPoll(el);
-        }
-    }
+    // ============================================================
+    // DOM observer
+    // ============================================================
 
     function installObserver() {
         if (!Heimdall.config.observeDom)
@@ -1193,7 +1590,10 @@
         dbg("MutationObserver installed");
     }
 
+    // ============================================================
     // Public API
+    // ============================================================
+
     const Heimdall = {
         version: VERSION,
         apiVersion: API_VERSION,
@@ -1202,6 +1602,12 @@
         boot,
         onReady,
         clearCsrfToken,
+
+        sse: {
+            connect: sseConnect,
+            disconnect: sseDisconnect,
+            disconnectAll: sseDisconnectAll
+        },
 
         // Internal (not promised): for diagnostics
         _observer: null,
@@ -1212,12 +1618,12 @@
 
             endpoints: {
                 contentActions: DEFAULT_CONTENT_ENDPOINT,
-                csrf: DEFAULT_CSRF_ENDPOINT
+                csrf: DEFAULT_CSRF_ENDPOINT,
+                bifrost: DEFAULT_BIFROST_ENDPOINT
             },
 
             observeDom: true,
             debug: false,
-            credentials: "same-origin",
 
             // Trigger tuning
             inputDebounceMs: 250,
@@ -1235,13 +1641,26 @@
             // If null => allow all OOB targets.
             // Recommended for prod: allowlist “outlets”, e.g. ["#modalHost", "#toastHost"].
             // You can also supply a function: (selector, sourceEl) => boolean
-            oobAllowedTargets: null
+            oobAllowedTargets: null,
+
+            // SSE (Bifrost)
+            // Recommended default: push OOB (<invocation>) updates; avoid main swap unless needed.
+            sseDefaultSwap: "none",
+            sseEventName: "heimdall",
+            sseSweepIntervalMs: 5000,
+
+            // If true: when tab is hidden, connections are closed and will reconnect when visible.
+            // Default false for background job progress (you usually want it to keep flowing).
+            ssePauseWhenHidden: false
         }
     };
 
     global.Heimdall = Heimdall;
 
+    // ============================================================
     // Startup
+    // ============================================================
+
     onReady(() => {
         if (!document.__heimdallDelegatesInstalled) {
             document.__heimdallDelegatesInstalled = true;
@@ -1262,6 +1681,7 @@
 
         boot(document);
         installObserver();
+        installSseSweeper();
 
         if (global.Blazor && typeof global.Blazor.addEventListener === "function") {
             global.Blazor.addEventListener("enhancedload", () => {

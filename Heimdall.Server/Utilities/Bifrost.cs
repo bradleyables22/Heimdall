@@ -19,11 +19,8 @@ namespace Heimdall.Server
 		private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, Channel<BifrostMessage>>> _subsByTopic
 			= new(StringComparer.OrdinalIgnoreCase);
 
-		private readonly HtmlEncoder _htmlEncoder;
-
-		public Bifrost(HtmlEncoder htmlEncoder)
+		public Bifrost()
 		{
-			_htmlEncoder = htmlEncoder;
 		}
 
 		// Subscribe returns (subscriptionId, reader, unsubscribe)
@@ -113,7 +110,7 @@ namespace Heimdall.Server
 			if (ttl <= TimeSpan.Zero)
 				ttl = TimeSpan.FromSeconds(5); // sane default
 
-			var html = content.RenderHtml(_htmlEncoder);
+			var html = content.RenderHtml();
 			var now = DateTimeOffset.UtcNow;
 
 			var msg = new BifrostMessage(

@@ -26,14 +26,15 @@ app.MapStaticAssets();
 app.UseStaticFiles();
 
 app.UseHeimdall();
-app.MapHeimdallPage(settings=>
+app.MapHeimdallPage(settings =>
 {
     settings.Pattern = "/";
     settings.PagePath = "index.html";
     settings.LayoutPath = "layouts/mainlayout.html";
     settings.LayoutPlaceholder = "{{page}}";
     settings.LayoutComponents.Add("{{MenuComponent}}", (sp, ctx) => MainLayout.RenderMenu(ctx, "/"));
-}).RequireAuthorization();
+});
+
 app.MapHeimdallPage(settings =>
 {
     settings.Pattern = "/dashboard";
