@@ -1,6 +1,7 @@
 using Heimdall.Example.Raw.Rendering.Layouts;
 using Heimdall.Example.Raw.Utilities.BackgroundServices;
 using Heimdall.Server;
+using Microsoft.AspNetCore.Identity;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -11,6 +12,7 @@ builder.Services.AddSingleton<NoteService>();
 builder.Services.AddHostedService<DummyNoteLoader>();
 
 builder.Services.AddHeimdall(options => options.EnableDetailedErrors = true);
+
 var app = builder.Build();
 
 //app.UseDefaultFiles();
@@ -31,7 +33,7 @@ app.MapHeimdallPage(settings=>
     settings.LayoutPath = "layouts/mainlayout.html";
     settings.LayoutPlaceholder = "{{page}}";
     settings.LayoutComponents.Add("{{MenuComponent}}", (sp, ctx) => MainLayout.RenderMenu(ctx, "/"));
-});
+}).RequireAuthorization();
 app.MapHeimdallPage(settings =>
 {
     settings.Pattern = "/dashboard";
