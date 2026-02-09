@@ -15,26 +15,61 @@
             crossorigin="anonymous"></script>
 
     <script>
-        var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'))
-        var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
-            return new bootstrap.Tooltip(tooltipTriggerEl)
-        })
+        (function () {
+            "use strict";
 
-        var popoverTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="popover"]'))
-        var popoverList = popoverTriggerList.map(function (popoverTriggerEl) {
-            return new bootstrap.Popover(popoverTriggerEl)
-        })
+            function initToast(el) {
+                if (!el || el.__toastInit)
+                    return;
+                el.__toastInit = true;
 
-        var toastElList = [].slice.call(document.querySelectorAll('.toast'))
-        var toastList = toastElList.map(function (toastEl) {
-            return new bootstrap.Toast(toastEl, option)
-        })
+                if (!window.bootstrap || !window.bootstrap.Toast)
+                    return;
+
+                const t = window.bootstrap.Toast.getOrCreateInstance(el);
+                el.addEventListener("hidden.bs.toast", () => el.remove(), { once: true });
+                t.show(); 
+            }
+
+            function initAll() {
+                const host = document.getElementById("heimdallToastHost");
+                if (!host) return;
+                host.querySelectorAll(".toast").forEach(initToast);
+            }
+
+            document.addEventListener("DOMContentLoaded", () => {
+                initAll();
+
+                const host = document.getElementById("heimdallToastHost");
+                if (!host) return;
+
+                new MutationObserver(muts => {
+                    for (const m of muts) {
+                        for (const n of m.addedNodes) {
+                            if (n.nodeType !== 1)
+                                continue;
+                            if (n.matches?.(".toast")) initToast(n);
+                            n.querySelectorAll?.(".toast").forEach(initToast);
+                        }
+                    }
+                }).observe(host, { childList: true, subtree: true });
+            });
+        })();
     </script>
 
 </head>
 
 <body>
-    
+    <div id="heimdallToastHost"
+         class="toast-container position-fixed top-0 end-0 p-3"
+         style="z-index: 1080;"
+         aria-live="polite"
+         aria-atomic="true"
+         heimdall-sse="toasts"
+         heimdall-sse-target="#heimdallToastHost"
+         heimdall-sse-swap="afterbegin">
+    </div>
+
     {{MenuComponent}}
 
     <div class="container-fluid p-2">

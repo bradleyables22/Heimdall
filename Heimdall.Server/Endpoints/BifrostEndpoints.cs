@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Builder;
+﻿using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using System.Text;
 
@@ -8,17 +9,45 @@ namespace Heimdall.Server
 	{
 		internal static WebApplication MapHeimdallBifrostEndpoints(this WebApplication app)
 		{
-			app.MapGet("__heimdall/v1/bifrost", async (HttpContext ctx, Bifrost bifrost) =>
+
+            app.MapGet("__heimdall/v1/bifrost/token", async ( HttpContext ctx, IAntiforgery antiforgery, BifrostSubscribeToken tokenSvc) =>
+            {
+                var topic = ctx.Request.Query["topic"].ToString()?.Trim();
+
+                if (string.IsNullOrWhiteSpace(topic))
+                    return Results.BadRequest("Querystring 'topic' is required.");
+
+                try
+                {
+                    await antiforgery.ValidateRequestAsync(ctx);
+                }
+                catch
+                {
+                    return Results.Unauthorized();
+                }
+
+                var st = tokenSvc.Create(topic, TimeSpan.FromMinutes(2));
+                return Results.Json(new { token = st, expiresInSeconds = 120 });
+
+            }).ExcludeFromDescription();
+
+
+
+            app.MapGet("__heimdall/v1/bifrost", async (HttpContext ctx, Bifrost bifrost, BifrostSubscribeToken tokenSvc) =>
 			{
 				var topic = ctx.Request.Query["topic"].ToString()?.Trim();
 
 				if (string.IsNullOrWhiteSpace(topic))
 					return Results.BadRequest("Querystring 'topic' is required.");
 
-				// SSE headers
-				ctx.Response.Headers.CacheControl = "no-cache";
+				var st = ctx.Request.Query["st"].ToString()?.Trim() ?? string.Empty;
+                if (!tokenSvc.TryValidate(topic, st))
+                    return Results.Unauthorized();
+
+                // SSE headers
+                ctx.Response.Headers.CacheControl = "no-cache";
 				ctx.Response.Headers.Connection = "keep-alive";
-				ctx.Response.Headers["X-Accel-Buffering"] = "no"; // nginx friendliness
+				ctx.Response.Headers["X-Accel-Buffering"] = "no"; 
 				ctx.Response.ContentType = "text/event-stream";
 
 				var abort = ctx.RequestAborted;

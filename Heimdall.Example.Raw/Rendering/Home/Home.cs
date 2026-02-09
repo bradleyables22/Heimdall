@@ -42,7 +42,7 @@ namespace Heimdall.Example.Raw.Rendering.Home
         }
 
         [ContentInvocation]
-        public static async Task<IHtmlContent> RenderRowsAsync(NoteService noteService, OffsetRequest request)
+        public static async Task<IHtmlContent> RenderRowsAsync(NoteService noteService,Bifrost bifrost, OffsetRequest request)
         {
             var notes = await noteService.GetPageAsync(request.Offset, request.Size);
 
@@ -74,6 +74,16 @@ namespace Heimdall.Example.Raw.Rendering.Home
                       Loading…
                   </td>
                 </tr>");
+
+
+
+
+                await bifrost.PublishAsync(
+                    "toasts",
+                    ToastManager.CreateToast("Test", "This is a test"),
+                    TimeSpan.FromSeconds(2)
+                );
+                
 
             return b;
         }

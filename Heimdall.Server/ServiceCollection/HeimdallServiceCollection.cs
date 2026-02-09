@@ -48,9 +48,10 @@ namespace Heimdall.Server
 				return registry;
 			});
 
-			services.AddSingleton<Bifrost>();
-
-			return services;
+            services.AddSingleton<BifrostSubscribeToken>();
+            services.AddSingleton<Bifrost>();
+			
+            return services;
 		}
 
 		/// <summary>
@@ -71,8 +72,8 @@ namespace Heimdall.Server
 		{
 			app.MapHeimdallSecurityEndpoints();
 			app.MapHeimdallContentEndpoints();
-
-			return app;
+			app.MapHeimdallBifrostEndpoints();
+            return app;
 		}
 
 		private static IReadOnlyCollection<Assembly> ResolveAssemblies(Assembly[]? assemblies)

@@ -2,7 +2,6 @@
 using Heimdall.Server.Helpers;
 using Microsoft.AspNetCore.Html;
 using System.Collections.Concurrent;
-using System.Text.Encodings.Web;
 using System.Threading.Channels;
 
 namespace Heimdall.Server
@@ -19,9 +18,6 @@ namespace Heimdall.Server
 		private readonly ConcurrentDictionary<string, ConcurrentDictionary<Guid, Channel<BifrostMessage>>> _subsByTopic
 			= new(StringComparer.OrdinalIgnoreCase);
 
-		public Bifrost()
-		{
-		}
 
 		// Subscribe returns (subscriptionId, reader, unsubscribe)
 		internal (Guid id, ChannelReader<BifrostMessage> reader, Action unsubscribe) Subscribe( string topic, int perSubscriberBuffer = 64)
@@ -48,10 +44,8 @@ namespace Heimdall.Server
 				if (_subsByTopic.TryGetValue(topic, out var b))
 				{
 					if (b.TryRemove(id, out var ch))
-					{
 						ch.Writer.TryComplete();
-					}
-
+					
 					// Cleanup topic bucket if empty
 					if (b.IsEmpty)
 						_subsByTopic.TryRemove(topic, out _);
@@ -74,11 +68,6 @@ namespace Heimdall.Server
 		/// </param>
 		/// <param name="content">
 		/// The HTML content to publish.
-		/// 
-		/// The content may include Heimdall out-of-band (<c>&lt;invocation&gt;</c>)
-		/// directives and will be rendered using the configured
-		/// <see cref="System.Text.Encodings.Web.HtmlEncoder"/>.
-		/// </param>
 		/// <param name="ttl">
 		/// The time-to-live for the published content.
 		/// 
@@ -108,7 +97,7 @@ namespace Heimdall.Server
 				throw new ArgumentNullException(nameof(content));
 
 			if (ttl <= TimeSpan.Zero)
-				ttl = TimeSpan.FromSeconds(5); // sane default
+				ttl = TimeSpan.FromSeconds(5); 
 
 			var html = content.RenderHtml();
 			var now = DateTimeOffset.UtcNow;
