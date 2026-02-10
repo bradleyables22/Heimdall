@@ -5,15 +5,14 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
 
-		<!-- NuGet packing -->
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-		<PackageId>Heimdall.Server</PackageId>
+		<PackageId>HeimdallFramework.Server</PackageId>
 		<Version>0.1.0-alpha.1</Version>
-
+		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>ALPHA RELEASE. Heimdall server-side middleware, endpoints, and action pipeline for HTML-first server invocations.</Description>
-		<PackageTags>heimdall;html;SSR;rpc;aspnetcore;middleware;sse</PackageTags>
+		<PackageTags>heimdall framework;html;SSR;rpc;aspnetcore;middleware;sse</PackageTags>
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -36,6 +35,7 @@
 	<ItemGroup>
 		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
 		<None Include="LICENSE" Pack="true" PackagePath="\" />
+		<None Include="readme.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 </Project>

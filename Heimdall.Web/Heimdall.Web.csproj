@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
 	<PropertyGroup>
 		<TargetFramework>net10.0</TargetFramework>
@@ -6,15 +6,15 @@
 		<ImplicitUsings>enable</ImplicitUsings>
 		<AddRazorSupportForMvc>true</AddRazorSupportForMvc>
 
-		<!-- NuGet packing -->
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
-		<PackageId>Heimdall.Web</PackageId>
+		<PackageId>HeimdallFramework.Web</PackageId>
 		<Version>0.1.0-alpha.1</Version>
-
+		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
-		<Description>ALPHA RELEASE. Heimdall javascript library.</Description>
-		<PackageTags>heimdall;html,SSR;javascript;html;aspnetcore;</PackageTags>
+		<Description>ALPHA RELEASE. Heimdall JavaScript library.</Description>
+		<PackageTags>heimdall framework;html;ssr;javascript;aspnetcore;rcl</PackageTags>
+
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -34,13 +34,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Content Include="wwwroot\**\*.*" />
+		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
+		<None Include="LICENSE" Pack="true" PackagePath="\" />
+		<None Include="readme.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
-	<ItemGroup>
-		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
-	</ItemGroup>
-	<ItemGroup>
-		<None Include="LICENSE" Pack="true" PackagePath="\" />
-	</ItemGroup>
 </Project>
