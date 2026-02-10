@@ -1,11 +1,41 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+
+		<!-- NuGet packing -->
+		<IsPackable>true</IsPackable>
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+		<PackageId>Heimdall.Server</PackageId>
+		<Version>0.1.0-alpha.1</Version>
+
+		<Authors>Bradley Ables</Authors>
+		<Description>ALPHA RELEASE. Heimdall server-side middleware, endpoints, and action pipeline for HTML-first server invocations.</Description>
+		<PackageTags>heimdall;html;SSR;rpc;aspnetcore;middleware;sse</PackageTags>
+		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+		<PackageIcon>heimdall-128.png</PackageIcon>
+
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<Deterministic>true</Deterministic>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<FrameworkReference Include="Microsoft.AspNetCore.App" />
 	</ItemGroup>
+
+
+	<ItemGroup>
+		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
+		<None Include="LICENSE" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
 </Project>

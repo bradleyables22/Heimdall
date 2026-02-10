@@ -1,20 +1,46 @@
 <Project Sdk="Microsoft.NET.Sdk.Razor">
 
-  <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
-  </PropertyGroup>
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<Nullable>enable</Nullable>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<AddRazorSupportForMvc>true</AddRazorSupportForMvc>
 
-  <ItemGroup>
-    <FrameworkReference Include="Microsoft.AspNetCore.App" />
-  </ItemGroup>
+		<!-- NuGet packing -->
+		<IsPackable>true</IsPackable>
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+		<PackageId>Heimdall.Web</PackageId>
+		<Version>0.1.0-alpha.1</Version>
 
-  <ItemGroup>
-    <None Include="wwwroot\heimdall.js" />
-  </ItemGroup>
+		<Authors>Bradley Ables</Authors>
+		<Description>ALPHA RELEASE. Heimdall javascript library.</Description>
+		<PackageTags>heimdall;html,SSR;javascript;html;aspnetcore;</PackageTags>
+		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 
+		<PackageIcon>heimdall-128.png</PackageIcon>
 
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<Deterministic>true</Deterministic>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
 
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Content Include="wwwroot\**\*.*" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
+	</ItemGroup>
+	<ItemGroup>
+		<None Include="LICENSE" Pack="true" PackagePath="\" />
+	</ItemGroup>
 </Project>
