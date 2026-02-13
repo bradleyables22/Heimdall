@@ -1,5 +1,4 @@
 <Solution>
-  <Project Path="Heimdall.Example.Raw/Heimdall.Example.Raw.csproj" Id="26055b38-54ab-41eb-a575-9bb86e258914" />
   <Project Path="Heimdall.Server/Heimdall.Server.csproj" />
   <Project Path="Heimdall.Web/Heimdall.Web.csproj" />
 </Solution>
