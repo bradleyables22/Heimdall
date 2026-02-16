@@ -29,35 +29,35 @@
     // Content Action Attributes
     // ---------------------------------------------------------------------------
     // Triggers:
-    //   • heimdall-content-load="Action.Id"
-    //   • heimdall-content-click="Action.Id"
-    //   • heimdall-content-change="Action.Id"
-    //   • heimdall-content-input="Action.Id"
-    //   • heimdall-content-submit="Action.Id"
-    //   • heimdall-content-keydown="Action.Id"
-    //   • heimdall-content-blur="Action.Id"
-    //   • heimdall-content-hover="Action.Id"
-    //   • heimdall-content-visible="Action.Id"
-    //   • heimdall-content-scroll="Action.Id"
+    //   - heimdall-content-load="Action.Id"
+    //   - heimdall-content-click="Action.Id"
+    //   - heimdall-content-change="Action.Id"
+    //   - heimdall-content-input="Action.Id"
+    //   - heimdall-content-submit="Action.Id"
+    //   - heimdall-content-keydown="Action.Id"
+    //   - heimdall-content-blur="Action.Id"
+    //   - heimdall-content-hover="Action.Id"
+    //   - heimdall-content-visible="Action.Id"
+    //   - heimdall-content-scroll="Action.Id"
     //
     // Common Options:
-    //   • heimdall-content-target="#selector"
-    //   • heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
-    //   • heimdall-content-disable="true|false"
-    //   • heimdall-prevent-default="true|false"
+    //   - heimdall-content-target="#selector"
+    //   - heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
+    //   - heimdall-content-disable="true|false"
+    //   - heimdall-prevent-default="true|false"
     //
     // Payload Options:
-    //   • heimdall-payload='{"json":1}'
-    //   • heimdall-payload-from="closest-form|self|#form|ref:path"
-    //   • heimdall-payload-ref="Path.To.Object"
+    //   - heimdall-payload='{"json":1}'
+    //   - heimdall-payload-from="closest-form|self|#form|ref:path|closest-state[:key]"
+    //   - heimdall-payload-ref="Path.To.Object"
     //
     // Trigger Modifiers:
-    //   • heimdall-debounce="ms"
-    //   • heimdall-key="Enter|Escape|13"
-    //   • heimdall-hover-delay="ms"
-    //   • heimdall-visible-once="true|false"
-    //   • heimdall-scroll-threshold="px"
-    //   • heimdall-poll="ms"
+    //   - heimdall-debounce="ms"
+    //   - heimdall-key="Enter|Escape|13"
+    //   - heimdall-hover-delay="ms"
+    //   - heimdall-visible-once="true|false"
+    //   - heimdall-scroll-threshold="px"
+    //   - heimdall-poll="ms"
     //
     // ---------------------------------------------------------------------------
     // Out-of-Band Updates (<invocation>)
@@ -66,33 +66,33 @@
     // and is never rendered directly into the response output.
     //
     // Required:
-    //   • heimdall-content-target="#selector"
+    //   - heimdall-content-target="#selector"
     //
     // Optional:
-    //   • heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
+    //   - heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
     //
     // Payload:
-    //   • Wrap HTML fragments in <template> to preserve table rows (<tr>, etc)
+    //   - Wrap HTML fragments in <template> to preserve table rows (<tr>, etc)
     //
     // Security:
-    //   • <script> tags are always stripped
-    //   • Invocation targets can be allow-listed via config
+    //   - <script> tags are always stripped
+    //   - Invocation targets can be allow-listed via config
     //
     // ---------------------------------------------------------------------------
     // Bifrost (SSE) Attributes
     // ---------------------------------------------------------------------------
-    //   • heimdall-sse="topic:name"
-    //   • heimdall-sse-topic="topic:name"      (alias)
-    //   • heimdall-sse-target="#selector"       (default: element itself)
-    //   • heimdall-sse-swap="inner|outer|beforeend|afterbegin|none"
-    //   • heimdall-sse-event="heimdall"
-    //   • heimdall-sse-disable="true|false"
+    //   - heimdall-sse="topic:name"
+    //   - heimdall-sse-topic="topic:name"      (alias)
+    //   - heimdall-sse-target="#selector"       (default: element itself)
+    //   - heimdall-sse-swap="inner|outer|beforeend|afterbegin|none"
+    //   - heimdall-sse-event="heimdall"
+    //   - heimdall-sse-disable="true|false"
     //
     // Bifrost notes:
-    //   • Uses EventSource (GET only)
-    //   • Automatically reconnects
-    //   • Designed for same-origin use
-    //   • Subscription access is gated server-side
+    //   - Uses EventSource (GET only)
+    //   - Automatically reconnects
+    //   - Designed for same-origin use
+    //   - Subscription access is gated server-side
     //
     // ---------------------------------------------------------------------------
     // This file is intentionally dependency-free and framework-agnostic.
@@ -207,6 +207,50 @@
         return cur;
     }
 
+    // ============================================================
+    // NEW: Closest "state" payload support
+    // ------------------------------------------------------------
+    // Usage:
+    //   heimdall-payload-from="closest-state"
+    //     -> reads nearest ancestor with data-heimdall-state='{"..."}'
+    //
+    //   heimdall-payload-from="closest-state:filters"
+    //     -> reads nearest ancestor with data-heimdall-state-filters='{"..."}'
+    //
+    // Notes:
+    // - This is purely client-side state (DOM as state store).
+    // - It does not execute scripts; it only JSON-parses attribute values.
+    // ============================================================
+
+    function findClosestStateElement(el, key) {
+        let cur = el;
+        while (cur && cur.nodeType === 1) {
+            if (key) {
+                const attr = `data-heimdall-state-${key}`;
+                if (cur.hasAttribute && cur.hasAttribute(attr))
+                    return cur;
+            } else {
+                if (cur.hasAttribute && cur.hasAttribute("data-heimdall-state"))
+                    return cur;
+            }
+            cur = cur.parentElement;
+        }
+        return null;
+    }
+
+    function readClosestState(el, key) {
+        const host = findClosestStateElement(el, key);
+        if (!host)
+            return null;
+
+        const attr = key ? `data-heimdall-state-${key}` : "data-heimdall-state";
+        const raw = host.getAttribute(attr);
+        if (!raw)
+            return null;
+
+        return safeJsonParse(raw);
+    }
+
     function resolvePayloadRef(el) {
         const ref = getAttr(el, "heimdall-payload-ref");
         if (ref)
@@ -229,7 +273,15 @@
         if (refObj !== undefined)
             return refObj;
 
-        const from = (getAttr(el, "heimdall-payload-from") || "").toLowerCase().trim();
+        const fromRaw = (getAttr(el, "heimdall-payload-from") || "").trim();
+        const from = fromRaw.toLowerCase();
+
+        // NEW: closest-state[:key]
+        if (from === "closest-state" || from.startsWith("closest-state:")) {
+            const key = from.startsWith("closest-state:") ? fromRaw.substring("closest-state:".length).trim() : null;
+            return readClosestState(el, key || null);
+        }
+
         if (!from)
             return null;
 
@@ -246,7 +298,7 @@
             return obj;
         }
 
-        const form = document.querySelector(from);
+        const form = document.querySelector(fromRaw);
         if (form && form.tagName === "FORM") {
             return formDataToObject(new FormData(form));
         }
