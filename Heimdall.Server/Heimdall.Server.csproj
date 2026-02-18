@@ -8,7 +8,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Server</PackageId>
-		<Version>0.1.1-alpha.1</Version>
+		<Version>0.1.2-alpha.1</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>ALPHA RELEASE. Heimdall server-side middleware, endpoints, and action pipeline for HTML-first server invocations.</Description>
