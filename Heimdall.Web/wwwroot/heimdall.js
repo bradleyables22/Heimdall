@@ -4,7 +4,7 @@
     // ============================================================================
     // Heimdall.js
     // ---------------------------------------------------------------------------
-    // Version: 1.0.0
+    // Version: 1.3.2
     // API Version: v1
     // ---------------------------------------------------------------------------
     // Endpoints
@@ -100,7 +100,7 @@
     //
     // ============================================================================
 
-    const VERSION = "1.3.1";
+    const VERSION = "1.3.2";
     const API_VERSION = 1;
 
     const DEFAULT_BASE_PATH = "/__heimdall";
@@ -208,18 +208,14 @@
     }
 
     // ============================================================
-    // NEW: Closest "state" payload support
+    // Closest "state" payload support
     // ------------------------------------------------------------
     // Usage:
     //   heimdall-payload-from="closest-state"
-    //     -> reads nearest ancestor with data-heimdall-state='{"..."}'
+    //     -> reads nearest ancestor (or self) with data-heimdall-state='{"..."}'
     //
     //   heimdall-payload-from="closest-state:filters"
-    //     -> reads nearest ancestor with data-heimdall-state-filters='{"..."}'
-    //
-    // Notes:
-    // - This is purely client-side state (DOM as state store).
-    // - It does not execute scripts; it only JSON-parses attribute values.
+    //     -> reads nearest ancestor (or self) with data-heimdall-state-filters='{"..."}'
     // ============================================================
 
     function findClosestStateElement(el, key) {
@@ -276,9 +272,11 @@
         const fromRaw = (getAttr(el, "heimdall-payload-from") || "").trim();
         const from = fromRaw.toLowerCase();
 
-        // NEW: closest-state[:key]
+        // closest-state[:key]
         if (from === "closest-state" || from.startsWith("closest-state:")) {
-            const key = from.startsWith("closest-state:") ? fromRaw.substring("closest-state:".length).trim() : null;
+            const key = from.startsWith("closest-state:")
+                ? fromRaw.substring("closest-state:".length).trim()
+                : null;
             return readClosestState(el, key || null);
         }
 
@@ -359,8 +357,10 @@
         switch (mode) {
             case "outer": {
                 if (nodes.length === 0) {
+                    // FIX: capture parentElement BEFORE remove() detaches the node.
+                    const parent = targetEl.parentElement;
                     targetEl.remove();
-                    return { didApply: true, appliedRoot: targetEl.parentElement || null };
+                    return { didApply: true, appliedRoot: parent || null };
                 }
                 targetEl.replaceWith(...nodes);
                 return { didApply: true, appliedRoot };
@@ -371,7 +371,7 @@
             case "afterbegin":
                 targetEl.prepend(...nodes);
                 return { didApply: true, appliedRoot };
-            default:
+            default: // "inner"
                 targetEl.replaceChildren(...nodes);
                 return { didApply: true, appliedRoot };
         }
@@ -555,24 +555,22 @@
     }
 
     // ============================================================
-    // Bifrost subscribe token (Option 2)
+    // Bifrost subscribe token
     // ============================================================
 
-    const _bifrostTokenByTopic = new Map();          // topic -> { token, expiresAtMs }
-    const _bifrostTokenPromiseByTopic = new Map();   // topic -> Promise<string>
+    const _bifrostTokenByTopic = new Map();
+    const _bifrostTokenPromiseByTopic = new Map();
 
     async function ensureBifrostSubscribeToken(topic) {
         const t = String(topic || "").trim();
         if (!t)
             throw new Error("Bifrost topic is required.");
 
-        // cached + still valid?
         const cached = _bifrostTokenByTopic.get(t);
         if (cached && cached.token && cached.expiresAtMs && Date.now() < cached.expiresAtMs) {
             return cached.token;
         }
 
-        // in-flight?
         const inflight = _bifrostTokenPromiseByTopic.get(t);
         if (inflight)
             return inflight;
@@ -609,7 +607,6 @@
                 if (!token)
                     throw new Error("Bifrost token response missing token.");
 
-                // cache with a safety margin (expire early)
                 const ttlMs = Math.max(5, parseInt(expiresInSeconds, 10) || 120) * 1000;
                 const expiresAtMs = Date.now() + Math.max(5000, ttlMs - 5000);
 
@@ -690,9 +687,13 @@
             return result;
         }
 
+        // FIX: buffer the response body once so we can both inspect it for CSRF
+        // errors AND use it in the error path, without double-consuming the stream.
+        const rawHtml = await safeText(res);
+        const ms = performance.now() - started;
+
         if (res.status === 400 && shouldRetry) {
-            const text = await safeText(res);
-            const lower = (text || "").toLowerCase();
+            const lower = rawHtml.toLowerCase();
             if (lower.includes("csrf") || lower.includes("antiforgery")) {
                 dbg("csrf validation suspected; retrying once with fresh token");
                 clearCsrfToken();
@@ -700,8 +701,7 @@
             }
         }
 
-        let html = await safeText(res);
-        const ms = performance.now() - started;
+        let html = rawHtml;
 
         if (res.ok) {
             const oob = processOob(html, options && options.sourceEl ? options.sourceEl : null);
@@ -814,11 +814,36 @@
         }
     }
 
-    function bootLoads(root) {
-        const scope = root && isElement(root) ? root : document;
-        const nodes = scope.querySelectorAll("[heimdall-content-load]");
+    // ============================================================
+    // Boot helpers
+    // ------------------------------------------------------------
+    // FIX (all boot functions): querySelectorAll only matches DESCENDANTS.
+    // When a swapped-in element IS the trigger element (not a container),
+    // boot(thatElement) would silently skip it. We now check the root
+    // element itself before descending into its subtree.
+    // ============================================================
 
-        for (const el of nodes) {
+    function matchesTriggerAttr(el, attr) {
+        return isElement(el) && el.hasAttribute(attr);
+    }
+
+    // ============================================================
+    // Load trigger
+    // ============================================================
+
+    function bootLoads(root) {
+        const scope = isElement(root) ? root : document;
+        const candidates = [];
+
+        // Check root itself
+        if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-load"))
+            candidates.push(root);
+
+        // Descendants
+        for (const el of scope.querySelectorAll("[heimdall-content-load]"))
+            candidates.push(el);
+
+        for (const el of candidates) {
             if (el.__heimdallLoaded)
                 continue;
             el.__heimdallLoaded = true;
@@ -876,11 +901,19 @@
     }
 
     function bootVisible(root) {
-        const scope = root && isElement(root) ? root : document;
-        const nodes = scope.querySelectorAll("[heimdall-content-visible]");
-
+        const scope = isElement(root) ? root : document;
         const obs = ensureVisibleObserver();
-        for (const el of nodes) {
+        const candidates = [];
+
+        // FIX: check root element itself — querySelectorAll misses it
+        if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-visible"))
+            candidates.push(root);
+
+        // Descendants
+        for (const el of scope.querySelectorAll("[heimdall-content-visible]"))
+            candidates.push(el);
+
+        for (const el of candidates) {
             if (el.__heimdallVisibleBound)
                 continue;
             el.__heimdallVisibleBound = true;
@@ -952,9 +985,13 @@
     }
 
     function bootScroll(root) {
-        const scope = root && isElement(root) ? root : document;
-        const nodes = scope.querySelectorAll("[heimdall-content-scroll]");
-        for (const el of nodes)
+        const scope = isElement(root) ? root : document;
+
+        // FIX: check root element itself
+        if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-scroll"))
+            attachScroll(root);
+
+        for (const el of scope.querySelectorAll("[heimdall-content-scroll]"))
             attachScroll(el);
     }
 
@@ -975,10 +1012,9 @@
 
         const actionId = getAttr(el, "heimdall-content-load");
         if (!actionId) {
-            if (Heimdall.config.debug) {
-                // eslint-disable-next-line no-console
-                console.warn(`[Heimdall ${VERSION}] heimdall-poll set but no heimdall-content-load found.`, el);
-            }
+            // Always warn — misconfigured polling is a silent no-op and hard to debug.
+            // eslint-disable-next-line no-console
+            console.warn(`[Heimdall ${VERSION}] heimdall-poll set but no heimdall-content-load found on element.`, el);
             return;
         }
 
@@ -1039,9 +1075,13 @@
     }
 
     function bootPoll(root) {
-        const scope = root && isElement(root) ? root : document;
-        const nodes = scope.querySelectorAll("[heimdall-poll]");
-        for (const el of nodes)
+        const scope = isElement(root) ? root : document;
+
+        // FIX: check root element itself
+        if (isElement(root) && matchesTriggerAttr(root, "heimdall-poll"))
+            attachPoll(root);
+
+        for (const el of scope.querySelectorAll("[heimdall-poll]"))
             attachPoll(el);
     }
 
@@ -1188,6 +1228,11 @@
             return;
         }
 
+        // Snapshot all attrs synchronously before any async work.
+        // The programmatic sseConnect() API restores attrs in a finally block
+        // immediately after calling attachSse() — snapshotting here ensures
+        // the async continuation below uses the values that were present at
+        // call time, not whatever the DOM looks like later.
         const eventName = (getAttr(el, "heimdall-sse-event") || Heimdall.config.sseEventName || "heimdall").trim();
         const target = getAttr(el, "heimdall-sse-target") || el;
         const swap = (getAttr(el, "heimdall-sse-swap") || Heimdall.config.sseDefaultSwap || "none").toLowerCase();
@@ -1195,7 +1240,7 @@
         const state = {
             el,
             topic,
-            url: null,           // set after token minted
+            url: null,
             eventName,
             target,
             swap,
@@ -1209,7 +1254,6 @@
         _sseByElement.set(el, state);
         _sseStates.add(state);
 
-        // Token mint + connect (async) so the developer never deals with it.
         (async () => {
             try {
                 const st = await ensureBifrostSubscribeToken(topic);
@@ -1277,9 +1321,13 @@
     }
 
     function bootSse(root) {
-        const scope = root && isElement(root) ? root : document;
-        const nodes = scope.querySelectorAll("[heimdall-sse],[heimdall-sse-topic]");
-        for (const el of nodes)
+        const scope = isElement(root) ? root : document;
+
+        // FIX: check root element itself
+        if (isElement(root) && (matchesTriggerAttr(root, "heimdall-sse") || matchesTriggerAttr(root, "heimdall-sse-topic")))
+            attachSse(root);
+
+        for (const el of scope.querySelectorAll("[heimdall-sse],[heimdall-sse-topic]"))
             attachSse(el);
     }
 
@@ -1339,7 +1387,7 @@
         }
     }
 
-    // Programmatic API
+    // Programmatic SSE API
     function sseConnect(topic, options) {
         options = options || {};
         const el = options.element || document.body;
@@ -1347,6 +1395,9 @@
         if (!isElement(el))
             throw new Error("Heimdall.sse.connect requires an element (options.element).");
 
+        // Snapshot previous attrs so we can restore them after attachSse() reads them.
+        // attachSse() captures all SSE config values synchronously before returning,
+        // so the restore in finally is safe — the async token fetch uses the snapshot.
         const prev = {
             sse: el.getAttribute("heimdall-sse"),
             sseTopic: el.getAttribute("heimdall-sse-topic"),
@@ -1431,7 +1482,7 @@
     }
 
     // ============================================================
-    // Delegated handlers
+    // Delegated event handlers
     // ============================================================
 
     async function handleClick(e) {
@@ -1737,6 +1788,9 @@
             scrollThresholdPx: 120,
             scrollMinIntervalMs: 250,
 
+            // NOTE: visibleRootMargin and visibleThreshold are read once when
+            // the IntersectionObserver is first created. Set these values before
+            // any heimdall-content-visible element is booted (i.e. before DOMContentLoaded).
             visibleRootMargin: "0px",
             visibleThreshold: 0,
 
