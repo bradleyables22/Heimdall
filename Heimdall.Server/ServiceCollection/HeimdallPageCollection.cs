@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace Heimdall.Server
@@ -21,7 +22,7 @@ namespace Heimdall.Server
         /// </summary>
         public static RouteHandlerBuilder MapHeimdallPage(
             this IEndpointRouteBuilder app,
-            string pattern,
+           [StringSyntax("Route")] string pattern,
             Func<IServiceProvider, HttpContext, Task<IHtmlContent>> renderAsync)
         {
             if (app is null)
@@ -68,7 +69,7 @@ namespace Heimdall.Server
         /// </summary>
         public static RouteHandlerBuilder MapHeimdallPage(
             this IEndpointRouteBuilder app,
-            string pattern,
+            [StringSyntax("Route")] string pattern,
             Func<IServiceProvider, HttpContext, IHtmlContent> render)
         {
             if (render is null)
@@ -82,7 +83,7 @@ namespace Heimdall.Server
         /// </summary>
         public static RouteHandlerBuilder MapHeimdallPage(
             this IEndpointRouteBuilder app,
-            string pattern,
+            [StringSyntax("Route")] string pattern,
             Func<HttpContext, Task<IHtmlContent>> renderAsync)
         {
             if (renderAsync is null)
@@ -96,7 +97,7 @@ namespace Heimdall.Server
         /// </summary>
         public static RouteHandlerBuilder MapHeimdallPage(
             this IEndpointRouteBuilder app,
-            string pattern,
+            [StringSyntax("Route")] string pattern,
             Func<HttpContext, IHtmlContent> render)
         {
             if (render is null)
@@ -110,7 +111,7 @@ namespace Heimdall.Server
         /// </summary>
         public static RouteHandlerBuilder MapHeimdallPage(
             this IEndpointRouteBuilder app,
-            string pattern,
+            [StringSyntax("Route")] string pattern,
             Func<IHtmlContent> render)
         {
             if (render is null)

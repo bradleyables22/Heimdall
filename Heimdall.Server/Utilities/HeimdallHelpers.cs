@@ -7,9 +7,6 @@ namespace Heimdall.Server.Helpers
     {
 		internal static string RenderHtml(this IHtmlContent content, HtmlEncoder? encoder = null)
 		{
-			if (content is null) 
-                throw new ArgumentNullException(nameof(content));
-
 			using var sw = new StringWriter();
 			content.WriteTo(sw, encoder ?? HtmlEncoder.Default);
 			return sw.ToString();

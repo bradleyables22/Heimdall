@@ -1,7 +1,7 @@
 ﻿using Heimdall.Server.Helpers;
+using Heimdall.Server.Registry;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -14,10 +14,6 @@ namespace Heimdall.Server
     internal static class ContentEndpoints
     {
         private const string ActionHeader = "X-Heimdall-Content-Action";
-
-        // ---------------------------------------------------------------------
-        // Make JSON binding as accommodating as possible (esp. "stringly" forms)
-        // ---------------------------------------------------------------------
         private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
         private static JsonSerializerOptions CreateJsonOptions()
@@ -27,16 +23,12 @@ namespace Heimdall.Server
                 // Accept "123" into int/decimal/etc
                 NumberHandling = JsonNumberHandling.AllowReadingFromString,
 
-                // Debug/QoL (optional). You can remove these if you want strict JSON only.
+                // Debug/QoL
                 AllowTrailingCommas = true,
                 ReadCommentHandling = JsonCommentHandling.Skip,
-
-                // Web defaults already include:
-                // PropertyNameCaseInsensitive = true,
-                // PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
             };
 
-            // Accept enum values as strings too (camelCase, etc.)
+            // Accept enum values as strings too
             o.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
 
             // Accept "true"/"false"/"1"/"0"/"on"/"off" as bool (and nullable bool)
@@ -46,9 +38,6 @@ namespace Heimdall.Server
             return o;
         }
 
-        // ---------------------------------------------------------------------
-        // Endpoints
-        // ---------------------------------------------------------------------
         internal static WebApplication MapHeimdallContentEndpoints(this WebApplication app)
         {
             app.MapPost("__heimdall/v1/content/actions", async (
@@ -67,29 +56,15 @@ namespace Heimdall.Server
                     return Results.BadRequest($"Missing {ActionHeader} header.");
                 }
 
-                var methodId = values.ToString();
+                var actionId = values.ToString();
 
-                if (!registry.TryGet(methodId, out var method))
-                    return Results.NotFound($"Unknown action '{methodId}'.");
+                if (!registry.TryGet(actionId, out var action))
+                    return Results.NotFound($"Unknown action '{actionId}'.");
 
                 try
                 {
-                    var args = await BindArgumentsAsync(ctx, method);
-
-                    object? invokeResult = method.Invoke(null, args);
-
-                    if (invokeResult is null)
-                        return Results.NoContent();
-
-                    IHtmlContent? raw = invokeResult switch
-                    {
-                        IHtmlContent html => html,
-                        Task<IHtmlContent> taskHtml => await taskHtml,
-                        ValueTask<IHtmlContent> vtaskHtml => await vtaskHtml,
-                        _ => throw new InvalidOperationException(
-                            $"Heimdall action '{methodId}' returned unsupported type '{invokeResult.GetType().FullName}'. " +
-                            "Expected IHtmlContent, Task<IHtmlContent>, or ValueTask<IHtmlContent>.")
-                    };
+                    var args = await BindArgumentsAsync(ctx, action);
+                    var raw = await action.InvokeAsync(args);
 
                     if (raw is null)
                         return Results.NoContent();
@@ -119,133 +94,58 @@ namespace Heimdall.Server
             return app;
         }
 
-        private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, MethodInfo method)
+        private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, ContentActionDescriptor action)
         {
-            var parameters = method.GetParameters();
-            if (parameters.Length == 0)
+            if (action.Parameters.Count == 0)
                 return Array.Empty<object?>();
 
-            var args = new object?[parameters.Length];
-            JsonElement? bodyJson = null;
-            bool bodyRead = false;
-            bool payloadBound = false;
+            var args = new object?[action.Parameters.Count];
+            object? payloadValue = null;
 
-            for (int i = 0; i < parameters.Length; i++)
+            if (action.HasPayload)
             {
-                var p = parameters[i];
-                var pt = p.ParameterType;
+                if (ctx.Request.ContentLength is null or 0)
+                    throw new InvalidOperationException("Request body is empty.");
 
-                if (pt == typeof(HttpContext))
-                {
-                    args[i] = ctx;
-                    continue;
-                }
+                var bodyJson = await JsonSerializer.DeserializeAsync<JsonElement>(
+                    ctx.Request.Body,
+                    JsonOptions);
 
-                if (pt == typeof(CancellationToken))
-                {
-                    args[i] = ctx.RequestAborted;
-                    continue;
-                }
-
-                if (pt == typeof(System.Security.Claims.ClaimsPrincipal))
-                {
-                    args[i] = ctx.User;
-                    continue;
-                }
-
-                var service = ctx.RequestServices.GetService(pt);
-                if (service != null)
-                {
-                    args[i] = service;
-                    continue;
-                }
-
-                if (payloadBound)
-                {
-                    throw new InvalidOperationException(
-                        $"Action '{method.DeclaringType?.Name}.{method.Name}' " +
-                        "has multiple non-DI parameters. Only one payload DTO is allowed.");
-                }
-
-                if (!bodyRead)
-                {
-                    bodyRead = true;
-
-                    if (ctx.Request.ContentLength is null or 0)
-                        throw new InvalidOperationException("Request body is empty.");
-
-                    bodyJson = await JsonSerializer.DeserializeAsync<JsonElement>(
-                        ctx.Request.Body,
-                        JsonOptions);
-                }
-
-                args[i] = bodyJson!.Value.Deserialize(pt, JsonOptions)
+                payloadValue = bodyJson.Deserialize(action.PayloadType!, JsonOptions)
                     ?? throw new InvalidOperationException(
-                        $"Failed to bind payload parameter '{p.Name}'.");
+                        $"Failed to bind payload parameter '{action.PayloadParameter!.Parameter.Name}'.");
+            }
 
-                payloadBound = true;
+            foreach (var parameter in action.Parameters)
+            {
+                args[parameter.Index] = parameter.Kind switch
+                {
+                    ContentActionParameterKind.HttpContext => ctx,
+                    ContentActionParameterKind.CancellationToken => ctx.RequestAborted,
+                    ContentActionParameterKind.ClaimsPrincipal => ctx.User,
+                    ContentActionParameterKind.Service => ResolveRequiredService(ctx, action, parameter),
+                    ContentActionParameterKind.Payload => payloadValue,
+                    _ => throw new InvalidOperationException(
+                        $"Unsupported parameter kind '{parameter.Kind}' in action '{action.ActionId}'.")
+                };
             }
 
             return args;
         }
 
-        // ---------------------------------------------------------------------
-        // Converters
-        // ---------------------------------------------------------------------
-
-        private sealed class BoolFromStringConverter : JsonConverter<bool>
+        private static object ResolveRequiredService(
+            HttpContext ctx,
+            ContentActionDescriptor action,
+            ContentActionParameterDescriptor parameter)
         {
-            public override bool Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-            {
-                if (reader.TokenType == JsonTokenType.True) return true;
-                if (reader.TokenType == JsonTokenType.False) return false;
+            var service = ctx.RequestServices.GetService(parameter.ParameterType);
+            if (service is not null)
+                return service;
 
-                if (reader.TokenType == JsonTokenType.Number)
-                {
-                    // Accept 0/1 as well
-                    if (reader.TryGetInt64(out var n))
-                        return n != 0;
-                }
-
-                if (reader.TokenType == JsonTokenType.String)
-                {
-                    var s = reader.GetString()?.Trim();
-
-                    if (s is null) return false;
-
-                    if (s.Equals("true", StringComparison.OrdinalIgnoreCase)) return true;
-                    if (s.Equals("false", StringComparison.OrdinalIgnoreCase)) return false;
-
-                    if (s.Equals("on", StringComparison.OrdinalIgnoreCase)) return true;
-                    if (s.Equals("off", StringComparison.OrdinalIgnoreCase)) return false;
-
-                    if (s == "1") return true;
-                    if (s == "0") return false;
-                }
-
-                throw new JsonException($"Invalid boolean value (token: {reader.TokenType}).");
-            }
-
-            public override void Write(Utf8JsonWriter writer, bool value, JsonSerializerOptions options)
-                => writer.WriteBooleanValue(value);
-        }
-
-        private sealed class NullableBoolFromStringConverter : JsonConverter<bool?>
-        {
-            public override bool? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-            {
-                if (reader.TokenType == JsonTokenType.Null) return null;
-
-                // Reuse same logic as non-nullable
-                var inner = new BoolFromStringConverter();
-                return inner.Read(ref reader, typeof(bool), options);
-            }
-
-            public override void Write(Utf8JsonWriter writer, bool? value, JsonSerializerOptions options)
-            {
-                if (value is null) writer.WriteNullValue();
-                else writer.WriteBooleanValue(value.Value);
-            }
+            throw new InvalidOperationException(
+                $"Failed to resolve DI service '{parameter.ParameterType.FullName}' " +
+                $"for Heimdall action '{action.Method.DeclaringType?.FullName}.{action.Method.Name}' " +
+                $"parameter '{parameter.Parameter.Name}'.");
         }
     }
 }
