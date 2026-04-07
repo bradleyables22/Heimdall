@@ -6,6 +6,15 @@ using System.Collections.Concurrent;
 
 namespace Heimdall.Server
 {
+    /// <summary>
+    /// Provides a publish-subscribe mechanism for delivering HTML content to clients subscribed to specific topics.
+    /// This class enables broadcasting rendered HTML updates, such as UI fragments, to multiple subscribers in real
+    /// time, typically using Server-Sent Events (SSE).
+    /// </summary>
+    /// <remarks>Bifrost manages topic-based subscriptions and ensures that published content is efficiently
+    /// delivered to all active subscribers of a topic. Content can be published with a time-to-live (TTL) to prevent
+    /// stale updates from being sent to slow or disconnected clients. Instances of this class are thread-safe and
+    /// intended for use in web applications that require real-time UI updates.</remarks>
 	public sealed class Bifrost
 	{
         private readonly ConcurrentDictionary<string, TopicSubscriptions> _subsByTopic
@@ -27,38 +36,17 @@ namespace Heimdall.Server
             );
         }
         /// <summary>
-        /// Publishes HTML content to all active subscribers of the specified topic.
-        /// 
-        /// This method renders the provided <see cref="IHtmlContent"/> and delivers it
-        /// to any clients currently subscribed to the topic, typically via
-        /// Server-Sent Events (SSE).
+        /// Publishes an HTML message to the specified topic with a given time-to-live (TTL) duration.
         /// </summary>
-        /// <param name="topic">
-        /// The topic to which the content will be published.
-        /// Only subscribers listening to this topic will receive the update.
-        /// </param>
-        /// <param name="content">
-        /// The HTML content to publish.
-        /// <param name="ttl">
-        /// The time-to-live for the published content.
-        /// 
-        /// Content that exceeds this age may be dropped for slow or backlogged
-        /// subscribers to avoid delivering stale UI updates.
-        /// </param>
-        /// <param name="ct">
-        /// A cancellation token that can be used to cancel the publish operation
-        /// before the content is delivered.
-        /// </param>
-        /// <returns>
-        /// A <see cref="ValueTask"/> that completes once the content has been
-        /// dispatched to current subscribers.
-        /// </returns>
-        /// <exception cref="ArgumentException">
-        /// Thrown when <paramref name="topic"/> is null or empty.
-        /// </exception>
-        /// <exception cref="ArgumentNullException">
-        /// Thrown when <paramref name="content"/> is null.
-        /// </exception>
+        /// <param name="topic">The topic to which the message will be published. Cannot be null, empty, or consist only of white-space
+        /// characters.</param>
+        /// <param name="content">The HTML content to publish. Cannot be null.</param>
+        /// <param name="ttl">The duration for which the message remains valid. If less than or equal to zero, a default TTL of 5 seconds
+        /// is used.</param>
+        /// <param name="ct">A cancellation token that can be used to cancel the publish operation.</param>
+        /// <returns>A ValueTask that represents the asynchronous publish operation.</returns>
+        /// <exception cref="ArgumentException">Thrown if topic is null, empty, or consists only of white-space characters.</exception>
+        /// <exception cref="ArgumentNullException">Thrown if content is null.</exception>
         public ValueTask PublishAsync(string topic, IHtmlContent content, TimeSpan ttl, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(topic))

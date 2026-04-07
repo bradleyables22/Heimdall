@@ -27,29 +27,95 @@ namespace Heimdall.Server.Rendering
 		/// </remarks>
 		public enum InputType
 		{
-			button,
-			checkbox,
-			color,
-			date,
-			datetime_local,
-			email,
-			file,
-			hidden,
-			image,
-			month,
-			number,
-			password,
-			radio,
-			range,
-			reset,
-			search,
-			submit,
-			tel,
-			text,
-			time,
-			url,
-			week
-		}
+            /// <summary>
+            /// Identifies a button input
+            /// </summary>
+            button,
+            /// <summary>
+            /// Identifies a checkbox input
+            /// </summary>
+            checkbox,
+            /// <summary>
+            /// Identifies a color input
+            /// </summary>
+            color,
+            /// <summary>
+            /// Identifies a date input
+            /// </summary>
+            date,
+            /// <summary>
+            /// Identifies a local date input
+            /// </summary>
+            datetime_local,
+            /// <summary>
+            /// Identifies an email input
+            /// </summary>
+            email,
+            /// <summary>
+            /// Identifies a file input
+            /// </summary>
+            file,
+            /// <summary>
+            /// Identifies a hidden input
+            /// </summary>
+            hidden,
+            /// <summary>
+            /// Identifies a image input
+            /// </summary>
+            image,
+            /// <summary>
+            /// Identifies a month input
+            /// </summary>
+            month,
+            /// <summary>
+            /// Identifies a number input
+            /// </summary>
+            number,
+            /// <summary>
+            /// Identifies a password input
+            /// </summary>
+            password,
+            /// <summary>
+            /// Identifies a radio input
+            /// </summary>
+            radio,
+            /// <summary>
+            /// Identifies a range input
+            /// </summary>
+            range,
+            /// <summary>
+            /// Identifies a reset input
+            /// </summary>
+            reset,
+            /// <summary>
+            /// Identifies a search input
+            /// </summary>
+            search,
+            /// <summary>
+            /// Identifies a submit input
+            /// </summary>
+            submit,
+            /// <summary>
+            /// Identifies a phone input
+            /// </summary>
+            tel,
+            /// <summary>
+            /// Identifies a text input
+            /// </summary>
+            text,
+            /// <summary>
+            /// Identifies a time input
+            /// </summary>
+            time,
+            /// <summary>
+            /// Identifies a url input
+            /// </summary>
+            url,
+            /// <summary>
+            /// Identifies a week input
+            /// </summary>
+            week
+        }
 
 		/// <summary>
 		/// Creates a standard non-void HTML element.
@@ -710,9 +776,27 @@ namespace Heimdall.Server.Rendering
 		}
 
 		/// <summary>
-		/// Represents the rendering behavior of an HTML attribute.
+		/// Represents the kind of attribute being rendered
 		/// </summary>
-		public enum AttrKind { None, Normal, Boolean, Class }
+		public enum AttrKind 
+		{
+            /// <summary>
+            /// None
+            /// </summary>
+            None,
+            /// <summary>
+            /// Normal
+            /// </summary>
+            Normal,
+            /// <summary>
+            /// Boolean 
+            /// </summary>
+            Boolean,
+            /// <summary>
+            /// Class
+            /// </summary>
+            Class
+        }
 
 		/// <summary>
 		/// Represents a lightweight HTML attribute value used during element construction.

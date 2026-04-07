@@ -8,6 +8,15 @@ using System.Text;
 
 namespace Heimdall.Server
 {
+    /// <summary>
+    /// Provides extension methods for mapping Heimdall HTML-first page endpoints to an ASP.NET Core application's
+    /// routing system.
+    /// </summary>
+    /// <remarks>These methods enable the registration of endpoints that render HTML content using
+    /// user-supplied rendering delegates. Multiple overloads are provided to support both synchronous and asynchronous
+    /// rendering, as well as varying levels of dependency injection. Layouts, partials, and page composition are
+    /// handled by user code. Endpoints mapped with these methods are excluded from OpenAPI/Swagger documentation by
+    /// default.</remarks>
     public static class HeimdallPageCollection
     {
         private const string DefaultContentType = "text/html; charset=utf-8";

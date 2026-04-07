@@ -7,8 +7,15 @@ namespace Heimdall.Server
 	[AttributeUsage(AttributeTargets.Method, AllowMultiple = false, Inherited = false)]
 	public sealed class ContentInvocationAttribute : Attribute
 	{
-		public ContentInvocationAttribute() { }
+        /// <summary>
+        /// Empty Constructor. The invocation name can be set via the Invocation property.
+        /// </summary>
+        public ContentInvocationAttribute() { }
 
+		/// <summary>
+		/// Initializes a new instance of the ContentInvocationAttribute class with the specified invocation string.
+		/// </summary>
+		/// <param name="invocation">The invocation string that identifies the content invocation. Cannot be null.</param>
 		public ContentInvocationAttribute(string invocation) => Invocation = invocation;
 
 		/// <summary>

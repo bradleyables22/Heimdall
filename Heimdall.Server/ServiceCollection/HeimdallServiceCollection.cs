@@ -5,6 +5,14 @@ using System.Reflection;
 
 namespace Heimdall.Server
 {
+    /// <summary>
+    /// Provides extension methods for registering and configuring Heimdall services and middleware within an
+    /// application's dependency injection container and ASP.NET request pipeline.
+    /// </summary>
+    /// <remarks>This static class offers a set of fluent extension methods to simplify the integration of
+    /// Heimdall into ASP.NET Core applications. It supports both default and customized service registration, as well
+    /// as flexible assembly discovery for content and endpoint registration. Use these methods during application
+    /// startup to ensure all required Heimdall infrastructure is properly configured.</remarks>
     public static class HeimdallServiceCollection
     {
         /// <summary>
