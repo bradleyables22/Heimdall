@@ -43,7 +43,7 @@ namespace Heimdall.Server.Endpoints
 						title: "Failed to issue CSRF token",
 						statusCode: StatusCodes.Status500InternalServerError);
 				}
-			});
+			}).ExcludeFromDescription();
 
 			return app;
 		}

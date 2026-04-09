@@ -89,7 +89,7 @@ namespace Heimdall.Server
                         title: "Heimdall action invocation failed",
                         statusCode: StatusCodes.Status500InternalServerError);
                 }
-            });
+            }).ExcludeFromDescription();
 
             return app;
         }
