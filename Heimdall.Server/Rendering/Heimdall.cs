@@ -697,6 +697,16 @@ namespace Heimdall.Server.Rendering
 				Html.Tag("template", payload));
 		}
 
+		/// <summary>
+		/// Creates an abort directive that suppresses the main swap for the current response.
+		/// </summary>
+		/// <param name="reason">An optional traceability reason describing why the swap was aborted.</param>
+		/// <returns>An HTML content instance representing the abort directive.</returns>
+		public static IHtmlContent Abort(string? reason = null)
+			=> string.IsNullOrWhiteSpace(reason)
+				? Html.Tag("abort")
+				: Html.Tag("abort", Html.Attr("reason", reason));
+
 		private static string TriggerToAttr(Trigger trigger) => trigger switch
 		{
 			Trigger.Load => Attrs.Load,

@@ -514,6 +514,17 @@ namespace Heimdall.Server.Rendering
 			}
 
 			/// <summary>
+			/// Adds an abort directive to the fragment so the main swap is skipped.
+			/// </summary>
+			/// <param name="reason">An optional traceability reason describing why the swap was aborted.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallFragmentBuilder Abort(string? reason = null)
+			{
+				_f.Add(HeimdallHtml.Abort(reason));
+				return this;
+			}
+
+			/// <summary>
 			/// Adds HTML content directly to the fragment.
 			/// </summary>
 			/// <param name="content">The content to append.</param>

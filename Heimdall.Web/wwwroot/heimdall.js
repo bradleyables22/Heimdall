@@ -60,7 +60,7 @@
     //   - heimdall-poll="ms"
     //
     // ---------------------------------------------------------------------------
-    // Out-of-Band Updates (<invocation>)
+    // Response Directives (<invocation>, <abort>)
     // ---------------------------------------------------------------------------
     // Any <invocation> element returned by the server is treated as an instruction
     // and is never rendered directly into the response output.
@@ -77,6 +77,11 @@
     // Security:
     //   - <script> tags are always stripped
     //   - Invocation targets can be allow-listed via config
+    //
+    // <abort>:
+    //   - Suppresses the main target swap for the current response/payload
+    //   - Still allows <invocation> directives to be processed
+    //   - Optional reason attribute is surfaced through emitted abort events
     //
     // ---------------------------------------------------------------------------
     // Bifrost (SSE) Attributes
@@ -319,9 +324,6 @@
         }
     }
 
-    // ============================================================
-    // DOM-first swapping + HTML parsing
-    // ============================================================
 
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
@@ -385,6 +387,14 @@
             inv.remove();
     }
 
+    function stripAbortsFromFragment(fragment) {
+        if (!fragment || !fragment.querySelectorAll)
+            return;
+        const aborts = fragment.querySelectorAll("abort");
+        for (const abortEl of aborts)
+            abortEl.remove();
+    }
+
     function fragmentToHtml(fragment) {
         const host = document.createElement("div");
         try {
@@ -403,32 +413,48 @@
 
         const hasScript = html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1;
         const hasInv = html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1;
-        if (!hasScript && !hasInv)
+        const hasAbort = html.indexOf("<Abort") !== -1 || html.indexOf("<abort") !== -1;
+        if (!hasScript && !hasInv && !hasAbort)
             return html;
 
         const tpl = parseHtmlToTemplate(html);
         stripInvocationsFromFragment(tpl.content);
+        stripAbortsFromFragment(tpl.content);
         return fragmentToHtml(tpl.content);
     }
 
     function processOob(html, sourceEl) {
         const hasInv = html && (html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1);
         const hasScript = html && (html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1);
+        const hasAbort = html && (html.indexOf("<Abort") !== -1 || html.indexOf("<abort") !== -1);
 
-        if (!hasInv && !hasScript)
-            return { html: html || "", applied: 0 };
+        if (!hasInv && !hasScript && !hasAbort)
+            return { html: html || "", applied: 0, abortSwap: false, abortReason: null };
 
         const tpl = parseHtmlToTemplate(html);
         const fragment = tpl.content;
+        const aborts = fragment.querySelectorAll("abort");
+        let abortSwap = false;
+        let abortReason = null;
+
+        if (aborts && aborts.length > 0) {
+            abortSwap = true;
+            for (const abortEl of Array.from(aborts)) {
+                const reason = getAttr(abortEl, "reason");
+                if (abortReason == null && reason && reason.trim())
+                    abortReason = reason.trim();
+                abortEl.remove();
+            }
+        }
 
         const invocations = fragment.querySelectorAll("invocation");
         if (!invocations || invocations.length === 0) {
-            return { html: fragmentToHtml(fragment), applied: 0 };
+            return { html: fragmentToHtml(fragment), applied: 0, abortSwap, abortReason };
         }
 
         if (!Heimdall.config.oobEnabled) {
             stripInvocationsFromFragment(fragment);
-            return { html: fragmentToHtml(fragment), applied: 0 };
+            return { html: fragmentToHtml(fragment), applied: 0, abortSwap, abortReason };
         }
 
         let applied = 0;
@@ -486,12 +512,8 @@
             invEl.remove();
         }
 
-        return { html: fragmentToHtml(fragment), applied };
+        return { html: fragmentToHtml(fragment), applied, abortSwap, abortReason };
     }
-
-    // ============================================================
-    // CSRF token caching
-    // ============================================================
 
     let csrfToken = null;
     let csrfTokenPromise = null;
@@ -554,9 +576,6 @@
         return true;
     }
 
-    // ============================================================
-    // Bifrost subscribe token
-    // ============================================================
 
     const _bifrostTokenByTopic = new Map();
     const _bifrostTokenPromiseByTopic = new Map();
@@ -621,9 +640,6 @@
         return p;
     }
 
-    // ============================================================
-    // Content Actions
-    // ============================================================
 
     async function invoke(actionId, payload, options) {
         return _invokeWithRetry(actionId, payload, options, true);
@@ -702,17 +718,27 @@
         }
 
         let html = rawHtml;
+        let abortSwap = false;
+        let abortReason = null;
 
         if (res.ok) {
             const oob = processOob(html, options && options.sourceEl ? options.sourceEl : null);
             html = oob.html;
+            abortSwap = !!oob.abortSwap;
+            abortReason = oob.abortReason || null;
         } else {
             html = sanitizeHtmlStringNoApply(html);
         }
 
-        if (res.ok && targetEl) {
+        if (res.ok && abortSwap) {
+            emit("heimdall:abort", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, reason: abortReason });
+            dbg("swap aborted", { actionId, reason: abortReason, target: targetEl });
+        }
+
+        if (res.ok && targetEl && !abortSwap) {
             const mainTpl = parseHtmlToTemplate(html);
             stripInvocationsFromFragment(mainTpl.content);
+            stripAbortsFromFragment(mainTpl.content);
 
             const { didApply, appliedRoot } = applySwap(targetEl, mainTpl.content, swap);
 
@@ -730,7 +756,9 @@
             html: res.ok ? html : null,
             error: res.ok ? null : html,
             response: res,
-            ms
+            ms,
+            abortSwap,
+            abortReason
         };
 
         if (!res.ok) {
@@ -827,10 +855,6 @@
         return isElement(el) && el.hasAttribute(attr);
     }
 
-    // ============================================================
-    // Load trigger
-    // ============================================================
-
     function bootLoads(root) {
         const scope = isElement(root) ? root : document;
         const candidates = [];
@@ -856,9 +880,6 @@
         }
     }
 
-    // ============================================================
-    // Visible trigger
-    // ============================================================
 
     let _visibleObserver = null;
 
@@ -925,9 +946,6 @@
         }
     }
 
-    // ============================================================
-    // Scroll trigger
-    // ============================================================
 
     const _scrollState = new WeakMap();
 
@@ -995,9 +1013,6 @@
             attachScroll(el);
     }
 
-    // ============================================================
-    // Polling
-    // ============================================================
 
     const _pollState = new WeakMap();
 
@@ -1085,9 +1100,6 @@
             attachPoll(el);
     }
 
-    // ============================================================
-    // Bifrost SSE
-    // ============================================================
 
     const _sseByElement = new WeakMap();
     const _sseStates = new Set();
@@ -1162,10 +1174,14 @@
         const swapMode = state.swap || "none";
 
         let html = data;
+        let abortSwap = false;
+        let abortReason = null;
 
         try {
             const oob = processOob(html, state.el);
             html = oob.html;
+            abortSwap = !!oob.abortSwap;
+            abortReason = oob.abortReason || null;
         } catch (e) {
             emit("heimdall:sse-error", { topic: state.topic, url: state.url, el: state.el, error: e });
             if (Heimdall.config.debug) {
@@ -1175,9 +1191,15 @@
             return;
         }
 
-        if (swapMode !== "none" && targetEl) {
+        if (abortSwap) {
+            emit("heimdall:sse-abort", { topic: state.topic, url: state.url, el: state.el, target: targetEl, swap: swapMode, reason: abortReason });
+            dbg("sse swap aborted", { topic: state.topic, reason: abortReason, target: targetEl });
+        }
+
+        if (!abortSwap && swapMode !== "none" && targetEl) {
             const mainTpl = parseHtmlToTemplate(html);
             stripInvocationsFromFragment(mainTpl.content);
+            stripAbortsFromFragment(mainTpl.content);
 
             const { didApply, appliedRoot } = applySwap(targetEl, mainTpl.content, swapMode);
 
@@ -1323,7 +1345,6 @@
     function bootSse(root) {
         const scope = isElement(root) ? root : document;
 
-        // FIX: check root element itself
         if (isElement(root) && (matchesTriggerAttr(root, "heimdall-sse") || matchesTriggerAttr(root, "heimdall-sse-topic")))
             attachSse(root);
 
@@ -1469,9 +1490,6 @@
         }
     }
 
-    // ============================================================
-    // boot()
-    // ============================================================
 
     function boot(root) {
         bootLoads(root);
@@ -1481,9 +1499,6 @@
         bootSse(root);
     }
 
-    // ============================================================
-    // Delegated event handlers
-    // ============================================================
 
     async function handleClick(e) {
         const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-click]") : null;
@@ -1702,9 +1717,6 @@
         }
     }
 
-    // ============================================================
-    // DOM observer
-    // ============================================================
 
     function installObserver() {
         if (!Heimdall.config.observeDom)
@@ -1747,10 +1759,6 @@
 
         dbg("MutationObserver installed");
     }
-
-    // ============================================================
-    // Public API
-    // ============================================================
 
     const Heimdall = {
         version: VERSION,
@@ -1805,10 +1813,6 @@
     };
 
     global.Heimdall = Heimdall;
-
-    // ============================================================
-    // Startup
-    // ============================================================
 
     onReady(() => {
         if (!document.__heimdallDelegatesInstalled) {
