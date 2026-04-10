@@ -20,18 +20,12 @@ namespace Heimdall.Server
         {
             var o = new JsonSerializerOptions(JsonSerializerDefaults.Web)
             {
-                // Accept "123" into int/decimal/etc
                 NumberHandling = JsonNumberHandling.AllowReadingFromString,
-
-                // Debug/QoL
                 AllowTrailingCommas = true,
                 ReadCommentHandling = JsonCommentHandling.Skip,
             };
 
-            // Accept enum values as strings too
             o.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-
-            // Accept "true"/"false"/"1"/"0"/"on"/"off" as bool (and nullable bool)
             o.Converters.Add(new BoolFromStringConverter());
             o.Converters.Add(new NullableBoolFromStringConverter());
 
@@ -111,9 +105,7 @@ namespace Heimdall.Server
                     ctx.Request.Body,
                     JsonOptions);
 
-                payloadValue = bodyJson.Deserialize(action.PayloadType!, JsonOptions)
-                    ?? throw new InvalidOperationException(
-                        $"Failed to bind payload parameter '{action.PayloadParameter!.Parameter.Name}'.");
+                payloadValue = BindPayloadValue(bodyJson, action);
             }
 
             foreach (var parameter in action.Parameters)
@@ -131,6 +123,61 @@ namespace Heimdall.Server
             }
 
             return args;
+        }
+
+        private static object? BindPayloadValue(JsonElement bodyJson, ContentActionDescriptor action)
+        {
+            var payloadParameter = action.PayloadParameter!.Parameter;
+            var payloadType = action.PayloadType!;
+
+            if (bodyJson.ValueKind == JsonValueKind.Object)
+            {
+                if (bodyJson.TryGetProperty(payloadParameter.Name!, out var propertyJson))
+                {
+                    return DeserializeJsonValue(propertyJson, payloadType, payloadParameter);
+                }
+
+                if (payloadParameter.HasDefaultValue)
+                    return payloadParameter.DefaultValue;
+
+                return GetDefaultValue(payloadType);
+            }
+
+            if (bodyJson.ValueKind == JsonValueKind.Null)
+            {
+                if (payloadParameter.HasDefaultValue)
+                    return payloadParameter.DefaultValue;
+
+                return GetDefaultValue(payloadType);
+            }
+
+            return DeserializeJsonValue(bodyJson, payloadType, payloadParameter);
+        }
+
+        private static object? DeserializeJsonValue(
+            JsonElement json,
+            Type targetType,
+            ParameterInfo parameter)
+        {
+            var value = json.Deserialize(targetType, JsonOptions);
+
+            if (value is not null)
+                return value;
+
+            if (parameter.HasDefaultValue)
+                return parameter.DefaultValue;
+
+            return GetDefaultValue(targetType);
+        }
+
+        private static object? GetDefaultValue(Type type)
+        {
+            if (!type.IsValueType)
+                return null;
+
+            return Nullable.GetUnderlyingType(type) is not null
+                ? null
+                : Activator.CreateInstance(type);
         }
 
         private static object ResolveRequiredService(
