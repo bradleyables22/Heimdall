@@ -20,12 +20,18 @@ namespace Heimdall.Server
         {
             var o = new JsonSerializerOptions(JsonSerializerDefaults.Web)
             {
+                // Accept "123" into int/decimal/etc
                 NumberHandling = JsonNumberHandling.AllowReadingFromString,
+
+                // Debug/QoL
                 AllowTrailingCommas = true,
                 ReadCommentHandling = JsonCommentHandling.Skip,
             };
 
+            // Accept enum values as strings too
             o.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
+
+            // Accept "true"/"false"/"1"/"0"/"on"/"off" as bool (and nullable bool)
             o.Converters.Add(new BoolFromStringConverter());
             o.Converters.Add(new NullableBoolFromStringConverter());
 
@@ -94,19 +100,8 @@ namespace Heimdall.Server
                 return Array.Empty<object?>();
 
             var args = new object?[action.Parameters.Count];
-            object? payloadValue = null;
-
-            if (action.HasPayload)
-            {
-                if (ctx.Request.ContentLength is null or 0)
-                    throw new InvalidOperationException("Request body is empty.");
-
-                var bodyJson = await JsonSerializer.DeserializeAsync<JsonElement>(
-                    ctx.Request.Body,
-                    JsonOptions);
-
-                payloadValue = BindPayloadValue(bodyJson, action);
-            }
+            JsonElement? bodyJson = null;
+            bool bodyRead = false;
 
             foreach (var parameter in action.Parameters)
             {
@@ -116,45 +111,65 @@ namespace Heimdall.Server
                     ContentActionParameterKind.CancellationToken => ctx.RequestAborted,
                     ContentActionParameterKind.ClaimsPrincipal => ctx.User,
                     ContentActionParameterKind.Service => ResolveRequiredService(ctx, action, parameter),
-                    ContentActionParameterKind.Payload => payloadValue,
+                    ContentActionParameterKind.Payload => await BindPayloadParameterAsync(ctx, parameter),
                     _ => throw new InvalidOperationException(
                         $"Unsupported parameter kind '{parameter.Kind}' in action '{action.ActionId}'.")
                 };
             }
 
             return args;
-        }
 
-        private static object? BindPayloadValue(JsonElement bodyJson, ContentActionDescriptor action)
-        {
-            var payloadParameter = action.PayloadParameter!.Parameter;
-            var payloadType = action.PayloadType!;
-
-            if (bodyJson.ValueKind == JsonValueKind.Object)
+            async Task<object?> BindPayloadParameterAsync(
+                HttpContext httpContext,
+                ContentActionParameterDescriptor parameter)
             {
-                if (bodyJson.TryGetProperty(payloadParameter.Name!, out var propertyJson))
+                if (!bodyRead)
                 {
-                    return DeserializeJsonValue(propertyJson, payloadType, payloadParameter);
+                    bodyRead = true;
+
+                    if (httpContext.Request.ContentLength is null or 0)
+                        throw new InvalidOperationException("Request body is empty.");
+
+                    bodyJson = await JsonSerializer.DeserializeAsync<JsonElement>(
+                        httpContext.Request.Body,
+                        JsonOptions);
                 }
 
-                if (payloadParameter.HasDefaultValue)
-                    return payloadParameter.DefaultValue;
-
-                return GetDefaultValue(payloadType);
+                return BindPayloadValue(bodyJson!.Value, parameter.Parameter);
             }
-
-            if (bodyJson.ValueKind == JsonValueKind.Null)
-            {
-                if (payloadParameter.HasDefaultValue)
-                    return payloadParameter.DefaultValue;
-
-                return GetDefaultValue(payloadType);
-            }
-
-            return DeserializeJsonValue(bodyJson, payloadType, payloadParameter);
         }
 
-        private static object? DeserializeJsonValue(
+        private static object? BindPayloadValue(JsonElement bodyJson, ParameterInfo parameter)
+        {
+            var targetType = parameter.ParameterType;
+
+            if (bodyJson.ValueKind == JsonValueKind.Null)
+                return GetMissingValue(parameter, targetType);
+
+            if (bodyJson.ValueKind != JsonValueKind.Object)
+                return DeserializeRequired(bodyJson, targetType, parameter);
+
+            if (IsSimplePayloadType(targetType))
+            {
+                if (TryGetPropertyCaseInsensitive(bodyJson, parameter.Name!, out var propertyJson))
+                    return DeserializeRequired(propertyJson, targetType, parameter);
+
+                return GetMissingValue(parameter, targetType);
+            }
+
+            if (TryGetPropertyCaseInsensitive(bodyJson, parameter.Name!, out var nestedPropertyJson) &&
+                nestedPropertyJson.ValueKind == JsonValueKind.Object)
+            {
+                return DeserializeRequired(nestedPropertyJson, targetType, parameter);
+            }
+
+            if (bodyJson.EnumerateObject().MoveNext())
+                return DeserializeRequired(bodyJson, targetType, parameter);
+
+            return GetMissingValue(parameter, targetType);
+        }
+
+        private static object? DeserializeRequired(
             JsonElement json,
             Type targetType,
             ParameterInfo parameter)
@@ -164,20 +179,73 @@ namespace Heimdall.Server
             if (value is not null)
                 return value;
 
+            if (AllowsNull(targetType))
+                return null;
+
             if (parameter.HasDefaultValue)
                 return parameter.DefaultValue;
 
-            return GetDefaultValue(targetType);
+            throw new InvalidOperationException(
+                $"Failed to bind payload parameter '{parameter.Name}'.");
         }
 
-        private static object? GetDefaultValue(Type type)
+        private static object? GetMissingValue(ParameterInfo parameter, Type targetType)
         {
-            if (!type.IsValueType)
+            if (parameter.HasDefaultValue)
+                return parameter.DefaultValue;
+
+            if (AllowsNull(targetType))
                 return null;
 
-            return Nullable.GetUnderlyingType(type) is not null
-                ? null
-                : Activator.CreateInstance(type);
+            throw new InvalidOperationException(
+                $"Missing required payload value for parameter '{parameter.Name}'.");
+        }
+
+        private static bool AllowsNull(Type type)
+        {
+            if (!type.IsValueType)
+                return true;
+
+            return Nullable.GetUnderlyingType(type) is not null;
+        }
+
+        private static bool IsSimplePayloadType(Type type)
+        {
+            var underlying = Nullable.GetUnderlyingType(type) ?? type;
+
+            if (underlying.IsEnum)
+                return true;
+
+            if (underlying.IsPrimitive)
+                return true;
+
+            return underlying == typeof(string)
+                || underlying == typeof(decimal)
+                || underlying == typeof(Guid)
+                || underlying == typeof(DateTime)
+                || underlying == typeof(DateTimeOffset)
+                || underlying == typeof(TimeSpan);
+        }
+
+        private static bool TryGetPropertyCaseInsensitive(
+            JsonElement jsonObject,
+            string propertyName,
+            out JsonElement value)
+        {
+            if (jsonObject.TryGetProperty(propertyName, out value))
+                return true;
+
+            foreach (var property in jsonObject.EnumerateObject())
+            {
+                if (string.Equals(property.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+                {
+                    value = property.Value;
+                    return true;
+                }
+            }
+
+            value = default;
+            return false;
         }
 
         private static object ResolveRequiredService(
