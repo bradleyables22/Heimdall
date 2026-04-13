@@ -523,13 +523,24 @@ namespace Heimdall.Server.Rendering
 				_f.Add(HeimdallHtml.Abort(reason));
 				return this;
 			}
+            /// <summary>
+            /// Adds a redirect directive to the fragment so the client will navigate to a new location.
+            /// </summary>
+            /// <param name="location"></param>
+            /// <returns></returns>
+            public HeimdallFragmentBuilder Redirect(string location )
+            {
+                _f.Add(HeimdallHtml.Redirect(location));
+                return this;
+            }
 
-			/// <summary>
-			/// Adds HTML content directly to the fragment.
-			/// </summary>
-			/// <param name="content">The content to append.</param>
-			/// <returns>The current builder instance.</returns>
-			public HeimdallFragmentBuilder Add(IHtmlContent content)
+
+            /// <summary>
+            /// Adds HTML content directly to the fragment.
+            /// </summary>
+            /// <param name="content">The content to append.</param>
+            /// <returns>The current builder instance.</returns>
+            public HeimdallFragmentBuilder Add(IHtmlContent content)
 			{
 				_f.Add(content);
 				return this;

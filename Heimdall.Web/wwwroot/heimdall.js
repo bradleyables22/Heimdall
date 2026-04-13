@@ -12,7 +12,7 @@
     // Content Actions:
     //   POST /__heimdall/v1/content/actions
     //     - Executes a server action
-    //     - Returns HTML (with optional <invocation> directives)
+    //     - Returns HTML (with optional <invocation>, <abort>, or <redirect> directives)
     //
     // CSRF Token:
     //   GET  /__heimdall/v1/csrf
@@ -22,7 +22,7 @@
     // Bifrost (Server-Sent Events):
     //   GET  /__heimdall/v1/bifrost?topic=...
     //     - Subscribes to a server topic
-    //     - Streams HTML payloads and/or <invocation> directives
+    //     - Streams HTML payloads and/or <invocation>, <abort>, or <redirect> directives
     //     - Protected via short-lived subscribe token (minted with CSRF)
     //
     // ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@
     //   - heimdall-poll="ms"
     //
     // ---------------------------------------------------------------------------
-    // Response Directives (<invocation>, <abort>)
+    // Response Directives (<invocation>, <abort>, <redirect>)
     // ---------------------------------------------------------------------------
     // Any <invocation> element returned by the server is treated as an instruction
     // and is never rendered directly into the response output.
@@ -82,6 +82,12 @@
     //   - Suppresses the main target swap for the current response/payload
     //   - Still allows <invocation> directives to be processed
     //   - Optional reason attribute is surfaced through emitted abort events
+    //
+    // <redirect>:
+    //   - Forces immediate browser navigation
+    //   - Acts as a hard-stop directive
+    //   - Prevents OOB processing, abort handling, and main target swap
+    //   - First redirect wins
     //
     // ---------------------------------------------------------------------------
     // Bifrost (SSE) Attributes
@@ -324,7 +330,6 @@
         }
     }
 
-
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -395,6 +400,33 @@
             abortEl.remove();
     }
 
+    function stripRedirectsFromFragment(fragment) {
+        if (!fragment || !fragment.querySelectorAll)
+            return;
+        const redirects = fragment.querySelectorAll("redirect");
+        for (const redirectEl of redirects)
+            redirectEl.remove();
+    }
+
+    function extractRedirectFromFragment(fragment) {
+        if (!fragment || !fragment.querySelector)
+            return null;
+
+        const redirectEl = fragment.querySelector("redirect");
+        if (!redirectEl)
+            return null;
+
+        const urlAttr = getAttr(redirectEl, "url");
+        if (urlAttr && urlAttr.trim())
+            return { url: urlAttr.trim() };
+
+        const textUrl = (redirectEl.textContent || "").trim();
+        if (textUrl)
+            return { url: textUrl };
+
+        return null;
+    }
+
     function fragmentToHtml(fragment) {
         const host = document.createElement("div");
         try {
@@ -414,12 +446,15 @@
         const hasScript = html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1;
         const hasInv = html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1;
         const hasAbort = html.indexOf("<Abort") !== -1 || html.indexOf("<abort") !== -1;
-        if (!hasScript && !hasInv && !hasAbort)
+        const hasRedirect = html.indexOf("<Redirect") !== -1 || html.indexOf("<redirect") !== -1;
+
+        if (!hasScript && !hasInv && !hasAbort && !hasRedirect)
             return html;
 
         const tpl = parseHtmlToTemplate(html);
         stripInvocationsFromFragment(tpl.content);
         stripAbortsFromFragment(tpl.content);
+        stripRedirectsFromFragment(tpl.content);
         return fragmentToHtml(tpl.content);
     }
 
@@ -427,12 +462,33 @@
         const hasInv = html && (html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1);
         const hasScript = html && (html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1);
         const hasAbort = html && (html.indexOf("<Abort") !== -1 || html.indexOf("<abort") !== -1);
+        const hasRedirect = html && (html.indexOf("<Redirect") !== -1 || html.indexOf("<redirect") !== -1);
 
-        if (!hasInv && !hasScript && !hasAbort)
-            return { html: html || "", applied: 0, abortSwap: false, abortReason: null };
+        if (!hasInv && !hasScript && !hasAbort && !hasRedirect) {
+            return {
+                html: html || "",
+                applied: 0,
+                abortSwap: false,
+                abortReason: null,
+                redirectUrl: null
+            };
+        }
 
         const tpl = parseHtmlToTemplate(html);
         const fragment = tpl.content;
+
+        const redirect = extractRedirectFromFragment(fragment);
+        if (redirect && redirect.url) {
+            stripRedirectsFromFragment(fragment);
+            return {
+                html: fragmentToHtml(fragment),
+                applied: 0,
+                abortSwap: true,
+                abortReason: "redirect",
+                redirectUrl: redirect.url
+            };
+        }
+
         const aborts = fragment.querySelectorAll("abort");
         let abortSwap = false;
         let abortReason = null;
@@ -449,12 +505,24 @@
 
         const invocations = fragment.querySelectorAll("invocation");
         if (!invocations || invocations.length === 0) {
-            return { html: fragmentToHtml(fragment), applied: 0, abortSwap, abortReason };
+            return {
+                html: fragmentToHtml(fragment),
+                applied: 0,
+                abortSwap,
+                abortReason,
+                redirectUrl: null
+            };
         }
 
         if (!Heimdall.config.oobEnabled) {
             stripInvocationsFromFragment(fragment);
-            return { html: fragmentToHtml(fragment), applied: 0, abortSwap, abortReason };
+            return {
+                html: fragmentToHtml(fragment),
+                applied: 0,
+                abortSwap,
+                abortReason,
+                redirectUrl: null
+            };
         }
 
         let applied = 0;
@@ -512,7 +580,13 @@
             invEl.remove();
         }
 
-        return { html: fragmentToHtml(fragment), applied, abortSwap, abortReason };
+        return {
+            html: fragmentToHtml(fragment),
+            applied,
+            abortSwap,
+            abortReason,
+            redirectUrl: null
+        };
     }
 
     let csrfToken = null;
@@ -576,7 +650,6 @@
         return true;
     }
 
-
     const _bifrostTokenByTopic = new Map();
     const _bifrostTokenPromiseByTopic = new Map();
 
@@ -639,7 +712,6 @@
         _bifrostTokenPromiseByTopic.set(t, p);
         return p;
     }
-
 
     async function invoke(actionId, payload, options) {
         return _invokeWithRetry(actionId, payload, options, true);
@@ -720,14 +792,43 @@
         let html = rawHtml;
         let abortSwap = false;
         let abortReason = null;
+        let redirectUrl = null;
 
         if (res.ok) {
             const oob = processOob(html, options && options.sourceEl ? options.sourceEl : null);
             html = oob.html;
             abortSwap = !!oob.abortSwap;
             abortReason = oob.abortReason || null;
+            redirectUrl = oob.redirectUrl || null;
         } else {
             html = sanitizeHtmlStringNoApply(html);
+        }
+
+        if (res.ok && redirectUrl) {
+            emit("heimdall:redirect", {
+                actionId,
+                payload,
+                target: targetEl,
+                swap,
+                endpoint: url.toString(),
+                status: res.status,
+                url: redirectUrl
+            });
+
+            dbg("redirecting", { actionId, url: redirectUrl });
+            global.location.href = redirectUrl;
+
+            return {
+                ok: true,
+                status: res.status,
+                html: null,
+                error: null,
+                response: res,
+                ms,
+                abortSwap: true,
+                abortReason: "redirect",
+                redirectUrl
+            };
         }
 
         if (res.ok && abortSwap) {
@@ -739,6 +840,7 @@
             const mainTpl = parseHtmlToTemplate(html);
             stripInvocationsFromFragment(mainTpl.content);
             stripAbortsFromFragment(mainTpl.content);
+            stripRedirectsFromFragment(mainTpl.content);
 
             const { didApply, appliedRoot } = applySwap(targetEl, mainTpl.content, swap);
 
@@ -758,13 +860,14 @@
             response: res,
             ms,
             abortSwap,
-            abortReason
+            abortReason,
+            redirectUrl
         };
 
         if (!res.ok) {
             emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: res.status, body: html });
         } else {
-            emit("heimdall:after", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, ms, html });
+            emit("heimdall:after", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, ms, html, redirectUrl });
         }
 
         if (typeof options.onSuccess === "function" && res.ok)
@@ -880,7 +983,6 @@
         }
     }
 
-
     let _visibleObserver = null;
 
     function ensureVisibleObserver() {
@@ -945,7 +1047,6 @@
             catch { /* ignore */ }
         }
     }
-
 
     const _scrollState = new WeakMap();
 
@@ -1012,7 +1113,6 @@
         for (const el of scope.querySelectorAll("[heimdall-content-scroll]"))
             attachScroll(el);
     }
-
 
     const _pollState = new WeakMap();
 
@@ -1100,7 +1200,6 @@
             attachPoll(el);
     }
 
-
     const _sseByElement = new WeakMap();
     const _sseStates = new Set();
 
@@ -1176,18 +1275,33 @@
         let html = data;
         let abortSwap = false;
         let abortReason = null;
+        let redirectUrl = null;
 
         try {
             const oob = processOob(html, state.el);
             html = oob.html;
             abortSwap = !!oob.abortSwap;
             abortReason = oob.abortReason || null;
+            redirectUrl = oob.redirectUrl || null;
         } catch (e) {
             emit("heimdall:sse-error", { topic: state.topic, url: state.url, el: state.el, error: e });
             if (Heimdall.config.debug) {
                 // eslint-disable-next-line no-console
                 console.error(`[Heimdall ${VERSION}] SSE OOB processing error`, e);
             }
+            return;
+        }
+
+        if (redirectUrl) {
+            emit("heimdall:sse-redirect", {
+                topic: state.topic,
+                url: state.url,
+                el: state.el,
+                redirectUrl
+            });
+
+            dbg("sse redirecting", { topic: state.topic, redirectUrl });
+            global.location.href = redirectUrl;
             return;
         }
 
@@ -1200,6 +1314,7 @@
             const mainTpl = parseHtmlToTemplate(html);
             stripInvocationsFromFragment(mainTpl.content);
             stripAbortsFromFragment(mainTpl.content);
+            stripRedirectsFromFragment(mainTpl.content);
 
             const { didApply, appliedRoot } = applySwap(targetEl, mainTpl.content, swapMode);
 
@@ -1490,7 +1605,6 @@
         }
     }
 
-
     function boot(root) {
         bootLoads(root);
         bootVisible(root);
@@ -1498,7 +1612,6 @@
         bootPoll(root);
         bootSse(root);
     }
-
 
     async function handleClick(e) {
         const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-click]") : null;
@@ -1716,7 +1829,6 @@
             _hoverTimers.delete(el);
         }
     }
-
 
     function installObserver() {
         if (!Heimdall.config.observeDom)

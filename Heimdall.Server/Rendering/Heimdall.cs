@@ -707,7 +707,15 @@ namespace Heimdall.Server.Rendering
 				? Html.Tag("abort")
 				: Html.Tag("abort", Html.Attr("reason", reason));
 
-		private static string TriggerToAttr(Trigger trigger) => trigger switch
+        /// <summary>
+        /// Creates a redirect directive that instructs the client to navigate to a different URL.
+        /// </summary>
+        /// <param name="location"></param>
+        /// <returns></returns>
+        public static IHtmlContent Redirect(string location)
+            => Html.Tag("redirect", Html.Attr("location", location));
+
+        private static string TriggerToAttr(Trigger trigger) => trigger switch
 		{
 			Trigger.Load => Attrs.Load,
 			Trigger.Click => Attrs.Click,
