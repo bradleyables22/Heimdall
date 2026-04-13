@@ -524,13 +524,13 @@ namespace Heimdall.Server.Rendering
 				return this;
 			}
             /// <summary>
-            /// Adds a redirect directive to the fragment so the client will navigate to a new location.
+            /// Adds a redirect directive to the fragment so the client will navigate to a new url.
             /// </summary>
-            /// <param name="location"></param>
+            /// <param name="url"></param>
             /// <returns></returns>
-            public HeimdallFragmentBuilder Redirect(string location )
+            public HeimdallFragmentBuilder Redirect(string url )
             {
-                _f.Add(HeimdallHtml.Redirect(location));
+                _f.Add(HeimdallHtml.Redirect(url));
                 return this;
             }
 

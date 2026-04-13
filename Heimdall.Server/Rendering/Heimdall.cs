@@ -710,10 +710,10 @@ namespace Heimdall.Server.Rendering
         /// <summary>
         /// Creates a redirect directive that instructs the client to navigate to a different URL.
         /// </summary>
-        /// <param name="location"></param>
+        /// <param name="url"></param>
         /// <returns></returns>
-        public static IHtmlContent Redirect(string location)
-            => Html.Tag("redirect", Html.Attr("location", location));
+        public static IHtmlContent Redirect(string url)
+            => Html.Tag("redirect", Html.Attr("url", url));
 
         private static string TriggerToAttr(Trigger trigger) => trigger switch
 		{
