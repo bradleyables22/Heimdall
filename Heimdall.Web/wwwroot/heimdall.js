@@ -45,6 +45,8 @@
     //   - heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
     //   - heimdall-content-disable="true|false"
     //   - heimdall-prevent-default="true|false"
+    //   - heimdall-ignore="click|change|input|submit|keydown|blur|hover|visible|scroll|load|*"
+    //   - heimdall-scope="closest|self"
     //
     // Payload Options:
     //   - heimdall-payload='{"json":1}'
@@ -95,6 +97,157 @@
     //   - heimdall-sse="topic:name"
     //   - heimdall-sse-topic="topic:name"      (alias)
     //   - heimdall-sse-target="#selector"       (default: element itself)
+    //   - heimdall-sse-swap="inner|outer|beforeend|afterbegin|none"
+    //   - heimdall-sse-event="heimdall"
+    //   - heimdall-sse-disable="true|false"
+    //
+    // Bifrost notes:
+    //   - Uses EventSource (GET only)
+    //   - Automatically reconnects
+    //   - Designed for same-origin use
+    //   - Subscription access is gated server-side
+    //
+    // ---------------------------------------------------------------------------
+    // This file is intentionally dependency-free and framework-agnostic.
+    // It is safe to use alongside Blazor, Razor Pages, MVC, or static HTML.
+    //// ============================================================================
+    // Heimdall.js
+    // ---------------------------------------------------------------------------
+    // Version: 1.3.2
+    // API Version: v1
+    // ---------------------------------------------------------------------------
+    // Endpoints
+    // ---------------------------------------------------------------------------
+    // Content Actions:
+    //   POST /__heimdall/v1/content/actions
+    //     - Executes a server action
+    //     - Returns HTML (with optional <invocation>, <abort>, or <redirect> directives)
+    //
+    // CSRF Token:
+    //   GET  /__heimdall/v1/csrf
+    //     - Returns antiforgery token
+    //     - Cached client-side and reused automatically
+    //
+    // Bifrost (Server-Sent Events):
+    //   GET  /__heimdall/v1/bifrost?topic=...
+    //     - Subscribes to a server topic
+    //     - Streams HTML payloads and/or <invocation>, <abort>, or <redirect> directives
+    //     - Protected via short-lived subscribe token (minted with CSRF)
+    //
+    // ---------------------------------------------------------------------------
+    // Content Action Attributes
+    // ---------------------------------------------------------------------------
+    //
+    // Triggers
+    // ---------------------------------------------------------------------------
+    // These attributes define actions that execute when the corresponding DOM
+    // event occurs. Heimdall uses delegated event handling, so triggers work on
+    // dynamically inserted content without rebinding.
+    //
+    //   - heimdall-content-load="Action.Id"
+    //   - heimdall-content-click="Action.Id"
+    //   - heimdall-content-change="Action.Id"
+    //   - heimdall-content-input="Action.Id"
+    //   - heimdall-content-submit="Action.Id"
+    //   - heimdall-content-keydown="Action.Id"
+    //   - heimdall-content-blur="Action.Id"
+    //   - heimdall-content-hover="Action.Id"
+    //   - heimdall-content-visible="Action.Id"
+    //   - heimdall-content-scroll="Action.Id"
+    //
+    // ---------------------------------------------------------------------------
+    // Trigger Resolution Options
+    // ---------------------------------------------------------------------------
+    // These attributes control how Heimdall resolves triggers in nested DOM
+    // structures. They affect framework event routing, not browser behavior.
+    //
+    // heimdall-ignore
+    //   Prevents Heimdall from resolving triggers past this element for the
+    //   specified trigger types.
+    //
+    //   Examples:
+    //     heimdall-ignore="click"
+    //     heimdall-ignore="click input change"
+    //     heimdall-ignore="*"
+    //
+    //   Behavior:
+    //     - Blocks outer trigger resolution
+    //     - Triggers inside the ignored region still work
+    //     - Applies only to Heimdall delegated triggers
+    //
+    // heimdall-scope
+    //   Controls how an actionable element is matched when a trigger fires.
+    //
+    //   Values:
+    //     closest (default) — nearest ancestor with trigger attribute
+    //     self              — only fire when the element itself is the event target
+    //
+    //   Example:
+    //     <div heimdall-content-click="close" heimdall-scope="self">
+    //
+    //   Useful for modal backdrops, overlays, and dismiss regions.
+    //
+    // ---------------------------------------------------------------------------
+    // Common Options
+    // ---------------------------------------------------------------------------
+    //   - heimdall-content-target="#selector"
+    //   - heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
+    //   - heimdall-content-disable="true|false"
+    //   - heimdall-prevent-default="true|false"
+    //
+    // ---------------------------------------------------------------------------
+    // Payload Options
+    // ---------------------------------------------------------------------------
+    //   - heimdall-payload='{"json":1}'
+    //   - heimdall-payload-from="closest-form|self|#form|ref:path|closest-state[:key]"
+    //   - heimdall-payload-ref="Path.To.Object"
+    //
+    // ---------------------------------------------------------------------------
+    // Trigger Modifiers
+    // ---------------------------------------------------------------------------
+    //   - heimdall-debounce="ms"
+    //   - heimdall-key="Enter|Escape|13"
+    //   - heimdall-hover-delay="ms"
+    //   - heimdall-visible-once="true|false"
+    //   - heimdall-scroll-threshold="px"
+    //   - heimdall-poll="ms"
+    //
+    // ---------------------------------------------------------------------------
+    // Response Directives (<invocation>, <abort>, <redirect>)
+    // ---------------------------------------------------------------------------
+    // Any <invocation> element returned by the server is treated as an instruction
+    // and is never rendered directly into the response output.
+    //
+    // Required:
+    //   - heimdall-content-target="#selector"
+    //
+    // Optional:
+    //   - heimdall-content-swap="inner|outer|beforeend|afterbegin|none"
+    //
+    // Payload:
+    //   - Wrap HTML fragments in <template> to preserve table rows (<tr>, etc)
+    //
+    // Security:
+    //   - <script> tags are always stripped
+    //   - Invocation targets can be allow-listed via config
+    //
+    // <abort>:
+    //   - Suppresses the main target swap for the current response/payload
+    //   - Still allows <invocation> directives to be processed
+    //   - Optional reason attribute is surfaced through emitted abort events
+    //
+    // <redirect>:
+    //   - Forces immediate browser navigation
+    //   - Acts as a hard-stop directive
+    //   - Prevents OOB processing, abort handling, and main target swap
+    //   - First redirect wins
+    //
+    // ---------------------------------------------------------------------------
+    // Bifrost (SSE) Attributes
+    // ---------------------------------------------------------------------------
+    //   - heimdall-sse="topic:name"
+    //   - heimdall-sse-topic="topic:name"      (alias)
+    //   - heimdall-sse-target="#selector"      (default: element itself)
     //   - heimdall-sse-swap="inner|outer|beforeend|afterbegin|none"
     //   - heimdall-sse-event="heimdall"
     //   - heimdall-sse-disable="true|false"
@@ -218,16 +371,6 @@
         return cur;
     }
 
-    // ============================================================
-    // Closest "state" payload support
-    // ------------------------------------------------------------
-    // Usage:
-    //   heimdall-payload-from="closest-state"
-    //     -> reads nearest ancestor (or self) with data-heimdall-state='{"..."}'
-    //
-    //   heimdall-payload-from="closest-state:filters"
-    //     -> reads nearest ancestor (or self) with data-heimdall-state-filters='{"..."}'
-    // ============================================================
 
     function findClosestStateElement(el, key) {
         let cur = el;
@@ -1613,15 +1756,83 @@
         bootSse(root);
     }
 
+    function parseTokenList(value) {
+        return String(value || "")
+            .split(/\s+/)
+            .map(x => x.trim().toLowerCase())
+            .filter(Boolean);
+    }
+
+    function elementIgnoresTrigger(el, triggerName) {
+        if (!el || !el.getAttribute)
+            return false;
+
+        const raw = getAttr(el, "heimdall-ignore");
+        if (!raw)
+            return false;
+
+        const tokens = parseTokenList(raw);
+        if (tokens.length === 0)
+            return false;
+
+        const trigger = String(triggerName || "").toLowerCase();
+        return tokens.includes("*") || tokens.includes(trigger);
+    }
+
+    function getClosestIgnoreBoundary(target, triggerName) {
+        let cur = target;
+        while (cur && cur.nodeType === 1) {
+            if (elementIgnoresTrigger(cur, triggerName))
+                return cur;
+            cur = cur.parentElement;
+        }
+        return null;
+    }
+
+    function matchesScope(actionEl, eventTarget) {
+        const scope = (getAttr(actionEl, "heimdall-scope") || "closest").toLowerCase().trim();
+
+        switch (scope) {
+            case "self":
+                return eventTarget === actionEl;
+            case "closest":
+            default:
+                return true;
+        }
+    }
+
+    function resolveActionElement(target, triggerAttr, triggerName) {
+        if (!target || !target.closest)
+            return null;
+
+        const actionEl = target.closest(`[${triggerAttr}]`);
+        if (!actionEl)
+            return null;
+
+        const ignoreBoundary = getClosestIgnoreBoundary(target, triggerName);
+
+        // No ignore boundary, normal resolution.
+        if (!ignoreBoundary)
+            return matchesScope(actionEl, target) ? actionEl : null;
+
+        // If the action is inside the ignore boundary, it is still allowed.
+        if (ignoreBoundary.contains(actionEl))
+            return matchesScope(actionEl, target) ? actionEl : null;
+
+        // Otherwise the boundary blocks resolution past it.
+        return null;
+    }
+
     async function handleClick(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-click]") : null;
-        if (!el)
-            return;
         if (e.defaultPrevented)
             return;
         if (e.button != null && e.button !== 0)
             return;
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)
+            return;
+
+        const el = resolveActionElement(e.target, "heimdall-content-click", "click");
+        if (!el)
             return;
 
         const actionId = getAttr(el, "heimdall-content-click");
@@ -1637,10 +1848,11 @@
     }
 
     async function handleChange(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-change]") : null;
-        if (!el)
-            return;
         if (e.defaultPrevented)
+            return;
+
+        const el = resolveActionElement(e.target, "heimdall-content-change", "change");
+        if (!el)
             return;
 
         const actionId = getAttr(el, "heimdall-content-change");
@@ -1679,10 +1891,11 @@
     }
 
     async function handleInput(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-input]") : null;
-        if (!el)
-            return;
         if (e.defaultPrevented)
+            return;
+
+        const el = resolveActionElement(e.target, "heimdall-content-input", "input");
+        if (!el)
             return;
 
         const actionId = getAttr(el, "heimdall-content-input");
@@ -1702,10 +1915,11 @@
     }
 
     async function handleSubmit(e) {
-        const form = e.target && e.target.closest ? e.target.closest("[heimdall-content-submit]") : null;
-        if (!form)
-            return;
         if (e.defaultPrevented)
+            return;
+
+        const form = resolveActionElement(e.target, "heimdall-content-submit", "submit");
+        if (!form)
             return;
 
         const actionId = getAttr(form, "heimdall-content-submit");
@@ -1713,7 +1927,8 @@
             return;
 
         const preventDefault = truthyAttr(form, "heimdall-prevent-default", true);
-        if (preventDefault) e.preventDefault();
+        if (preventDefault)
+            e.preventDefault();
 
         await runActionFromElement(form, actionId, "submit");
     }
@@ -1737,10 +1952,11 @@
     }
 
     async function handleKeydown(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-keydown]") : null;
-        if (!el)
-            return;
         if (e.defaultPrevented)
+            return;
+
+        const el = resolveActionElement(e.target, "heimdall-content-keydown", "keydown");
+        if (!el)
             return;
 
         const actionId = getAttr(el, "heimdall-content-keydown");
@@ -1758,16 +1974,18 @@
             (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"))
         );
 
-        if (wantsPreventDefault) e.preventDefault();
+        if (wantsPreventDefault)
+            e.preventDefault();
 
         await runActionFromElement(el, actionId, "keydown");
     }
 
     async function handleFocusOut(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-blur]") : null;
-        if (!el)
-            return;
         if (e.defaultPrevented)
+            return;
+
+        const el = resolveActionElement(e.target, "heimdall-content-blur", "blur");
+        if (!el)
             return;
 
         const actionId = getAttr(el, "heimdall-content-blur");
@@ -1785,10 +2003,11 @@
     }
 
     async function handleMouseOver(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-hover]") : null;
-        if (!el)
-            return;
         if (e.defaultPrevented)
+            return;
+
+        const el = resolveActionElement(e.target, "heimdall-content-hover", "hover");
+        if (!el)
             return;
         if (!isRealMouseEnter(e, el))
             return;
@@ -1800,7 +2019,8 @@
         const delay = intAttr(el, "heimdall-hover-delay", Heimdall.config.hoverDelayMs || 150);
 
         const prev = _hoverTimers.get(el);
-        if (prev) clearTimeout(prev);
+        if (prev)
+            clearTimeout(prev);
 
         if (delay > 0) {
             const tid = setTimeout(() => {
@@ -1814,8 +2034,8 @@
         await runActionFromElement(el, actionId, "hover");
     }
 
-    async function handleMouseOut(e) {
-        const el = e.target && e.target.closest ? e.target.closest("[heimdall-content-hover]") : null;
+    function handleMouseOut(e) {
+        const el = resolveActionElement(e.target, "heimdall-content-hover", "hover");
         if (!el)
             return;
 
