@@ -1236,10 +1236,16 @@ namespace Heimdall.Server.Rendering
 			/// </summary>
 			public ElementBuilder Dialog(Action<ElementBuilder> b) => Tag("dialog", b);
 
-			/// <summary>
-			/// Adds a nested <c>thead</c> element.
-			/// </summary>
-			public ElementBuilder TableHead(Action<ElementBuilder> b) => Tag("thead", b);
+
+            /// <summary>
+            /// Adds a nested <c>table</c> element.
+            /// </summary>
+            public ElementBuilder Table(Action<ElementBuilder> b) => Tag("table", b);
+
+            /// <summary>
+            /// Adds a nested <c>thead</c> element.
+            /// </summary>
+            public ElementBuilder TableHead(Action<ElementBuilder> b) => Tag("thead", b);
 
 			/// <summary>
 			/// Adds a nested <c>tbody</c> element.
@@ -1832,11 +1838,14 @@ namespace Heimdall.Server.Rendering
 				_parts.Add(FluentHtml.CodeBlock(language, build));
 				return this;
 			}
-
-			/// <summary>
-			/// Adds a nested <c>thead</c> element.
-			/// </summary>
-			public FragmentBuilder TableHead(Action<ElementBuilder> b) => Tag("thead", b);
+            /// <summary>
+            /// Adds a nested <c>table</c> element.
+            /// </summary>
+            public FragmentBuilder Table(Action<ElementBuilder> b) => Tag("table", b);
+            /// <summary>
+            /// Adds a nested <c>thead</c> element.
+            /// </summary>
+            public FragmentBuilder TableHead(Action<ElementBuilder> b) => Tag("thead", b);
 
 			/// <summary>
 			/// Adds a nested <c>tbody</c> element.
