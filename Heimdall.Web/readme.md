@@ -1,7 +1,5 @@
 # HeimdallFramework.Web
 
-> **Status: ALPHA — APIs and behavior may change**
->
 > **HeimdallFramework.Web** distributes the **Heimdall JavaScript runtime (`heimdall.js`)** as a Razor Class Library (RCL) static web asset.
 >
 > This package contains **only the client runtime**.

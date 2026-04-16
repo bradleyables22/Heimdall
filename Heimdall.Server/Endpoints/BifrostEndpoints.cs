@@ -46,7 +46,6 @@ namespace Heimdall.Server
 
                 // SSE headers
                 ctx.Response.Headers.CacheControl = "no-cache";
-				ctx.Response.Headers.Connection = "keep-alive";
 				ctx.Response.Headers["X-Accel-Buffering"] = "no"; 
 				ctx.Response.ContentType = "text/event-stream";
 

@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="Heimdall.Bootstrap/Heimdall.Bootstrap.csproj" Id="f373c3c2-fd49-45b5-bdf0-9ed29893e472" />
   <Project Path="Heimdall.Server/Heimdall.Server.csproj" />
   <Project Path="Heimdall.Web/Heimdall.Web.csproj" />
 </Solution>

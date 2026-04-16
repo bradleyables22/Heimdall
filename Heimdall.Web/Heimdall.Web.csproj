@@ -9,10 +9,10 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Web</PackageId>
-		<Version>0.1.5-alpha.1</Version>
+		<Version>1.0.0</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
-		<Description>ALPHA RELEASE. Heimdall JavaScript library.</Description>
+		<Description>Heimdall JavaScript library.</Description>
 		<PackageTags>heimdall framework;html;ssr;javascript;aspnetcore;rcl</PackageTags>
 
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>

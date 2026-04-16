@@ -1,0 +1,32 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+	  <PackageId>HeimdallFramework.Bootstrap</PackageId>
+	  <Version>5.0.0</Version>
+	  <PackageReadmeFile>readme.md</PackageReadmeFile>
+	  <Authors>Bradley Ables</Authors>
+	  <Description>Heimdall strongly typed Bootstrap classes.</Description>
+	  <PackageTags>heimdall framework;html;css;bootstrap;styled components</PackageTags>
+
+	  <RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
+	  <RepositoryType>git</RepositoryType>
+	  <PackageLicenseExpression>MIT</PackageLicenseExpression>
+	  <PackageIcon>heimdall-128.png</PackageIcon>
+
+	  <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+	  <Deterministic>true</Deterministic>
+	  <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+
+	  <IncludeSymbols>true</IncludeSymbols>
+	  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+	<ItemGroup>
+		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
+		<None Include="LICENSE" Pack="true" PackagePath="\" />
+		<None Include="readme.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+</Project>

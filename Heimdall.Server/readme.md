@@ -1,7 +1,5 @@
 # HeimdallFramework.Server
 
-**ALPHA RELEASE**
-
 HeimdallFramework.Server provides the **ASP.NET Core server runtime** for the Heimdall framework.
 
 It exposes middleware, endpoints, and page primitives that enable **HTML-first applications**, where the server produces documents and UI updates using hypermedia exchange instead of client-side rendering frameworks.
