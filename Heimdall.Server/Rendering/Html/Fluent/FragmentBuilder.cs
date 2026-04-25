@@ -523,7 +523,10 @@ namespace Heimdall.Server.Rendering
 				_parts.Add(FluentHtml.CodeBlock(language, build));
 				return this;
 			}
-
+			/// <summary>
+			/// Adds a nested <c>table</c> element.
+			/// </summary>
+			public FragmentBuilder Table(Action<ElementBuilder> b) => Tag("table", b);
 			/// <summary>
 			/// Adds a nested <c>thead</c> element.
 			/// </summary>

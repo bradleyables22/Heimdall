@@ -246,7 +246,10 @@ namespace Heimdall.Server.Rendering
 		/// Creates a <c>dialog</c> element.
 		/// </summary>
 		public static IHtmlContent Dialog(Action<ElementBuilder> b) => Tag("dialog", b);
-
+		/// <summary>
+		/// Creates a <c>table</c> element.
+		/// </summary>
+		public static IHtmlContent Table(Action<ElementBuilder> b) => Tag("table", b);
 		/// <summary>
 		/// Creates a <c>thead</c> element.
 		/// </summary>
