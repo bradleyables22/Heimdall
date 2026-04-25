@@ -543,6 +543,11 @@ namespace Heimdall.Server.Rendering
 			public ElementBuilder Dialog(Action<ElementBuilder> b) => Tag("dialog", b);
 
 			/// <summary>
+			/// Adds a nested <c>table</c> element.
+			/// </summary>
+			public ElementBuilder Table(Action<ElementBuilder> b) => Tag("table", b);
+
+			/// <summary>
 			/// Adds a nested <c>thead</c> element.
 			/// </summary>
 			public ElementBuilder TableHead(Action<ElementBuilder> b) => Tag("thead", b);
