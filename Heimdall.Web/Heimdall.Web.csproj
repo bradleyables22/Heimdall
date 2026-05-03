@@ -5,6 +5,9 @@
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+		<RunHeimdallJavaScriptBuild Condition="'$(RunHeimdallJavaScriptBuild)' == ''">true</RunHeimdallJavaScriptBuild>
+		<HeimdallEsbuildMarker Condition="'$(OS)' == 'Windows_NT'">$(MSBuildProjectDirectory)\node_modules\.bin\esbuild.cmd</HeimdallEsbuildMarker>
+		<HeimdallEsbuildMarker Condition="'$(HeimdallEsbuildMarker)' == ''">$(MSBuildProjectDirectory)/node_modules/.bin/esbuild</HeimdallEsbuildMarker>
 
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
@@ -38,5 +41,30 @@
 		<None Include="LICENSE" Pack="true" PackagePath="\" />
 		<None Include="readme.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
+
+	<ItemGroup>
+		<HeimdallJavaScriptInput Include="build.mjs" />
+		<HeimdallJavaScriptInput Include="package.json" />
+		<HeimdallJavaScriptInput Include="package-lock.json" />
+		<HeimdallJavaScriptInput Include="src\heimdall\**\*.js" />
+	</ItemGroup>
+
+	<Target Name="RestoreHeimdallJavaScriptTooling"
+			BeforeTargets="BuildHeimdallJavaScript"
+			Condition="'$(RunHeimdallJavaScriptBuild)' == 'true' and !Exists('$(HeimdallEsbuildMarker)')">
+		<Message Text="Restoring Heimdall JavaScript tooling..." Importance="high" />
+		<Exec Condition="'$(OS)' == 'Windows_NT'" WorkingDirectory="$(MSBuildProjectDirectory)" Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;npm.cmd ci&quot;" />
+		<Exec Condition="'$(OS)' != 'Windows_NT'" WorkingDirectory="$(MSBuildProjectDirectory)" Command="npm ci" />
+	</Target>
+
+	<Target Name="BuildHeimdallJavaScript"
+			BeforeTargets="PrepareForBuild;GenerateNuspec;ComputeFilesToPublish"
+			Condition="'$(RunHeimdallJavaScriptBuild)' == 'true'"
+			Inputs="@(HeimdallJavaScriptInput)"
+			Outputs="$(IntermediateOutputPath)heimdall-js-build.stamp;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.js">
+		<Message Text="Building Heimdall JavaScript bundle..." Importance="high" />
+		<Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="node build.mjs" />
+		<Touch Files="$(IntermediateOutputPath)heimdall-js-build.stamp" AlwaysCreate="true" />
+	</Target>
 
 </Project>

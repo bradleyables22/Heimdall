@@ -1,0 +1,15 @@
+{
+  "name": "heimdallframework-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "install:browsers": "playwright install chromium",
+    "test": "node tests/heimdall-runtime.spec.mjs",
+    "verify": "node build.mjs --verify && node tests/heimdall-runtime.spec.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.0",
+    "playwright": "1.59.1"
+  }
+}
