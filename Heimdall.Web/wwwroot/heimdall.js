@@ -1,10 +1,9 @@
-﻿(function (global) {
+(function (global) {
     "use strict";
 
     // ============================================================================
     // Heimdall.js
     // ---------------------------------------------------------------------------
-    // Version: 1.3.2
     // API Version: v1
     // ---------------------------------------------------------------------------
     // Endpoints
@@ -62,6 +61,38 @@
     //   - heimdall-poll="ms"
     //
     // ---------------------------------------------------------------------------
+    // Trigger Resolution Options
+    // ---------------------------------------------------------------------------
+    // These attributes control how Heimdall resolves triggers in nested DOM
+    // structures. They affect framework event routing, not browser behavior.
+    //
+    // heimdall-ignore
+    //   Prevents Heimdall from resolving triggers past this element for the
+    //   specified trigger types.
+    //
+    //   Examples:
+    //     heimdall-ignore="click"
+    //     heimdall-ignore="click input change"
+    //     heimdall-ignore="*"
+    //
+    //   Behavior:
+    //     - Blocks outer trigger resolution
+    //     - Triggers inside the ignored region still work
+    //     - Applies only to Heimdall delegated triggers
+    //
+    // heimdall-scope
+    //   Controls how an actionable element is matched when a trigger fires.
+    //
+    //   Values:
+    //     closest (default) — nearest ancestor with trigger attribute
+    //     self              — only fire when the element itself is the event target
+    //
+    //   Example:
+    //     <div heimdall-content-click="close" heimdall-scope="self">
+    //
+    //   Useful for modal backdrops, overlays, and dismiss regions.
+    //
+    // ---------------------------------------------------------------------------
     // Response Directives (<invocation>, <abort>, <redirect>)
     // ---------------------------------------------------------------------------
     // Any <invocation> element returned by the server is treated as an instruction
@@ -78,7 +109,6 @@
     //
     // Security:
     //   - <script> tags are always stripped
-    //   - Invocation targets can be allow-listed via config
     //
     // <abort>:
     //   - Suppresses the main target swap for the current response/payload
@@ -110,18 +140,6 @@
     // ---------------------------------------------------------------------------
     // This file is intentionally dependency-free and framework-agnostic.
     // It is safe to use alongside Blazor, Razor Pages, MVC, or static HTML.
-    //// ============================================================================
-    // Heimdall.js
-    // ---------------------------------------------------------------------------
-    // Version: 1.3.2
-    // API Version: v1
-    // ---------------------------------------------------------------------------
-    // Endpoints
-    // ---------------------------------------------------------------------------
-    // Content Actions:
-    //   POST /__heimdall/v1/content/actions
-    //     - Executes a server action
-    //     - Returns HTML (with optional <invocation>, <abort>, or <redirect> directives)
     //
     // CSRF Token:
     //   GET  /__heimdall/v1/csrf
@@ -179,8 +197,8 @@
     //   Controls how an actionable element is matched when a trigger fires.
     //
     //   Values:
-    //     closest (default) — nearest ancestor with trigger attribute
-    //     self              — only fire when the element itself is the event target
+    //     closest (default) � nearest ancestor with trigger attribute
+    //     self              � only fire when the element itself is the event target
     //
     //   Example:
     //     <div heimdall-content-click="close" heimdall-scope="self">
@@ -229,7 +247,6 @@
     //
     // Security:
     //   - <script> tags are always stripped
-    //   - Invocation targets can be allow-listed via config
     //
     // <abort>:
     //   - Suppresses the main target swap for the current response/payload
@@ -264,7 +281,6 @@
     //
     // ============================================================================
 
-    const VERSION = "1.3.2";
     const API_VERSION = 1;
 
     const DEFAULT_BASE_PATH = "/__heimdall";
@@ -469,7 +485,7 @@
     function dbg(...args) {
         if (Heimdall.config.debug) {
             // eslint-disable-next-line no-console
-            console.debug(`[Heimdall ${VERSION}]`, ...args);
+            console.debug(`[Heimdall]`, ...args);
         }
     }
 
@@ -678,15 +694,6 @@
                 continue;
             }
 
-            if (!matchesAllowedTarget(targetSel, sourceEl)) {
-                if (Heimdall.config.debug) {
-                    // eslint-disable-next-line no-console
-                    console.warn(`[Heimdall ${VERSION}] OOB target not allowed: '${targetSel}'.`);
-                }
-                invEl.remove();
-                continue;
-            }
-
             const swap = (getAttr(invEl, "heimdall-content-swap") || "inner").toLowerCase();
             const targetEl = resolveTarget(targetSel, null);
 
@@ -770,27 +777,6 @@
         csrfTokenPromise = null;
         _bifrostTokenByTopic.clear();
         _bifrostTokenPromiseByTopic.clear();
-    }
-
-    function matchesAllowedTarget(selector, sourceEl) {
-        const rule = Heimdall.config.oobAllowedTargets;
-
-        if (!rule)
-            return true;
-
-        if (Array.isArray(rule))
-            return rule.includes(selector);
-
-        if (typeof rule === "function") {
-            try {
-                return !!rule(selector, sourceEl);
-            }
-            catch {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     const _bifrostTokenByTopic = new Map();
@@ -1171,7 +1157,7 @@
         const obs = ensureVisibleObserver();
         const candidates = [];
 
-        // FIX: check root element itself — querySelectorAll misses it
+        // FIX: check root element itself � querySelectorAll misses it
         if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-visible"))
             candidates.push(root);
 
@@ -1270,9 +1256,9 @@
 
         const actionId = getAttr(el, "heimdall-content-load");
         if (!actionId) {
-            // Always warn — misconfigured polling is a silent no-op and hard to debug.
+            // Always warn � misconfigured polling is a silent no-op and hard to debug.
             // eslint-disable-next-line no-console
-            console.warn(`[Heimdall ${VERSION}] heimdall-poll set but no heimdall-content-load found on element.`, el);
+            console.warn(`[Heimdall] heimdall-poll set but no heimdall-content-load found on element.`, el);
             return;
         }
 
@@ -1430,7 +1416,7 @@
             emit("heimdall:sse-error", { topic: state.topic, url: state.url, el: state.el, error: e });
             if (Heimdall.config.debug) {
                 // eslint-disable-next-line no-console
-                console.error(`[Heimdall ${VERSION}] SSE OOB processing error`, e);
+                console.error(`[Heimdall] SSE OOB processing error`, e);
             }
             return;
         }
@@ -1503,14 +1489,14 @@
         if (!("EventSource" in global)) {
             if (Heimdall.config.debug) {
                 // eslint-disable-next-line no-console
-                console.warn(`[Heimdall ${VERSION}] EventSource not available; SSE disabled.`, el);
+                console.warn(`[Heimdall] EventSource not available; SSE disabled.`, el);
             }
             return;
         }
 
         // Snapshot all attrs synchronously before any async work.
         // The programmatic sseConnect() API restores attrs in a finally block
-        // immediately after calling attachSse() — snapshotting here ensures
+        // immediately after calling attachSse() � snapshotting here ensures
         // the async continuation below uses the values that were present at
         // call time, not whatever the DOM looks like later.
         const eventName = (getAttr(el, "heimdall-sse-event") || Heimdall.config.sseEventName || "heimdall").trim();
@@ -1555,7 +1541,7 @@
                     emit("heimdall:sse-error", { topic, url, el, error: e });
                     if (Heimdall.config.debug) {
                         // eslint-disable-next-line no-console
-                        console.error(`[Heimdall ${VERSION}] SSE connect failed`, e);
+                        console.error(`[Heimdall] SSE connect failed`, e);
                     }
                     closeSseState(state, "connect-failed");
                     return;
@@ -1586,14 +1572,14 @@
                     emit("heimdall:sse-error", { topic, url, el, error: e });
                     if (Heimdall.config.debug) {
                         // eslint-disable-next-line no-console
-                        console.warn(`[Heimdall ${VERSION}] SSE error (auto-reconnect expected)`, { topic, url }, e);
+                        console.warn(`[Heimdall] SSE error (auto-reconnect expected)`, { topic, url }, e);
                     }
                 };
             } catch (e) {
                 emit("heimdall:sse-error", { topic, url: state.url, el, error: e });
                 if (Heimdall.config.debug) {
                     // eslint-disable-next-line no-console
-                    console.error(`[Heimdall ${VERSION}] SSE token/connect failed`, e);
+                    console.error(`[Heimdall] SSE token/connect failed`, e);
                 }
                 closeSseState(state, "token-failed");
             }
@@ -1676,7 +1662,7 @@
 
         // Snapshot previous attrs so we can restore them after attachSse() reads them.
         // attachSse() captures all SSE config values synchronously before returning,
-        // so the restore in finally is safe — the async token fetch uses the snapshot.
+        // so the restore in finally is safe � the async token fetch uses the snapshot.
         const prev = {
             sse: el.getAttribute("heimdall-sse"),
             sseTopic: el.getAttribute("heimdall-sse-topic"),
@@ -2093,7 +2079,6 @@
     }
 
     const Heimdall = {
-        version: VERSION,
         apiVersion: API_VERSION,
 
         invoke,
@@ -2135,7 +2120,6 @@
             visibleThreshold: 0,
 
             oobEnabled: true,
-            oobAllowedTargets: null,
 
             sseDefaultSwap: "none",
             sseEventName: "heimdall",
