@@ -43,10 +43,27 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Content Remove="_build\**" />
+		<Content Remove="build-heimdall.ps1" />
+		<Content Remove="build.mjs" />
+		<Content Remove="node_modules\**" />
+		<Content Remove="package-lock.json" />
+		<Content Remove="package.json" />
+		<Content Remove="tests\**" />
+		<None Remove="_build\**" />
+		<None Remove="build-heimdall.ps1" />
+		<None Remove="build.mjs" />
+		<None Remove="node_modules\**" />
+		<None Remove="package-lock.json" />
+		<None Remove="package.json" />
+		<None Remove="tests\**" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<HeimdallJavaScriptInput Include="build.mjs" />
 		<HeimdallJavaScriptInput Include="package.json" />
 		<HeimdallJavaScriptInput Include="package-lock.json" />
-		<HeimdallJavaScriptInput Include="src\heimdall\**\*.js" />
+		<HeimdallJavaScriptInput Include="_build\heimdall\**\*.js" />
 	</ItemGroup>
 
 	<Target Name="RestoreHeimdallJavaScriptTooling"
@@ -61,7 +78,7 @@
 			BeforeTargets="PrepareForBuild;GenerateNuspec;ComputeFilesToPublish"
 			Condition="'$(RunHeimdallJavaScriptBuild)' == 'true'"
 			Inputs="@(HeimdallJavaScriptInput)"
-			Outputs="$(IntermediateOutputPath)heimdall-js-build.stamp;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.js">
+			Outputs="$(IntermediateOutputPath)heimdall-js-build.stamp;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.js;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.min.js">
 		<Message Text="Building Heimdall JavaScript bundle..." Importance="high" />
 		<Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="node build.mjs" />
 		<Touch Files="$(IntermediateOutputPath)heimdall-js-build.stamp" AlwaysCreate="true" />

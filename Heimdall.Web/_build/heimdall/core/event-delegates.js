@@ -1,11 +1,13 @@
-    function boot(root) {
-        bootLoads(root);
-        bootVisible(root);
-        bootScroll(root);
-        bootPoll(root);
-        bootSse(root);
-    }
+import {
+    getAttr,
+    intAttr,
+    truthyAttr
+} from "./utils.js";
 
+export function createEventDelegates({
+    getConfig,
+    runActionFromElement
+}) {
     function parseTokenList(value) {
         return String(value || "")
             .split(/\s+/)
@@ -152,7 +154,7 @@
         if (!actionId)
             return;
 
-        const ms = intAttr(el, "heimdall-debounce", Heimdall.config.inputDebounceMs || 250);
+        const ms = intAttr(el, "heimdall-debounce", getConfig().inputDebounceMs || 250);
 
         if (ms > 0) {
             scheduleDebounced(el, "input", ms, () => {
@@ -266,7 +268,7 @@
         if (!actionId)
             return;
 
-        const delay = intAttr(el, "heimdall-hover-delay", Heimdall.config.hoverDelayMs || 150);
+        const delay = intAttr(el, "heimdall-hover-delay", getConfig().hoverDelayMs || 150);
 
         const prev = _hoverTimers.get(el);
         if (prev)
@@ -300,3 +302,14 @@
         }
     }
 
+    return {
+        handleChange,
+        handleClick,
+        handleFocusOut,
+        handleInput,
+        handleKeydown,
+        handleMouseOut,
+        handleMouseOver,
+        handleSubmit
+    };
+}

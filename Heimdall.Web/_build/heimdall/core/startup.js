@@ -1,3 +1,23 @@
+export function createHeimdallRuntime({
+    global,
+    apiVersion,
+    defaultBasePath,
+    defaultContentEndpoint,
+    defaultCsrfEndpoint,
+    defaultBifrostTokenEndpoint,
+    defaultBifrostEndpoint,
+    invoke,
+    boot,
+    onReady,
+    clearCsrfToken,
+    sseConnect,
+    sseDisconnect,
+    sseDisconnectAll,
+    handlers,
+    installSseSweeper,
+    dbg,
+    onRuntimeCreated
+}) {
     function installObserver() {
         if (!Heimdall.config.observeDom)
             return;
@@ -41,7 +61,7 @@
     }
 
     const Heimdall = {
-        apiVersion: API_VERSION,
+        apiVersion,
 
         invoke,
         boot,
@@ -57,14 +77,14 @@
         _observer: null,
 
         config: {
-            basePath: DEFAULT_BASE_PATH,
-            apiVersion: API_VERSION,
+            basePath: defaultBasePath,
+            apiVersion,
 
             endpoints: {
-                contentActions: DEFAULT_CONTENT_ENDPOINT,
-                csrf: DEFAULT_CSRF_ENDPOINT,
-                bifrostToken: DEFAULT_BIFROST_TOKEN_ENDPOINT,
-                bifrost: DEFAULT_BIFROST_ENDPOINT
+                contentActions: defaultContentEndpoint,
+                csrf: defaultCsrfEndpoint,
+                bifrostToken: defaultBifrostTokenEndpoint,
+                bifrost: defaultBifrostEndpoint
             },
 
             observeDom: true,
@@ -90,20 +110,23 @@
         }
     };
 
+    if (typeof onRuntimeCreated === "function")
+        onRuntimeCreated(Heimdall);
+
     global.Heimdall = Heimdall;
 
     onReady(() => {
         if (!document.__heimdallDelegatesInstalled) {
             document.__heimdallDelegatesInstalled = true;
 
-            document.addEventListener("click", handleClick, true);
-            document.addEventListener("change", handleChange, false);
-            document.addEventListener("input", handleInput, false);
-            document.addEventListener("submit", handleSubmit, false);
-            document.addEventListener("keydown", handleKeydown, false);
-            document.addEventListener("focusout", handleFocusOut, false);
-            document.addEventListener("mouseover", handleMouseOver, false);
-            document.addEventListener("mouseout", handleMouseOut, false);
+            document.addEventListener("click", handlers.handleClick, true);
+            document.addEventListener("change", handlers.handleChange, false);
+            document.addEventListener("input", handlers.handleInput, false);
+            document.addEventListener("submit", handlers.handleSubmit, false);
+            document.addEventListener("keydown", handlers.handleKeydown, false);
+            document.addEventListener("focusout", handlers.handleFocusOut, false);
+            document.addEventListener("mouseover", handlers.handleMouseOver, false);
+            document.addEventListener("mouseout", handlers.handleMouseOut, false);
         }
 
         boot(document);
@@ -117,4 +140,5 @@
         }
     });
 
-})(window);
+    return Heimdall;
+}

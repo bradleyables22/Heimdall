@@ -1,3 +1,15 @@
+import {
+    getAttr,
+    intAttr,
+    isElement,
+    truthyAttr
+} from "./utils.js";
+
+export function createBootTriggers({
+    global,
+    getConfig,
+    runActionFromElement
+}) {
     // ============================================================
     // Boot helpers
     // ------------------------------------------------------------
@@ -47,6 +59,7 @@
             return _visibleObserver;
         }
 
+        const config = getConfig();
         _visibleObserver = new IntersectionObserver((entries) => {
             for (const entry of entries) {
                 if (!entry.isIntersecting)
@@ -69,8 +82,8 @@
             }
         }, {
             root: null,
-            rootMargin: Heimdall.config.visibleRootMargin || "0px",
-            threshold: Heimdall.config.visibleThreshold || 0
+            rootMargin: config.visibleRootMargin || "0px",
+            threshold: config.visibleThreshold || 0
         });
 
         return _visibleObserver;
@@ -81,7 +94,7 @@
         const obs = ensureVisibleObserver();
         const candidates = [];
 
-        // FIX: check root element itself � querySelectorAll misses it
+        // FIX: check root element itself - querySelectorAll misses it
         if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-visible"))
             candidates.push(root);
 
@@ -134,8 +147,9 @@
             requestAnimationFrame(() => {
                 state.ticking = false;
 
-                const threshold = intAttr(el, "heimdall-scroll-threshold", Heimdall.config.scrollThresholdPx || 120);
-                const minInterval = Heimdall.config.scrollMinIntervalMs || 250;
+                const config = getConfig();
+                const threshold = intAttr(el, "heimdall-scroll-threshold", config.scrollThresholdPx || 120);
+                const minInterval = config.scrollMinIntervalMs || 250;
 
                 if (!isNearScrollEnd(el, threshold))
                     return;
@@ -180,7 +194,7 @@
 
         const actionId = getAttr(el, "heimdall-content-load");
         if (!actionId) {
-            // Always warn � misconfigured polling is a silent no-op and hard to debug.
+            // Always warn - misconfigured polling is a silent no-op and hard to debug.
             // eslint-disable-next-line no-console
             console.warn(`[Heimdall] heimdall-poll set but no heimdall-content-load found on element.`, el);
             return;
@@ -253,3 +267,11 @@
             attachPoll(el);
     }
 
+    return {
+        bootLoads,
+        bootPoll,
+        bootScroll,
+        bootVisible,
+        matchesTriggerAttr
+    };
+}

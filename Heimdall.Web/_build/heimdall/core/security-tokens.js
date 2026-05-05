@@ -1,5 +1,15 @@
+export function createSecurityTokens({
+    global,
+    getConfig,
+    safeText,
+    csrfHeader,
+    defaultBifrostTokenEndpoint
+}) {
     let csrfToken = null;
     let csrfTokenPromise = null;
+
+    const _bifrostTokenByTopic = new Map();
+    const _bifrostTokenPromiseByTopic = new Map();
 
     async function ensureCsrfToken() {
         if (csrfToken)
@@ -9,7 +19,7 @@
 
         csrfTokenPromise = (async () => {
             try {
-                const res = await fetch(Heimdall.config.endpoints.csrf, {
+                const res = await global.fetch(getConfig().endpoints.csrf, {
                     method: "GET",
                     credentials: "same-origin",
                     headers: { "X-Requested-With": "XMLHttpRequest" }
@@ -38,9 +48,6 @@
         _bifrostTokenPromiseByTopic.clear();
     }
 
-    const _bifrostTokenByTopic = new Map();
-    const _bifrostTokenPromiseByTopic = new Map();
-
     async function ensureBifrostSubscribeToken(topic) {
         const t = String(topic || "").trim();
         if (!t)
@@ -58,20 +65,21 @@
         const p = (async () => {
             try {
                 const csrf = await ensureCsrfToken();
+                const config = getConfig();
 
-                const base = Heimdall.config.endpoints && Heimdall.config.endpoints.bifrostToken
-                    ? Heimdall.config.endpoints.bifrostToken
-                    : DEFAULT_BIFROST_TOKEN_ENDPOINT;
+                const base = config.endpoints && config.endpoints.bifrostToken
+                    ? config.endpoints.bifrostToken
+                    : defaultBifrostTokenEndpoint;
 
                 const url = new URL(base, global.location?.origin || undefined);
                 url.searchParams.set("topic", t);
 
-                const res = await fetch(url.toString(), {
+                const res = await global.fetch(url.toString(), {
                     method: "GET",
                     credentials: "same-origin",
                     headers: {
                         "X-Requested-With": "XMLHttpRequest",
-                        [CSRF_HEADER]: csrf
+                        [csrfHeader]: csrf
                     }
                 });
 
@@ -101,3 +109,9 @@
         return p;
     }
 
+    return {
+        clearCsrfToken,
+        ensureBifrostSubscribeToken,
+        ensureCsrfToken
+    };
+}

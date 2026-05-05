@@ -1,3 +1,24 @@
+import {
+    formDataToObject,
+    getAttr,
+    resolveTarget,
+    safeText,
+    truthyAttr
+} from "./utils.js";
+
+export function createActionInvoker({
+    global,
+    getConfig,
+    ensureCsrfToken,
+    clearCsrfToken,
+    emit,
+    dbg,
+    payloadFromElement,
+    boot,
+    dom,
+    actionHeader,
+    csrfHeader
+}) {
     async function invoke(actionId, payload, options) {
         return _invokeWithRetry(actionId, payload, options, true);
     }
@@ -5,7 +26,8 @@
     async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
         options = options || {};
 
-        const endpointBase = options.endpoint || Heimdall.config.endpoints.contentActions;
+        const config = getConfig();
+        const endpointBase = options.endpoint || config.endpoints.contentActions;
         const targetEl = resolveTarget(options.target, options.fallbackTarget || null);
         const swap = options.swap || "inner";
 
@@ -16,8 +38,8 @@
 
         const headers = {
             "Content-Type": "application/json",
-            [ACTION_HEADER]: actionId,
-            [CSRF_HEADER]: token
+            [actionHeader]: actionId,
+            [csrfHeader]: token
         };
 
         if (options.headers) {
@@ -41,7 +63,7 @@
 
         let res;
         try {
-            res = await fetch(url.toString(), {
+            res = await global.fetch(url.toString(), {
                 method: "POST",
                 headers,
                 body,
@@ -80,13 +102,13 @@
         let redirectUrl = null;
 
         if (res.ok) {
-            const oob = processOob(html, options && options.sourceEl ? options.sourceEl : null);
+            const oob = dom.processOob(html, options && options.sourceEl ? options.sourceEl : null);
             html = oob.html;
             abortSwap = !!oob.abortSwap;
             abortReason = oob.abortReason || null;
             redirectUrl = oob.redirectUrl || null;
         } else {
-            html = sanitizeHtmlStringNoApply(html);
+            html = dom.sanitizeHtmlStringNoApply(html);
         }
 
         if (res.ok && redirectUrl) {
@@ -122,14 +144,14 @@
         }
 
         if (res.ok && targetEl && !abortSwap) {
-            const mainTpl = parseHtmlToTemplate(html);
-            stripInvocationsFromFragment(mainTpl.content);
-            stripAbortsFromFragment(mainTpl.content);
-            stripRedirectsFromFragment(mainTpl.content);
+            const mainTpl = dom.parseHtmlToTemplate(html);
+            dom.stripInvocationsFromFragment(mainTpl.content);
+            dom.stripAbortsFromFragment(mainTpl.content);
+            dom.stripRedirectsFromFragment(mainTpl.content);
 
-            const { didApply, appliedRoot } = applySwap(targetEl, mainTpl.content, swap);
+            const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swap);
 
-            if (didApply && !Heimdall.config.observeDom) {
+            if (didApply && !getConfig().observeDom) {
                 try {
                     boot(appliedRoot || targetEl);
                 }
@@ -230,3 +252,8 @@
         }
     }
 
+    return {
+        invoke,
+        runActionFromElement
+    };
+}

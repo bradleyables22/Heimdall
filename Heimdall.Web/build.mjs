@@ -5,22 +5,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
-const sourceDir = path.join(projectRoot, "src", "heimdall");
+const sourceDir = path.join(projectRoot, "_build", "heimdall");
 const staticAssetRoot = path.join(projectRoot, "wwwroot");
-const referencePath = path.join(staticAssetRoot, "heimdall.js");
-const outputPath = path.join(staticAssetRoot, "heimdall-bundle.js");
-
-const fragments = [
-  "00-shell-and-constants.js",
-  "10-utils-and-payloads.js",
-  "20-dom-swaps-and-directives.js",
-  "30-security-tokens.js",
-  "40-actions-and-invocation.js",
-  "50-boot-triggers.js",
-  "60-sse-bifrost.js",
-  "70-event-delegates.js",
-  "80-public-api-and-startup.js"
+const outputs = [
+  {
+    label: "readable",
+    minify: false,
+    path: path.join(staticAssetRoot, "heimdall-bundle.js")
+  },
+  {
+    label: "minified",
+    minify: true,
+    path: path.join(staticAssetRoot, "heimdall-bundle.min.js")
+  }
 ];
+const entryFile = "heimdall.entry.js";
 
 const verify = process.argv.includes("--verify");
 
@@ -38,60 +37,58 @@ function bytesEqual(a, b) {
   return true;
 }
 
-async function readFragments() {
-  const buffers = [];
-
-  for (const fragment of fragments) {
-    const fragmentPath = path.join(sourceDir, fragment);
-    if (!existsSync(fragmentPath)) {
-      throw new Error(`Missing Heimdall fragment: ${fragmentPath}`);
-    }
-
-    buffers.push(await readFile(fragmentPath));
+async function readRuntimeSource() {
+  const entryPath = path.join(sourceDir, entryFile);
+  if (!existsSync(entryPath)) {
+    throw new Error(`Missing Heimdall entrypoint: ${entryPath}`);
   }
 
-  return Buffer.concat(buffers);
+  return readFile(entryPath, "utf8");
 }
 
-async function buildBundle(sourceBytes) {
-  const source = sourceBytes.toString("utf8");
-
-  const result = await esbuild.transform(source, {
+async function buildBundle(source, { minify }) {
+  const result = await esbuild.build({
+    absWorkingDir: sourceDir,
+    bundle: true,
     charset: "utf8",
+    format: "iife",
     legalComments: "inline",
-    loader: "js",
-    minify: false,
-    sourcefile: "heimdall.js",
-    target: "es2020"
+    minify,
+    stdin: {
+      contents: source,
+      loader: "js",
+      resolveDir: sourceDir,
+      sourcefile: entryFile
+    },
+    target: "es2020",
+    write: false
   });
 
-  return Buffer.from(result.code, "utf8");
+  return result.outputFiles[0].contents;
 }
 
-const sourceBytes = await readFragments();
-const bundleBytes = await buildBundle(sourceBytes);
+const source = await readRuntimeSource();
+const bundles = await Promise.all(outputs.map(async output => ({
+  ...output,
+  bytes: await buildBundle(source, output)
+})));
 
 if (verify) {
-  if (!existsSync(referencePath)) {
-    throw new Error(`Cannot verify Heimdall source because reference does not exist: ${referencePath}`);
+  for (const bundle of bundles) {
+    if (!existsSync(bundle.path)) {
+      throw new Error(`Cannot verify Heimdall ${bundle.label} bundle because output does not exist: ${bundle.path}`);
+    }
+
+    const currentBundleBytes = await readFile(bundle.path);
+    if (!bytesEqual(currentBundleBytes, bundle.bytes)) {
+      throw new Error(`Heimdall ${bundle.label} bundle is out of date: ${bundle.path}`);
+    }
   }
 
-  const referenceBytes = await readFile(referencePath);
-  if (!bytesEqual(referenceBytes, sourceBytes)) {
-    throw new Error(`Heimdall source fragments differ from source-of-truth reference: ${referencePath}`);
-  }
-
-  if (!existsSync(outputPath)) {
-    throw new Error(`Cannot verify Heimdall bundle because output does not exist: ${outputPath}`);
-  }
-
-  const currentBundleBytes = await readFile(outputPath);
-  if (!bytesEqual(currentBundleBytes, bundleBytes)) {
-    throw new Error(`Heimdall bundle is out of date: ${outputPath}`);
-  }
-
-  console.log("Heimdall verified: source matches heimdall.js and bundle is up to date.");
+  console.log("Heimdall verified: bundles are up to date.");
 } else {
-  await writeFile(outputPath, bundleBytes);
-  console.log(`Heimdall bundle built: ${outputPath}`);
+  for (const bundle of bundles) {
+    await writeFile(bundle.path, bundle.bytes);
+    console.log(`Heimdall ${bundle.label} bundle built: ${bundle.path}`);
+  }
 }

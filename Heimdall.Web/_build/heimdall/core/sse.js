@@ -1,3 +1,21 @@
+import {
+    getAttr,
+    isElement,
+    resolveTarget,
+    truthyAttr
+} from "./utils.js";
+
+export function createSseRuntime({
+    global,
+    getConfig,
+    emit,
+    dbg,
+    dom,
+    boot,
+    ensureBifrostSubscribeToken,
+    matchesTriggerAttr,
+    defaultBifrostEndpoint
+}) {
     const _sseByElement = new WeakMap();
     const _sseStates = new Set();
 
@@ -14,9 +32,10 @@
     }
 
     function buildBifrostUrl(topic, st) {
-        const base = Heimdall.config.endpoints && Heimdall.config.endpoints.bifrost
-            ? Heimdall.config.endpoints.bifrost
-            : DEFAULT_BIFROST_ENDPOINT;
+        const config = getConfig();
+        const base = config.endpoints && config.endpoints.bifrost
+            ? config.endpoints.bifrost
+            : defaultBifrostEndpoint;
 
         const url = new URL(base, global.location?.origin || undefined);
         url.searchParams.set("topic", topic);
@@ -76,14 +95,14 @@
         let redirectUrl = null;
 
         try {
-            const oob = processOob(html, state.el);
+            const oob = dom.processOob(html, state.el);
             html = oob.html;
             abortSwap = !!oob.abortSwap;
             abortReason = oob.abortReason || null;
             redirectUrl = oob.redirectUrl || null;
         } catch (e) {
             emit("heimdall:sse-error", { topic: state.topic, url: state.url, el: state.el, error: e });
-            if (Heimdall.config.debug) {
+            if (getConfig().debug) {
                 // eslint-disable-next-line no-console
                 console.error(`[Heimdall] SSE OOB processing error`, e);
             }
@@ -109,14 +128,14 @@
         }
 
         if (!abortSwap && swapMode !== "none" && targetEl) {
-            const mainTpl = parseHtmlToTemplate(html);
-            stripInvocationsFromFragment(mainTpl.content);
-            stripAbortsFromFragment(mainTpl.content);
-            stripRedirectsFromFragment(mainTpl.content);
+            const mainTpl = dom.parseHtmlToTemplate(html);
+            dom.stripInvocationsFromFragment(mainTpl.content);
+            dom.stripAbortsFromFragment(mainTpl.content);
+            dom.stripRedirectsFromFragment(mainTpl.content);
 
-            const { didApply, appliedRoot } = applySwap(targetEl, mainTpl.content, swapMode);
+            const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swapMode);
 
-            if (didApply && !Heimdall.config.observeDom) {
+            if (didApply && !getConfig().observeDom) {
                 try {
                     boot(appliedRoot || targetEl);
                 }
@@ -156,7 +175,7 @@
         }
 
         if (!("EventSource" in global)) {
-            if (Heimdall.config.debug) {
+            if (getConfig().debug) {
                 // eslint-disable-next-line no-console
                 console.warn(`[Heimdall] EventSource not available; SSE disabled.`, el);
             }
@@ -165,12 +184,13 @@
 
         // Snapshot all attrs synchronously before any async work.
         // The programmatic sseConnect() API restores attrs in a finally block
-        // immediately after calling attachSse() � snapshotting here ensures
+        // immediately after calling attachSse() - snapshotting here ensures
         // the async continuation below uses the values that were present at
         // call time, not whatever the DOM looks like later.
-        const eventName = (getAttr(el, "heimdall-sse-event") || Heimdall.config.sseEventName || "heimdall").trim();
+        const config = getConfig();
+        const eventName = (getAttr(el, "heimdall-sse-event") || config.sseEventName || "heimdall").trim();
         const target = getAttr(el, "heimdall-sse-target") || el;
-        const swap = (getAttr(el, "heimdall-sse-swap") || Heimdall.config.sseDefaultSwap || "none").toLowerCase();
+        const swap = (getAttr(el, "heimdall-sse-swap") || config.sseDefaultSwap || "none").toLowerCase();
 
         const state = {
             el,
@@ -205,10 +225,10 @@
 
                 let es;
                 try {
-                    es = new EventSource(url);
+                    es = new global.EventSource(url);
                 } catch (e) {
                     emit("heimdall:sse-error", { topic, url, el, error: e });
-                    if (Heimdall.config.debug) {
+                    if (getConfig().debug) {
                         // eslint-disable-next-line no-console
                         console.error(`[Heimdall] SSE connect failed`, e);
                     }
@@ -239,14 +259,14 @@
 
                 es.onerror = (e) => {
                     emit("heimdall:sse-error", { topic, url, el, error: e });
-                    if (Heimdall.config.debug) {
+                    if (getConfig().debug) {
                         // eslint-disable-next-line no-console
                         console.warn(`[Heimdall] SSE error (auto-reconnect expected)`, { topic, url }, e);
                     }
                 };
             } catch (e) {
                 emit("heimdall:sse-error", { topic, url: state.url, el, error: e });
-                if (Heimdall.config.debug) {
+                if (getConfig().debug) {
                     // eslint-disable-next-line no-console
                     console.error(`[Heimdall] SSE token/connect failed`, e);
                 }
@@ -272,7 +292,7 @@
             return;
         _sseSweepInstalled = true;
 
-        const sweepIntervalMs = Heimdall.config.sseSweepIntervalMs || 5000;
+        const sweepIntervalMs = getConfig().sseSweepIntervalMs || 5000;
 
         setInterval(() => {
             for (const state of Array.from(_sseStates)) {
@@ -284,7 +304,7 @@
                     continue;
                 }
 
-                if (Heimdall.config.ssePauseWhenHidden && document.hidden) {
+                if (getConfig().ssePauseWhenHidden && document.hidden) {
                     closeSseState(state, "hidden");
                     continue;
                 }
@@ -301,7 +321,7 @@
                 }
             }
 
-            if (!document.hidden && Heimdall.config.ssePauseWhenHidden) {
+            if (!document.hidden && getConfig().ssePauseWhenHidden) {
                 try {
                     bootSse(document);
                 }
@@ -309,7 +329,7 @@
             }
         }, sweepIntervalMs);
 
-        if (Heimdall.config.ssePauseWhenHidden) {
+        if (getConfig().ssePauseWhenHidden) {
             document.addEventListener("visibilitychange", () => {
                 if (!document.hidden) {
                     try {
@@ -331,7 +351,7 @@
 
         // Snapshot previous attrs so we can restore them after attachSse() reads them.
         // attachSse() captures all SSE config values synchronously before returning,
-        // so the restore in finally is safe � the async token fetch uses the snapshot.
+        // so the restore in finally is safe - the async token fetch uses the snapshot.
         const prev = {
             sse: el.getAttribute("heimdall-sse"),
             sseTopic: el.getAttribute("heimdall-sse-topic"),
@@ -403,3 +423,11 @@
         }
     }
 
+    return {
+        bootSse,
+        installSseSweeper,
+        sseConnect,
+        sseDisconnect,
+        sseDisconnectAll
+    };
+}

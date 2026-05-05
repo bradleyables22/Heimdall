@@ -1,6 +1,6 @@
 # HeimdallFramework.Web
 
-> **HeimdallFramework.Web** distributes the **Heimdall JavaScript runtime (`heimdall.js`)** as a Razor Class Library (RCL) static web asset.
+> **HeimdallFramework.Web** distributes the **Heimdall JavaScript runtime** as Razor Class Library (RCL) static web assets.
 >
 > This package contains **only the client runtime**.
 >
@@ -34,7 +34,9 @@ The design goal:
 
 ## What This Package Contains
 
-* `heimdall.js` runtime
+* `heimdall-bundle.min.js` production runtime
+* `heimdall-bundle.js` readable debugging runtime
+* `heimdall.js` reference runtime
 * Static web asset delivery via Razor Class Library
 * Automatic boot on DOM ready
 * Declarative action system
@@ -56,10 +58,16 @@ Install:
 dotnet add package HeimdallFramework.Web
 ```
 
-Reference:
+Reference the minified runtime in production:
 
 ```html
-<script src="/_content/HeimdallFramework.Web/heimdall.js"></script>
+<script src="/_content/HeimdallFramework.Web/heimdall-bundle.min.js"></script>
+```
+
+For debugging, use the readable generated runtime:
+
+```html
+<script src="/_content/HeimdallFramework.Web/heimdall-bundle.js"></script>
 ```
 
 Heimdall boots automatically.

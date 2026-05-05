@@ -6,7 +6,10 @@
     "build": "node build.mjs",
     "install:browsers": "playwright install chromium",
     "test": "node tests/heimdall-runtime.spec.mjs",
-    "verify": "node build.mjs --verify && node tests/heimdall-runtime.spec.mjs"
+    "test:package": "node tests/heimdall-package.spec.mjs",
+    "verify": "node build.mjs --verify && node tests/heimdall-runtime.spec.mjs",
+    "verify:all": "node build.mjs --verify && node tests/heimdall-runtime.spec.mjs && node tests/heimdall-package.spec.mjs",
+    "verify:package": "node tests/heimdall-package.spec.mjs"
   },
   "devDependencies": {
     "esbuild": "0.28.0",

@@ -1,3 +1,17 @@
+import { createActionInvoker } from "./core/actions.js";
+import { createBootTriggers } from "./core/boot-triggers.js";
+import { createDiagnostics } from "./core/diagnostics.js";
+import { createDomPipeline } from "./core/dom.js";
+import { createEventDelegates } from "./core/event-delegates.js";
+import { createPayloadResolver } from "./core/payloads.js";
+import { createSecurityTokens } from "./core/security-tokens.js";
+import { createHeimdallRuntime } from "./core/startup.js";
+import { createSseRuntime } from "./core/sse.js";
+import {
+    onReady,
+    safeText
+} from "./core/utils.js";
+
 (function (global) {
     "use strict";
 
@@ -291,4 +305,122 @@
 
     const ACTION_HEADER = "X-Heimdall-Content-Action";
     const CSRF_HEADER = "RequestVerificationToken";
+    const runtimeRef = { current: null };
+    const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
+    const { payloadFromElement } = createPayloadResolver(global);
+    const { emit, dbg } = createDiagnostics(getRuntimeConfig);
+    const dom = createDomPipeline({
+        getConfig: getRuntimeConfig,
+        boot: root => boot(root),
+        dbg
+    });
+    const {
+        clearCsrfToken,
+        ensureBifrostSubscribeToken,
+        ensureCsrfToken
+    } = createSecurityTokens({
+        global,
+        getConfig: getRuntimeConfig,
+        safeText,
+        csrfHeader: CSRF_HEADER,
+        defaultBifrostTokenEndpoint: DEFAULT_BIFROST_TOKEN_ENDPOINT
+    });
+    const {
+        invoke,
+        runActionFromElement
+    } = createActionInvoker({
+        global,
+        getConfig: getRuntimeConfig,
+        ensureCsrfToken,
+        clearCsrfToken,
+        emit,
+        dbg,
+        payloadFromElement,
+        boot: root => boot(root),
+        dom,
+        actionHeader: ACTION_HEADER,
+        csrfHeader: CSRF_HEADER
+    });
+    const {
+        handleChange,
+        handleClick,
+        handleFocusOut,
+        handleInput,
+        handleKeydown,
+        handleMouseOut,
+        handleMouseOver,
+        handleSubmit
+    } = createEventDelegates({
+        getConfig: getRuntimeConfig,
+        runActionFromElement
+    });
+    const {
+        bootLoads,
+        bootPoll,
+        bootScroll,
+        bootVisible,
+        matchesTriggerAttr
+    } = createBootTriggers({
+        global,
+        getConfig: getRuntimeConfig,
+        runActionFromElement
+    });
+    const {
+        bootSse,
+        installSseSweeper,
+        sseConnect,
+        sseDisconnect,
+        sseDisconnectAll
+    } = createSseRuntime({
+        global,
+        getConfig: getRuntimeConfig,
+        emit,
+        dbg,
+        dom,
+        boot: root => boot(root),
+        ensureBifrostSubscribeToken,
+        matchesTriggerAttr,
+        defaultBifrostEndpoint: DEFAULT_BIFROST_ENDPOINT
+    });
 
+    function boot(root) {
+        bootLoads(root);
+        bootVisible(root);
+        bootScroll(root);
+        bootPoll(root);
+        bootSse(root);
+    }
+
+    const Heimdall = createHeimdallRuntime({
+        global,
+        apiVersion: API_VERSION,
+        defaultBasePath: DEFAULT_BASE_PATH,
+        defaultContentEndpoint: DEFAULT_CONTENT_ENDPOINT,
+        defaultCsrfEndpoint: DEFAULT_CSRF_ENDPOINT,
+        defaultBifrostTokenEndpoint: DEFAULT_BIFROST_TOKEN_ENDPOINT,
+        defaultBifrostEndpoint: DEFAULT_BIFROST_ENDPOINT,
+        invoke,
+        boot,
+        onReady,
+        clearCsrfToken,
+        sseConnect,
+        sseDisconnect,
+        sseDisconnectAll,
+        handlers: {
+            handleChange,
+            handleClick,
+            handleFocusOut,
+            handleInput,
+            handleKeydown,
+            handleMouseOut,
+            handleMouseOver,
+            handleSubmit
+        },
+        installSseSweeper,
+        dbg,
+        onRuntimeCreated: runtime => {
+            runtimeRef.current = runtime;
+        }
+    });
+
+})(window);

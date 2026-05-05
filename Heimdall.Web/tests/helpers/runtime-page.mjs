@@ -27,6 +27,9 @@ export async function installFakeServer(page, options = {}) {
     const csrfTokens = Array.isArray(serverOptions.csrfTokens) && serverOptions.csrfTokens.length > 0
       ? [...serverOptions.csrfTokens]
       : ["csrf-token"];
+    const bifrostTokens = Array.isArray(serverOptions.bifrostTokens) && serverOptions.bifrostTokens.length > 0
+      ? [...serverOptions.bifrostTokens]
+      : ["bifrost-token"];
 
     window.__heimdallFetches = [];
 
@@ -60,9 +63,21 @@ export async function installFakeServer(page, options = {}) {
         });
       }
 
+      if (url.includes("/__heimdall/v1/bifrost/token")) {
+        const token = bifrostTokens.length > 1 ? bifrostTokens.shift() : bifrostTokens[0];
+        return new Response(JSON.stringify({ token, expiresInSeconds: 120 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+
       const response = actionResponses.length > 0
         ? actionResponses.shift()
         : { status: 200, body: "" };
+
+      if (response.delayMs && Number(response.delayMs) > 0) {
+        await new Promise(resolve => setTimeout(resolve, Number(response.delayMs)));
+      }
 
       return new Response(response.body || "", {
         status: response.status || 200,

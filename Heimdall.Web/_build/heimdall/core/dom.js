@@ -1,4 +1,9 @@
+import {
+    getAttr,
+    resolveTarget
+} from "./utils.js";
 
+export function createDomPipeline({ getConfig, boot, dbg }) {
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -183,7 +188,7 @@
             };
         }
 
-        if (!Heimdall.config.oobEnabled) {
+        if (!getConfig().oobEnabled) {
             stripInvocationsFromFragment(fragment);
             return {
                 html: fragmentToHtml(fragment),
@@ -228,7 +233,7 @@
                 const { didApply, appliedRoot } = applySwap(targetEl, payloadFrag, swap);
                 if (didApply) {
                     applied++;
-                    if (!Heimdall.config.observeDom) {
+                    if (!getConfig().observeDom) {
                         try {
                             boot(appliedRoot || targetEl);
                         }
@@ -249,3 +254,13 @@
         };
     }
 
+    return {
+        applySwap,
+        parseHtmlToTemplate,
+        processOob,
+        sanitizeHtmlStringNoApply,
+        stripAbortsFromFragment,
+        stripInvocationsFromFragment,
+        stripRedirectsFromFragment
+    };
+}
