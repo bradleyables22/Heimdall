@@ -1,6 +1,10 @@
 ﻿using Heimdall.Server.Registry;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Metadata;
+using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 
 namespace Heimdall.Server
@@ -48,12 +52,18 @@ namespace Heimdall.Server
             ValidateStatic(method);
             var returnKind = ValidateAndGetReturnKind(method);
             var parameters = BuildParameterPlan(method, services);
+            var timeoutMetadata = ResolveRequestTimeoutMetadata(method);
+            var authorizationMetadata = ResolveAuthorizationMetadata(method);
 
             return new ContentActionDescriptor(
                 actionId,
                 method,
                 parameters,
-                returnKind);
+                returnKind,
+                timeoutMetadata.RequestTimeout,
+                timeoutMetadata.DisableRequestTimeout,
+                authorizationMetadata.AuthorizeData,
+                authorizationMetadata.AllowAnonymous);
         }
 
         private static void ValidateStatic(MethodInfo method)
@@ -125,12 +135,27 @@ namespace Heimdall.Server
             }
 
             // Determine DI vs payload
+            var serviceInspector = services.GetService<IServiceProviderIsService>();
             var serviceCandidates = new HashSet<ParameterInfo>();
 
             foreach (var p in unresolved)
             {
-                if (IsServiceType(services, p.ParameterType))
+                var explicitlyService = IsExplicitServiceParameter(p);
+                var explicitlyPayload = IsExplicitPayloadParameter(p);
+
+                if (explicitlyService && explicitlyPayload)
+                {
+                    throw new InvalidOperationException(
+                        $"[ContentInvocation] parameter '{p.Name}' on method " +
+                        $"'{method.DeclaringType?.FullName}.{method.Name}' cannot be both " +
+                        "[FromServices] and [ContentPayload].");
+                }
+
+                if (explicitlyService ||
+                    (!explicitlyPayload && IsServiceType(serviceInspector, p.ParameterType)))
+                {
                     serviceCandidates.Add(p);
+                }
             }
 
             var payloadCandidates = unresolved.Where(p => !serviceCandidates.Contains(p)).ToArray();
@@ -179,12 +204,90 @@ namespace Heimdall.Server
             return descriptors.OrderBy(x => x.Index).ToArray();
         }
 
-        private static bool IsServiceType(IServiceProvider services, Type type)
+        private static bool IsExplicitServiceParameter(ParameterInfo parameter)
+            => parameter.GetCustomAttributes(inherit: true).OfType<IFromServiceMetadata>().Any();
+
+        private static bool IsExplicitPayloadParameter(ParameterInfo parameter)
+            => parameter.GetCustomAttribute<ContentPayloadAttribute>(inherit: true) is not null;
+
+        private static bool IsServiceType(IServiceProviderIsService? serviceInspector, Type type)
         {
             if (type == typeof(IServiceProvider))
                 return true;
 
-            return services.GetService(type) is not null;
+            return serviceInspector?.IsService(type) == true;
         }
+
+        private static RequestTimeoutMetadata ResolveRequestTimeoutMetadata(MethodInfo method)
+        {
+            var methodTimeout = method.GetCustomAttribute<RequestTimeoutAttribute>(inherit: false);
+            var methodDisable = method.GetCustomAttribute<DisableRequestTimeoutAttribute>(inherit: false) is not null;
+
+            if (methodTimeout is not null && methodDisable)
+            {
+                throw new InvalidOperationException(
+                    $"[ContentInvocation] cannot combine [RequestTimeout] and [DisableRequestTimeout] on " +
+                    $"{method.DeclaringType?.FullName}.{method.Name}.");
+            }
+
+            if (methodTimeout is not null)
+                return new RequestTimeoutMetadata(methodTimeout, DisableRequestTimeout: false);
+
+            if (methodDisable)
+                return new RequestTimeoutMetadata(RequestTimeout: null, DisableRequestTimeout: true);
+
+            var declaringType = method.DeclaringType;
+            if (declaringType is null)
+                return RequestTimeoutMetadata.None;
+
+            var typeTimeout = declaringType.GetCustomAttribute<RequestTimeoutAttribute>(inherit: true);
+            var typeDisable = declaringType.GetCustomAttribute<DisableRequestTimeoutAttribute>(inherit: true) is not null;
+
+            if (typeTimeout is not null && typeDisable)
+            {
+                throw new InvalidOperationException(
+                    $"[ContentInvocation] cannot combine [RequestTimeout] and [DisableRequestTimeout] on " +
+                    $"{declaringType.FullName}.");
+            }
+
+            if (typeTimeout is not null)
+                return new RequestTimeoutMetadata(typeTimeout, DisableRequestTimeout: false);
+
+            if (typeDisable)
+                return new RequestTimeoutMetadata(RequestTimeout: null, DisableRequestTimeout: true);
+
+            return RequestTimeoutMetadata.None;
+        }
+
+        private static AuthorizationMetadata ResolveAuthorizationMetadata(MethodInfo method)
+        {
+            var authorizeData = new List<IAuthorizeData>();
+            var allowAnonymous = false;
+
+            var declaringType = method.DeclaringType;
+            if (declaringType is not null)
+            {
+                var typeAttributes = declaringType.GetCustomAttributes(inherit: true);
+                authorizeData.AddRange(typeAttributes.OfType<IAuthorizeData>());
+                allowAnonymous |= typeAttributes.OfType<IAllowAnonymous>().Any();
+            }
+
+            var methodAttributes = method.GetCustomAttributes(inherit: true);
+            authorizeData.AddRange(methodAttributes.OfType<IAuthorizeData>());
+            allowAnonymous |= methodAttributes.OfType<IAllowAnonymous>().Any();
+
+            return new AuthorizationMetadata(authorizeData.ToArray(), allowAnonymous);
+        }
+
+        private readonly record struct RequestTimeoutMetadata(
+            RequestTimeoutAttribute? RequestTimeout,
+            bool DisableRequestTimeout)
+        {
+            public static RequestTimeoutMetadata None { get; } = new(null, false);
+        }
+
+        private readonly record struct AuthorizationMetadata(
+            IReadOnlyList<IAuthorizeData> AuthorizeData,
+            bool AllowAnonymous);
     }
 }

@@ -46,6 +46,28 @@ namespace Heimdall.Server.Rendering
 			}
 
 			/// <summary>
+			/// Adds an abort directive that suppresses the main target swap.
+			/// </summary>
+			/// <param name="reason">An optional reason surfaced in Heimdall abort events.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallFragmentBuilder Abort(string? reason = null)
+			{
+				_f.Add(HeimdallHtml.Abort(reason));
+				return this;
+			}
+
+			/// <summary>
+			/// Adds a redirect directive that navigates the browser to the supplied URL.
+			/// </summary>
+			/// <param name="url">The URL to navigate to.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallFragmentBuilder Redirect(string url)
+			{
+				_f.Add(HeimdallHtml.Redirect(url));
+				return this;
+			}
+
+			/// <summary>
 			/// Adds HTML content directly to the fragment.
 			/// </summary>
 			/// <param name="content">The content to append.</param>

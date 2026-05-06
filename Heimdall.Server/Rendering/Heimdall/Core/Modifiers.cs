@@ -21,6 +21,31 @@ namespace Heimdall.Server.Rendering
 		/// Prevents default browser behavior for the element.
 		/// </summary>
 		public static Html.HtmlAttr PreventDefault(bool on = true) => Html.Bool(Attrs.PreventDefault, on);
+
+		/// <summary>
+		/// Prevents Heimdall delegated trigger resolution from crossing this element for the specified triggers.
+		/// </summary>
+		public static Html.HtmlAttr Ignore(params Trigger[] triggers)
+			=> Html.Attr(Attrs.Ignore, TriggerListToString(triggers));
+
+		/// <summary>
+		/// Prevents Heimdall delegated trigger resolution from crossing this element for all triggers.
+		/// </summary>
+		public static Html.HtmlAttr IgnoreAll()
+			=> Html.Attr(Attrs.Ignore, "*");
+
+		/// <summary>
+		/// Emits a raw Heimdall ignore trigger list.
+		/// </summary>
+		public static Html.HtmlAttr Ignore(string triggerList)
+			=> Html.Attr(Attrs.Ignore, triggerList);
+
+		/// <summary>
+		/// Sets the delegated trigger matching scope.
+		/// </summary>
+		public static Html.HtmlAttr Scope(EventScope scope)
+			=> Html.Attr(Attrs.Scope, EventScopeToString(scope));
+
 		/// <summary>
 		/// Adds a debounce delay to a trigger.
 		/// </summary>
@@ -56,5 +81,35 @@ namespace Heimdall.Server.Rendering
 		/// </summary>
 		public static Html.HtmlAttr PollMs(int ms)
 			=> Html.Attr(Attrs.Poll, Math.Max(0, ms).ToString(CultureInfo.InvariantCulture));
+
+		private static string EventScopeToString(EventScope scope) => scope switch
+		{
+			EventScope.Self => "self",
+			EventScope.Closest => "closest",
+			_ => "closest"
+		};
+
+		private static string TriggerListToString(IReadOnlyCollection<Trigger>? triggers)
+		{
+			if (triggers is null || triggers.Count == 0)
+				return "*";
+
+			return string.Join(" ", triggers.Select(TriggerToToken));
+		}
+
+		private static string TriggerToToken(Trigger trigger) => trigger switch
+		{
+			Trigger.Load => "load",
+			Trigger.Click => "click",
+			Trigger.Change => "change",
+			Trigger.Input => "input",
+			Trigger.Submit => "submit",
+			Trigger.KeyDown => "keydown",
+			Trigger.Blur => "blur",
+			Trigger.Hover => "hover",
+			Trigger.Visible => "visible",
+			Trigger.Scroll => "scroll",
+			_ => throw new ArgumentOutOfRangeException(nameof(trigger))
+		};
 	}
 }

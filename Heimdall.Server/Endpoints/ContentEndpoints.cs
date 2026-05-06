@@ -1,8 +1,11 @@
 ﻿using Heimdall.Server.Helpers;
 using Heimdall.Server.Registry;
 using Microsoft.AspNetCore.Antiforgery;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System.Reflection;
@@ -15,6 +18,7 @@ namespace Heimdall.Server
     {
         private const string ActionHeader = "X-Heimdall-Content-Action";
         private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
+        private static readonly RequestDelegate EmptyAuthorizationPipeline = _ => Task.CompletedTask;
 
         private static JsonSerializerOptions CreateJsonOptions()
         {
@@ -61,6 +65,12 @@ namespace Heimdall.Server
                 if (!registry.TryGet(actionId, out var action))
                     return Results.NotFound($"Unknown action '{actionId}'.");
 
+                var authorizationResult = await AuthorizeActionAsync(ctx, action);
+                if (authorizationResult is not null)
+                    return authorizationResult;
+
+                var timeoutScope = CreateRequestTimeoutScope(ctx, action);
+
                 try
                 {
                     var args = await BindArgumentsAsync(ctx, action);
@@ -70,6 +80,22 @@ namespace Heimdall.Server
                         return Results.NoContent();
 
                     return Results.Content(raw.RenderHtml(), "text/html; charset=utf-8");
+                }
+                catch (OperationCanceledException) when (timeoutScope.TimedOut)
+                {
+                    return await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
+                }
+                catch (JsonException ex)
+                {
+                    if (settings.EnableDetailedErrors)
+                    {
+                        return Results.Problem(
+                            detail: ex.ToString(),
+                            title: "Invalid Heimdall action request body",
+                            statusCode: StatusCodes.Status400BadRequest);
+                    }
+
+                    return Results.BadRequest("Invalid JSON request body.");
                 }
                 catch (Exception ex)
                 {
@@ -88,6 +114,10 @@ namespace Heimdall.Server
                     return Results.Problem(
                         title: "Heimdall action invocation failed",
                         statusCode: StatusCodes.Status500InternalServerError);
+                }
+                finally
+                {
+                    timeoutScope.Dispose();
                 }
             }).ExcludeFromDescription();
 
@@ -127,16 +157,122 @@ namespace Heimdall.Server
                 {
                     bodyRead = true;
 
-                    if (httpContext.Request.ContentLength is null or 0)
+                    if (httpContext.Request.ContentLength == 0)
                         throw new InvalidOperationException("Request body is empty.");
 
                     bodyJson = await JsonSerializer.DeserializeAsync<JsonElement>(
                         httpContext.Request.Body,
-                        JsonOptions);
+                        JsonOptions,
+                        httpContext.RequestAborted);
                 }
 
                 return BindPayloadValue(bodyJson!.Value, parameter.Parameter);
             }
+        }
+
+        private static async Task<IResult?> AuthorizeActionAsync(
+            HttpContext ctx,
+            ContentActionDescriptor action)
+        {
+            if (!action.RequiresAuthorization)
+                return null;
+
+            var policyProvider = GetRequiredAuthorizationService<IAuthorizationPolicyProvider>(ctx);
+            var policy = await AuthorizationPolicy.CombineAsync(policyProvider, action.AuthorizeData);
+
+            if (policy is null)
+                return null;
+
+            var policyEvaluator = GetRequiredAuthorizationService<IPolicyEvaluator>(ctx);
+            var authenticateResult = await policyEvaluator.AuthenticateAsync(policy, ctx);
+            var authorizeResult = await policyEvaluator.AuthorizeAsync(policy, authenticateResult, ctx, ctx);
+
+            if (authorizeResult.Succeeded)
+                return null;
+
+            var resultHandler = GetRequiredAuthorizationService<IAuthorizationMiddlewareResultHandler>(ctx);
+            await resultHandler.HandleAsync(EmptyAuthorizationPipeline, ctx, policy, authorizeResult);
+
+            return Results.Empty;
+        }
+
+        private static T GetRequiredAuthorizationService<T>(HttpContext ctx)
+            where T : notnull
+        {
+            return ctx.RequestServices.GetService<T>()
+                ?? throw new InvalidOperationException(
+                    $"Heimdall content action authorization requires '{typeof(T).FullName}'. " +
+                    "Register authorization services with services.AddAuthorization(...).");
+        }
+
+        private static ContentActionTimeoutScope CreateRequestTimeoutScope(
+            HttpContext ctx,
+            ContentActionDescriptor action)
+        {
+            if (action.DisableRequestTimeout)
+            {
+                ctx.Features.Get<IHttpRequestTimeoutFeature>()?.DisableTimeout();
+                return ContentActionTimeoutScope.None(ctx);
+            }
+
+            var policy = ResolveRequestTimeoutPolicy(ctx, action);
+            if (policy is null)
+                return ContentActionTimeoutScope.None(ctx);
+
+            ctx.Features.Get<IHttpRequestTimeoutFeature>()?.DisableTimeout();
+            return ContentActionTimeoutScope.Start(ctx, policy);
+        }
+
+        private static RequestTimeoutPolicy? ResolveRequestTimeoutPolicy(
+            HttpContext ctx,
+            ContentActionDescriptor action)
+        {
+            var attr = action.RequestTimeout;
+            if (attr is null)
+                return null;
+
+            if (attr.Timeout.HasValue)
+            {
+                return new RequestTimeoutPolicy
+                {
+                    Timeout = attr.Timeout.Value
+                };
+            }
+
+            if (string.IsNullOrWhiteSpace(attr.PolicyName))
+            {
+                throw new InvalidOperationException(
+                    $"Request timeout metadata for Heimdall action '{action.ActionId}' does not specify a timeout or policy name.");
+            }
+
+            var options = ctx.RequestServices.GetService<IOptions<RequestTimeoutOptions>>()?.Value;
+            if (options is null || !options.Policies.TryGetValue(attr.PolicyName, out var policy))
+            {
+                throw new InvalidOperationException(
+                    $"Request timeout policy '{attr.PolicyName}' was not found for Heimdall action '{action.ActionId}'. " +
+                    "Register it with services.AddRequestTimeouts(...).");
+            }
+
+            return policy;
+        }
+
+        private static async Task<IResult> CreateRequestTimeoutResultAsync(
+            HttpContext ctx,
+            RequestTimeoutPolicy policy)
+        {
+            if (ctx.Response.HasStarted)
+                return Results.Empty;
+
+            var statusCode = policy.TimeoutStatusCode ?? StatusCodes.Status504GatewayTimeout;
+            ctx.Response.StatusCode = statusCode;
+
+            if (policy.WriteTimeoutResponse is not null)
+            {
+                await policy.WriteTimeoutResponse(ctx);
+                return Results.Empty;
+            }
+
+            return Results.StatusCode(statusCode);
         }
 
         private static object? BindPayloadValue(JsonElement bodyJson, ParameterInfo parameter)
@@ -246,6 +382,74 @@ namespace Heimdall.Server
 
             value = default;
             return false;
+        }
+
+        private sealed class ContentActionTimeoutScope : IDisposable
+        {
+            private readonly HttpContext _ctx;
+            private readonly CancellationToken _originalRequestAborted;
+            private readonly CancellationTokenSource? _timeoutCts;
+            private readonly CancellationTokenSource? _linkedCts;
+            private bool _disposed;
+
+            private ContentActionTimeoutScope(
+                HttpContext ctx,
+                CancellationToken originalRequestAborted,
+                RequestTimeoutPolicy? policy,
+                CancellationTokenSource? timeoutCts,
+                CancellationTokenSource? linkedCts)
+            {
+                _ctx = ctx;
+                _originalRequestAborted = originalRequestAborted;
+                Policy = policy;
+                _timeoutCts = timeoutCts;
+                _linkedCts = linkedCts;
+            }
+
+            public RequestTimeoutPolicy? Policy { get; }
+
+            public bool TimedOut =>
+                _timeoutCts?.IsCancellationRequested == true &&
+                !_originalRequestAborted.IsCancellationRequested;
+
+            public static ContentActionTimeoutScope None(HttpContext ctx)
+                => new(ctx, ctx.RequestAborted, policy: null, timeoutCts: null, linkedCts: null);
+
+            public static ContentActionTimeoutScope Start(HttpContext ctx, RequestTimeoutPolicy policy)
+            {
+                var originalRequestAborted = ctx.RequestAborted;
+                var timeout = policy.Timeout;
+
+                if (!timeout.HasValue || timeout.Value == System.Threading.Timeout.InfiniteTimeSpan)
+                    return new ContentActionTimeoutScope(ctx, originalRequestAborted, policy, timeoutCts: null, linkedCts: null);
+
+                var timeoutCts = new CancellationTokenSource();
+                timeoutCts.CancelAfter(timeout.Value);
+
+                var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    originalRequestAborted,
+                    timeoutCts.Token);
+
+                ctx.RequestAborted = linkedCts.Token;
+
+                return new ContentActionTimeoutScope(
+                    ctx,
+                    originalRequestAborted,
+                    policy,
+                    timeoutCts,
+                    linkedCts);
+            }
+
+            public void Dispose()
+            {
+                if (_disposed)
+                    return;
+
+                _ctx.RequestAborted = _originalRequestAborted;
+                _linkedCts?.Dispose();
+                _timeoutCts?.Dispose();
+                _disposed = true;
+            }
         }
 
         private static object ResolveRequiredService(

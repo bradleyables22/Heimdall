@@ -80,6 +80,21 @@ namespace Heimdall.Server.Rendering
 		}
 
 		/// <summary>
+		/// Defines how delegated Heimdall triggers are matched.
+		/// </summary>
+		public enum EventScope
+		{
+			/// <summary>
+			/// The nearest ancestor with a matching Heimdall trigger handles the event.
+			/// </summary>
+			Closest,
+			/// <summary>
+			/// Only the element that owns the Heimdall trigger handles the event.
+			/// </summary>
+			Self
+		}
+
+		/// <summary>
 		/// Defines DOM swap behaviors supported by Heimdall.
 		/// </summary>
 		public enum Swap

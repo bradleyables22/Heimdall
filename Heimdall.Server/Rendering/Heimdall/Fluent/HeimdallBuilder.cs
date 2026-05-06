@@ -207,6 +207,45 @@ namespace Heimdall.Server.Rendering
 			public HeimdallBuilder PreventDefault(bool on = true) { _b.Add(HeimdallHtml.PreventDefault(on)); return this; }
 
 			/// <summary>
+			/// Prevents Heimdall delegated trigger resolution from crossing this element for the specified triggers.
+			/// </summary>
+			/// <param name="triggers">The trigger names to block.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder Ignore(params HeimdallHtml.Trigger[] triggers) { _b.Add(HeimdallHtml.Ignore(triggers)); return this; }
+
+			/// <summary>
+			/// Emits a raw Heimdall ignore trigger list.
+			/// </summary>
+			/// <param name="triggerList">A whitespace-separated trigger list, or <c>*</c>.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder Ignore(string triggerList) { _b.Add(HeimdallHtml.Ignore(triggerList)); return this; }
+
+			/// <summary>
+			/// Prevents Heimdall delegated trigger resolution from crossing this element for all triggers.
+			/// </summary>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder IgnoreAll() { _b.Add(HeimdallHtml.IgnoreAll()); return this; }
+
+			/// <summary>
+			/// Sets the delegated trigger matching scope.
+			/// </summary>
+			/// <param name="scope">The event scope to apply.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder Scope(HeimdallHtml.EventScope scope) { _b.Add(HeimdallHtml.Scope(scope)); return this; }
+
+			/// <summary>
+			/// Allows delegated trigger resolution from descendant event targets.
+			/// </summary>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder ScopeClosest() => Scope(HeimdallHtml.EventScope.Closest);
+
+			/// <summary>
+			/// Restricts the trigger to events whose target is this element.
+			/// </summary>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder ScopeSelf() => Scope(HeimdallHtml.EventScope.Self);
+
+			/// <summary>
 			/// Sets the swap mode to inner.
 			/// </summary>
 			/// <returns>The current builder instance.</returns>

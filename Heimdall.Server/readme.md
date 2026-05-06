@@ -124,6 +124,70 @@ User interaction → heimdall.js → POST content action → server returns HTML
 
 Responses may include `<invocation>` directives for out-of-band updates.
 
+Content actions honor ASP.NET Core request timeout metadata:
+
+```csharp
+using Microsoft.AspNetCore.Http.Timeouts;
+
+[ContentInvocation("search")]
+[RequestTimeout(milliseconds: 2000)]
+public static async Task<IHtmlContent> Search(SearchPayload payload, CancellationToken ct)
+{
+    var results = await SearchService.QueryAsync(payload.Query, ct);
+    return SearchResults.Render(results);
+}
+```
+
+Named timeout policies can be reused with `[RequestTimeout("PolicyName")]` after configuring ASP.NET Core request timeouts with `AddRequestTimeouts(...)`. `[DisableRequestTimeout]` can be applied to a content action or action class to opt out of a default timeout.
+
+Content actions also honor ASP.NET Core authorization metadata:
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+
+[Authorize(Roles = "Admin")]
+[ContentInvocation("admin.refresh")]
+public static IHtmlContent RefreshAdminPanel(HttpContext ctx)
+{
+    return AdminPanel.Render(ctx.User);
+}
+```
+
+`[Authorize]` can be applied to an action method or containing action class. `[AllowAnonymous]` can be used to opt out at either level. Heimdall uses the registered ASP.NET Core authorization services, policies, authentication schemes, and challenge/forbid handlers.
+
+Content action parameters are classified without constructing services. Heimdall uses ASP.NET Core's `IServiceProviderIsService` for implicit service detection and supports explicit markers when a type is ambiguous:
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+
+[ContentInvocation("orders.filter")]
+public static IHtmlContent FilterOrders(
+    [ContentPayload] OrderFilter filter,
+    [FromServices] IOrderRepository orders)
+{
+    return OrderList.Render(orders.Search(filter));
+}
+```
+
+`[ContentPayload]` marks the single payload parameter. `[FromServices]` forces DI binding even if implicit service detection cannot classify the parameter.
+
+Server helpers cover the same trigger-routing and response directives supported by `heimdall.js`:
+
+```csharp
+Html.Button(
+    "Close",
+    HeimdallHtml.OnClick("dialog.close"),
+    HeimdallHtml.Scope(HeimdallHtml.EventScope.Self)
+);
+
+return Html.Fragment(
+    HeimdallHtml.Abort("validation-failed"),
+    HeimdallHtml.Invocation("#errors", HeimdallHtml.Swap.Inner, ErrorList.Render(errors))
+);
+```
+
+Use `HeimdallHtml.Ignore(...)` / `.IgnoreAll()` for `heimdall-ignore`, `HeimdallHtml.Scope(...)` for `heimdall-scope`, `HeimdallHtml.Abort(...)` to suppress the main swap, and `HeimdallHtml.Redirect(...)` for client navigation.
+
 ---
 
 ## Endpoints (v1)
@@ -145,6 +209,25 @@ Server-Sent Events stream for pushing HTML and/or `<invocation>` directives.
 ### Bifrost subscribe token  
 `GET /__heimdall/v1/bifrost/token?topic=...`  
 Issues a short-lived subscribe token gated by antiforgery.
+
+Topic subscription can be authorized before a subscribe token is issued:
+
+```csharp
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("BifrostTopic", policy =>
+        policy.RequireAuthenticatedUser());
+});
+
+builder.Services.AddHeimdall(options =>
+{
+    options.BifrostTopicPolicy = "BifrostTopic";
+    options.AuthorizeBifrostTopic = (ctx, topic) =>
+        ValueTask.FromResult(topic.StartsWith($"user:{ctx.User.Identity?.Name}:", StringComparison.Ordinal));
+});
+```
+
+Policy handlers receive a `BifrostTopicResource` containing the topic and `HttpContext`. If both `BifrostTopicPolicy` and `AuthorizeBifrostTopic` are configured, both must allow the topic. Subscribe tokens are short-lived and bound to the current authenticated principal.
 
 ---
 

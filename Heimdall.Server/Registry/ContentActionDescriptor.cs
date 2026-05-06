@@ -1,5 +1,7 @@
 ﻿using Heimdall.Server.Registry;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
+using Microsoft.AspNetCore.Http.Timeouts;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -17,6 +19,16 @@ namespace Heimdall.Server
 
         public ContentActionReturnKind ReturnKind { get; }
 
+        public RequestTimeoutAttribute? RequestTimeout { get; }
+
+        public bool DisableRequestTimeout { get; }
+
+        public IReadOnlyList<IAuthorizeData> AuthorizeData { get; }
+
+        public bool AllowAnonymous { get; }
+
+        public bool RequiresAuthorization => AuthorizeData.Count > 0 && !AllowAnonymous;
+
         public bool HasPayload => PayloadParameter is not null;
 
         public ContentActionParameterDescriptor? PayloadParameter { get; }
@@ -27,12 +39,20 @@ namespace Heimdall.Server
             string actionId,
             MethodInfo method,
             IReadOnlyList<ContentActionParameterDescriptor> parameters,
-            ContentActionReturnKind returnKind)
+            ContentActionReturnKind returnKind,
+            RequestTimeoutAttribute? requestTimeout,
+            bool disableRequestTimeout,
+            IReadOnlyList<IAuthorizeData> authorizeData,
+            bool allowAnonymous)
         {
             ActionId = actionId;
             Method = method;
             Parameters = parameters;
             ReturnKind = returnKind;
+            RequestTimeout = requestTimeout;
+            DisableRequestTimeout = disableRequestTimeout;
+            AuthorizeData = authorizeData;
+            AllowAnonymous = allowAnonymous;
             PayloadParameter = parameters.FirstOrDefault(x => x.Kind == ContentActionParameterKind.Payload);
             _invoker = CompileInvoker(method);
         }
