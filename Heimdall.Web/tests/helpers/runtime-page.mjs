@@ -30,6 +30,9 @@ export async function installFakeServer(page, options = {}) {
     const bifrostTokens = Array.isArray(serverOptions.bifrostTokens) && serverOptions.bifrostTokens.length > 0
       ? [...serverOptions.bifrostTokens]
       : ["bifrost-token"];
+    const bifrostTokenResponses = Array.isArray(serverOptions.bifrostTokenResponses)
+      ? [...serverOptions.bifrostTokenResponses]
+      : null;
 
     window.__heimdallFetches = [];
 
@@ -64,6 +67,31 @@ export async function installFakeServer(page, options = {}) {
       }
 
       if (url.includes("/__heimdall/v1/bifrost/token")) {
+        if (bifrostTokenResponses) {
+          const response = bifrostTokenResponses.length > 1
+            ? bifrostTokenResponses.shift()
+            : bifrostTokenResponses[0];
+
+          if (response.delayMs && Number(response.delayMs) > 0) {
+            await new Promise(resolve => setTimeout(resolve, Number(response.delayMs)));
+          }
+
+          if (response.token || response.st) {
+            return new Response(JSON.stringify({
+              token: response.token || response.st,
+              expiresInSeconds: response.expiresInSeconds || 120
+            }), {
+              status: response.status || 200,
+              headers: { "Content-Type": "application/json" }
+            });
+          }
+
+          return new Response(response.body || "", {
+            status: response.status || 200,
+            headers: { "Content-Type": response.contentType || "text/plain; charset=utf-8" }
+          });
+        }
+
         const token = bifrostTokens.length > 1 ? bifrostTokens.shift() : bifrostTokens[0];
         return new Response(JSON.stringify({ token, expiresInSeconds: 120 }), {
           status: 200,

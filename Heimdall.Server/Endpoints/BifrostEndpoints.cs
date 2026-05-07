@@ -107,7 +107,7 @@ namespace Heimdall.Server
 
 							await WriteEventAsync(
 								ctx,
-								eventName: "heimdall",
+								eventName: msg.EventName,
 								data: msg.Html,
 								eventId: msg.Id,
 								ct: abort

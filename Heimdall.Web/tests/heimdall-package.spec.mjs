@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, rmSync, readdirSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -80,17 +80,18 @@ try {
   run("dotnet", ["pack", projectFile, "--no-restore", "-o", packDir], { stdio: "pipe" });
   run("dotnet", ["publish", projectFile, "--no-restore", "-o", publishDir], { stdio: "pipe" });
 
-  const nupkgPath = path.join(packDir, "HeimdallFramework.Web.1.0.1.nupkg");
-  assert.equal(existsSync(nupkgPath), true, "Expected package output to exist.");
+  const packageFile = readdirSync(packDir).find(entry =>
+    /^HeimdallFramework\.Web\.\d+\.\d+\.\d+\.nupkg$/.test(entry)
+  );
+  assert.ok(packageFile, "Expected package output to exist.");
+  const nupkgPath = path.join(packDir, packageFile);
 
   const packageEntries = listPackageEntries(nupkgPath);
-  assert.ok(packageEntries.includes("staticwebassets/heimdall.js"), "Package should contain reference runtime.");
   assert.ok(packageEntries.includes("staticwebassets/heimdall-bundle.js"), "Package should contain generated runtime.");
   assert.ok(packageEntries.includes("staticwebassets/heimdall-bundle.min.js"), "Package should contain minified generated runtime.");
   assertNoInternalFiles(packageEntries, "Package");
 
   const publishEntries = listFilesRecursive(publishDir);
-  assert.ok(publishEntries.includes("wwwroot/heimdall.js"), "Publish output should contain reference runtime.");
   assert.ok(publishEntries.includes("wwwroot/heimdall-bundle.js"), "Publish output should contain generated runtime.");
   assert.ok(publishEntries.includes("wwwroot/heimdall-bundle.min.js"), "Publish output should contain minified generated runtime.");
   assertNoInternalFiles(publishEntries, "Publish output");

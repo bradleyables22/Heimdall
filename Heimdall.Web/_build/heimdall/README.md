@@ -2,7 +2,7 @@
 
 This folder contains the maintainable source for the browser runtime.
 
-`wwwroot/heimdall.js` remains the source-of-truth reference file for now. The build pipeline reads `heimdall.entry.js`, bundles its ES module imports with esbuild, and writes `wwwroot/heimdall-bundle.js` plus `wwwroot/heimdall-bundle.min.js`.
+The build pipeline reads `heimdall.entry.js`, bundles its ES module imports with esbuild, and writes `wwwroot/heimdall-bundle.js` plus `wwwroot/heimdall-bundle.min.js`.
 
 Consumers should still reference only one public RCL asset. Use the readable generated runtime while debugging:
 
@@ -21,7 +21,6 @@ Use the minified generated runtime in production:
 - Preserve behavior exactly unless a change is intentional.
 - Preserve existing quirks while refactoring.
 - Keep `heimdall.entry.js` as the single runtime entrypoint.
-- Do not write generated output over `wwwroot/heimdall.js` while it is the reference file.
 - Treat `wwwroot/heimdall-bundle.js` and `wwwroot/heimdall-bundle.min.js` as generated output.
 - Prefer small `import` / `export` modules for runtime code. Current modules live under `core/`.
 
@@ -47,7 +46,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\build-heimdall.ps1
 npm run verify
 ```
 
-Verification checks that generated bundles are up to date and that the browser parity tests pass against `wwwroot/heimdall.js`, `wwwroot/heimdall-bundle.js`, and `wwwroot/heimdall-bundle.min.js`.
+Verification checks that generated bundles are up to date and that the browser tests pass against `wwwroot/heimdall-bundle.js` and `wwwroot/heimdall-bundle.min.js`.
 
 The first local test run may need the Playwright browser binary:
 
@@ -55,4 +54,4 @@ The first local test run may need the Playwright browser binary:
 npm run install:browsers
 ```
 
-The parity tests live in `tests/heimdall-runtime.spec.mjs`.
+The browser tests live in `tests/heimdall-runtime.spec.mjs`.

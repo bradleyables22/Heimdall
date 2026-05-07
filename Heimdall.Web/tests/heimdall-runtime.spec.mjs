@@ -13,10 +13,6 @@ import {
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtimes = [
   {
-    name: "reference",
-    path: path.join(projectRoot, "wwwroot", "heimdall.js")
-  },
-  {
     name: "bundle",
     path: path.join(projectRoot, "wwwroot", "heimdall-bundle.js")
   },
@@ -55,6 +51,12 @@ const tests = [
   ["mints SSE subscribe tokens with CSRF", testSseSubscribeToken],
   ["applies SSE messages and emits message events", testSseMessageSwap],
   ["handles custom SSE events and disconnects", testSseCustomEventAndDisconnect],
+  ["shares SSE connections across event subscribers", testSseSharedConnectionAcrossEvents],
+  ["retries SSE token failures with backoff", testSseTokenFailureRetry],
+  ["reconnects SSE errors with a fresh token", testSseErrorReconnectFreshToken],
+  ["pauses SSE reconnects while offline", testSseOfflinePauseResume],
+  ["resumes programmatic SSE after hidden pause", testSseProgrammaticHiddenPauseResume],
+  ["observes SSE attribute changes", testSseAttributeChanges],
   ["boots root element load triggers", testBootRootLoadTrigger],
   ["boots inserted load triggers with MutationObserver", testMutationObserverBoot]
 ];
@@ -1083,6 +1085,755 @@ async function testSseCustomEventAndDisconnect(page) {
   assert.deepEqual(state.closeEvents, [{ topic: "topic:custom", reason: "manual" }]);
 }
 
+async function testSseSharedConnectionAcrossEvents(page) {
+  await installFakeServer(page, {
+    csrfTokens: ["csrf-sse-shared"],
+    bifrostTokens: ["st-shared"]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = `
+      <div id="sse-host-a"></div>
+      <div id="sse-host-b"></div>
+      <div id="target-a">A old</div>
+      <div id="target-b">B old</div>
+    `;
+
+    window.__eventSources = [];
+    window.EventSource = class {
+      constructor(url) {
+        this.url = url;
+        this.listeners = {};
+        this.closed = false;
+        window.__eventSources.push(this);
+      }
+
+      addEventListener(name, handler) {
+        this.listeners[name] = handler;
+      }
+
+      removeEventListener(name, handler) {
+        if (this.listeners[name] === handler) {
+          delete this.listeners[name];
+        }
+      }
+
+      close() {
+        this.closed = true;
+      }
+    };
+
+    const messages = [];
+    const closeEvents = [];
+
+    document.addEventListener("heimdall:sse-message", ev => {
+      messages.push({
+        topic: ev.detail.topic,
+        event: ev.detail.event,
+        targetId: ev.detail.el && ev.detail.el.id
+      });
+    });
+
+    document.addEventListener("heimdall:sse-close", ev => {
+      closeEvents.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason,
+        el: ev.detail.el && ev.detail.el.id
+      });
+    });
+
+    const first = window.Heimdall.sse.connect("topic:shared", {
+      element: document.querySelector("#sse-host-a"),
+      target: "#target-a",
+      swap: "inner",
+      event: "order.updated"
+    });
+
+    const second = window.Heimdall.sse.connect("topic:shared", {
+      element: document.querySelector("#sse-host-b"),
+      target: "#target-b",
+      swap: "inner",
+      event: "toast"
+    });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        const es = window.__eventSources[0];
+        if (
+          window.__eventSources.length === 1 &&
+          es &&
+          typeof es.listeners["order.updated"] === "function" &&
+          typeof es.listeners.toast === "function"
+        ) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for shared EventSource listeners"));
+        }
+      }, 10);
+    });
+
+    const es = window.__eventSources[0];
+    es.listeners["order.updated"]({
+      data: '<span id="order-done">Order</span>',
+      lastEventId: "order-1"
+    });
+
+    first.close();
+    const closedAfterFirst = es.closed;
+
+    es.listeners.toast({
+      data: '<strong id="toast-done">Toast</strong>',
+      lastEventId: "toast-1"
+    });
+
+    second.close();
+
+    return {
+      eventSourceCount: window.__eventSources.length,
+      eventSourceUrl: es.url,
+      firstUrl: first.url,
+      secondUrl: second.url,
+      closedAfterFirst,
+      closedAfterSecond: es.closed,
+      targetA: document.querySelector("#target-a").innerHTML,
+      targetB: document.querySelector("#target-b").innerHTML,
+      messages,
+      closeEvents
+    };
+  });
+
+  const eventSourceUrl = new URL(state.eventSourceUrl);
+
+  assert.equal(state.eventSourceCount, 1);
+  assert.equal(eventSourceUrl.searchParams.get("topic"), "topic:shared");
+  assert.equal(eventSourceUrl.searchParams.get("st"), "st-shared");
+  assert.equal(state.firstUrl, state.eventSourceUrl);
+  assert.equal(state.secondUrl, state.eventSourceUrl);
+  assert.equal(state.closedAfterFirst, false);
+  assert.equal(state.closedAfterSecond, true);
+  assert.equal(state.targetA, '<span id="order-done">Order</span>');
+  assert.equal(state.targetB, '<strong id="toast-done">Toast</strong>');
+  assert.deepEqual(state.messages, [
+    { topic: "topic:shared", event: "order.updated", targetId: "sse-host-a" },
+    { topic: "topic:shared", event: "toast", targetId: "sse-host-b" }
+  ]);
+  assert.deepEqual(state.closeEvents, [
+    { topic: "topic:shared", reason: "manual", el: "sse-host-a" },
+    { topic: "topic:shared", reason: "manual", el: "sse-host-b" }
+  ]);
+
+  const fetches = await getFetches(page);
+  const tokenFetches = fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/bifrost/token"));
+  assert.equal(tokenFetches.length, 1);
+}
+
+async function testSseTokenFailureRetry(page) {
+  await installFakeServer(page, {
+    csrfTokens: ["csrf-sse-retry"],
+    bifrostTokenResponses: [
+      { status: 401, body: "try again" },
+      { token: "st-retry" }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="sse-host"></div>';
+    window.Heimdall.config.sseReconnectDelayMs = 10;
+    window.Heimdall.config.sseReconnectMaxDelayMs = 10;
+
+    window.__eventSources = [];
+    window.EventSource = class {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        window.__eventSources.push(this);
+      }
+
+      addEventListener() {
+      }
+
+      close() {
+        this.closed = true;
+      }
+    };
+
+    const scheduled = [];
+    document.addEventListener("heimdall:sse-reconnect-scheduled", ev => {
+      scheduled.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason,
+        status: ev.detail.status,
+        delayMs: ev.detail.delayMs
+      });
+    });
+
+    window.Heimdall.sse.connect("topic:retry", {
+      element: document.querySelector("#sse-host"),
+      event: "message"
+    });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources.length > 0) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for retry EventSource"));
+        }
+      }, 10);
+    });
+
+    return {
+      eventSourceUrl: window.__eventSources[0].url,
+      scheduled
+    };
+  });
+
+  const eventSourceUrl = new URL(state.eventSourceUrl);
+  assert.equal(eventSourceUrl.searchParams.get("topic"), "topic:retry");
+  assert.equal(eventSourceUrl.searchParams.get("st"), "st-retry");
+  assert.equal(state.scheduled.length, 1);
+  assert.deepEqual(state.scheduled[0], {
+    topic: "topic:retry",
+    reason: "token-failed",
+    status: 401,
+    delayMs: 10
+  });
+
+  const fetches = await getFetches(page);
+  const tokenFetches = fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/bifrost/token"));
+  assert.equal(tokenFetches.length, 2);
+}
+
+async function testSseErrorReconnectFreshToken(page) {
+  await installFakeServer(page, {
+    csrfTokens: ["csrf-sse-error"],
+    bifrostTokenResponses: [
+      { token: "st-first" },
+      { token: "st-second" }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="sse-host"></div>';
+    window.Heimdall.config.sseReconnectDelayMs = 10;
+    window.Heimdall.config.sseReconnectMaxDelayMs = 10;
+
+    window.__eventSources = [];
+    window.EventSource = class {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        window.__eventSources.push(this);
+      }
+
+      addEventListener() {
+      }
+
+      close() {
+        this.closed = true;
+      }
+    };
+
+    const scheduled = [];
+    document.addEventListener("heimdall:sse-reconnect-scheduled", ev => {
+      scheduled.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason,
+        delayMs: ev.detail.delayMs
+      });
+    });
+
+    window.Heimdall.sse.connect("topic:error", {
+      element: document.querySelector("#sse-host"),
+      event: "message"
+    });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        const es = window.__eventSources[0];
+        if (es && typeof es.onerror === "function") {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for initial EventSource"));
+        }
+      }, 10);
+    });
+
+    const first = window.__eventSources[0];
+    first.onerror({ type: "error" });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources.length > 1) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for reconnect EventSource"));
+        }
+      }, 10);
+    });
+
+    return {
+      firstUrl: window.__eventSources[0].url,
+      secondUrl: window.__eventSources[1].url,
+      firstClosed: window.__eventSources[0].closed,
+      scheduled
+    };
+  });
+
+  const firstUrl = new URL(state.firstUrl);
+  const secondUrl = new URL(state.secondUrl);
+
+  assert.equal(firstUrl.searchParams.get("st"), "st-first");
+  assert.equal(secondUrl.searchParams.get("st"), "st-second");
+  assert.equal(state.firstClosed, true);
+  assert.equal(state.scheduled.length, 1);
+  assert.deepEqual(state.scheduled[0], {
+    topic: "topic:error",
+    reason: "eventsource-error",
+    delayMs: 10
+  });
+
+  const fetches = await getFetches(page);
+  const tokenFetches = fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/bifrost/token"));
+  assert.equal(tokenFetches.length, 2);
+}
+
+async function testSseOfflinePauseResume(page) {
+  await installFakeServer(page, {
+    csrfTokens: ["csrf-sse-offline"],
+    bifrostTokenResponses: [
+      { token: "st-offline-first" },
+      { token: "st-offline-second" }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="sse-host"></div>';
+    window.Heimdall.config.sseReconnectDelayMs = 10;
+    window.Heimdall.config.sseReconnectMaxDelayMs = 10;
+    window.__heimdallOnline = true;
+
+    Object.defineProperty(window.navigator, "onLine", {
+      configurable: true,
+      get: () => window.__heimdallOnline
+    });
+
+    window.__eventSources = [];
+    window.EventSource = class {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        window.__eventSources.push(this);
+      }
+
+      addEventListener() {
+      }
+
+      close() {
+        this.closed = true;
+      }
+    };
+
+    const paused = [];
+    const resumed = [];
+    const scheduled = [];
+
+    document.addEventListener("heimdall:sse-pause", ev => {
+      paused.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason
+      });
+    });
+
+    document.addEventListener("heimdall:sse-resume", ev => {
+      resumed.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason,
+        previousReason: ev.detail.previousReason
+      });
+    });
+
+    document.addEventListener("heimdall:sse-reconnect-scheduled", ev => {
+      scheduled.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason
+      });
+    });
+
+    window.Heimdall.sse.connect("topic:offline", {
+      element: document.querySelector("#sse-host"),
+      event: "message"
+    });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        const es = window.__eventSources[0];
+        if (es && typeof es.onerror === "function") {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for initial EventSource"));
+        }
+      }, 10);
+    });
+
+    window.__heimdallOnline = false;
+    window.__eventSources[0].onerror({ type: "error" });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (paused.length > 0 && window.__eventSources[0].closed) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for offline pause"));
+        }
+      }, 10);
+    });
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const countWhileOffline = window.__eventSources.length;
+
+    window.__heimdallOnline = true;
+    window.dispatchEvent(new Event("online"));
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources.length > 1) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for online resume"));
+        }
+      }, 10);
+    });
+
+    return {
+      firstUrl: window.__eventSources[0].url,
+      secondUrl: window.__eventSources[1].url,
+      firstClosed: window.__eventSources[0].closed,
+      countWhileOffline,
+      paused,
+      resumed,
+      scheduled
+    };
+  });
+
+  const firstUrl = new URL(state.firstUrl);
+  const secondUrl = new URL(state.secondUrl);
+
+  assert.equal(firstUrl.searchParams.get("st"), "st-offline-first");
+  assert.equal(secondUrl.searchParams.get("st"), "st-offline-second");
+  assert.equal(state.firstClosed, true);
+  assert.equal(state.countWhileOffline, 1);
+  assert.deepEqual(state.paused, [{ topic: "topic:offline", reason: "offline" }]);
+  assert.deepEqual(state.resumed, [{ topic: "topic:offline", reason: "online", previousReason: "offline" }]);
+  assert.deepEqual(state.scheduled, []);
+
+  const fetches = await getFetches(page);
+  const tokenFetches = fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/bifrost/token"));
+  assert.equal(tokenFetches.length, 2);
+}
+
+async function testSseProgrammaticHiddenPauseResume(page) {
+  await installFakeServer(page, {
+    csrfTokens: ["csrf-sse-hidden"],
+    bifrostTokenResponses: [
+      { token: "st-hidden" }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="sse-host"></div>';
+    window.Heimdall.config.ssePauseWhenHidden = true;
+    window.__heimdallHidden = false;
+
+    Object.defineProperty(document, "hidden", {
+      configurable: true,
+      get: () => window.__heimdallHidden
+    });
+
+    window.__eventSources = [];
+    window.EventSource = class {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        window.__eventSources.push(this);
+      }
+
+      addEventListener() {
+      }
+
+      close() {
+        this.closed = true;
+      }
+    };
+
+    const paused = [];
+    const resumed = [];
+
+    document.addEventListener("heimdall:sse-pause", ev => {
+      paused.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason
+      });
+    });
+
+    document.addEventListener("heimdall:sse-resume", ev => {
+      resumed.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason,
+        previousReason: ev.detail.previousReason
+      });
+    });
+
+    const handle = window.Heimdall.sse.connect("topic:hidden", {
+      element: document.querySelector("#sse-host"),
+      event: "message"
+    });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources.length > 0) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for initial EventSource"));
+        }
+      }, 10);
+    });
+
+    window.__heimdallHidden = true;
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources[0].closed && paused.length > 0) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for hidden pause"));
+        }
+      }, 10);
+    });
+
+    window.__heimdallHidden = false;
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources.length > 1) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for visible resume"));
+        }
+      }, 10);
+    });
+
+    return {
+      firstUrl: window.__eventSources[0].url,
+      secondUrl: window.__eventSources[1].url,
+      firstClosed: window.__eventSources[0].closed,
+      handleTopic: handle.topic,
+      handleUrl: handle.url,
+      paused,
+      resumed
+    };
+  });
+
+  const firstUrl = new URL(state.firstUrl);
+  const secondUrl = new URL(state.secondUrl);
+
+  assert.equal(firstUrl.searchParams.get("topic"), "topic:hidden");
+  assert.equal(secondUrl.searchParams.get("topic"), "topic:hidden");
+  assert.equal(firstUrl.searchParams.get("st"), "st-hidden");
+  assert.equal(secondUrl.searchParams.get("st"), "st-hidden");
+  assert.equal(state.firstClosed, true);
+  assert.equal(state.handleTopic, "topic:hidden");
+  assert.equal(state.handleUrl, state.secondUrl);
+  assert.deepEqual(state.paused, [{ topic: "topic:hidden", reason: "hidden" }]);
+  assert.deepEqual(state.resumed, [{ topic: "topic:hidden", reason: "visible", previousReason: "hidden" }]);
+
+  const fetches = await getFetches(page);
+  const tokenFetches = fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/bifrost/token"));
+  assert.equal(tokenFetches.length, 1);
+}
+
+async function testSseAttributeChanges(page) {
+  await installFakeServer(page, {
+    csrfTokens: ["csrf-sse-attrs"],
+    bifrostTokenResponses: [
+      { token: "st-attrs-one" },
+      { token: "st-attrs-two" }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="sse-host"></div><div id="target">Old</div>';
+    window.Heimdall.config.sseReconnectDelayMs = 10;
+    window.Heimdall.config.sseReconnectMaxDelayMs = 10;
+
+    window.__eventSources = [];
+    window.EventSource = class {
+      constructor(url) {
+        this.url = url;
+        this.closed = false;
+        window.__eventSources.push(this);
+      }
+
+      addEventListener() {
+      }
+
+      close() {
+        this.closed = true;
+      }
+    };
+
+    const closeEvents = [];
+    document.addEventListener("heimdall:sse-close", ev => {
+      closeEvents.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason
+      });
+    });
+
+    const host = document.querySelector("#sse-host");
+    host.setAttribute("heimdall-sse", "topic:attrs");
+    host.setAttribute("heimdall-sse-target", "#target");
+    host.setAttribute("heimdall-sse-swap", "inner");
+    host.setAttribute("heimdall-sse-event", "message");
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources.length > 0) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for attribute-created EventSource"));
+        }
+      }, 10);
+    });
+
+    host.setAttribute("heimdall-sse", "topic:attrs-next");
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources.length > 1) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for attribute-changed EventSource"));
+        }
+      }, 10);
+    });
+
+    host.setAttribute("heimdall-sse-disable", "true");
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        if (window.__eventSources[1] && window.__eventSources[1].closed) {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for SSE disable close"));
+        }
+      }, 10);
+    });
+
+    return {
+      firstUrl: window.__eventSources[0].url,
+      secondUrl: window.__eventSources[1].url,
+      firstClosed: window.__eventSources[0].closed,
+      secondClosed: window.__eventSources[1].closed,
+      closeEvents
+    };
+  });
+
+  const firstUrl = new URL(state.firstUrl);
+  const secondUrl = new URL(state.secondUrl);
+
+  assert.equal(firstUrl.searchParams.get("topic"), "topic:attrs");
+  assert.equal(firstUrl.searchParams.get("st"), "st-attrs-one");
+  assert.equal(secondUrl.searchParams.get("topic"), "topic:attrs-next");
+  assert.equal(secondUrl.searchParams.get("st"), "st-attrs-two");
+  assert.equal(state.firstClosed, true);
+  assert.equal(state.secondClosed, true);
+  assert.deepEqual(state.closeEvents, [
+    { topic: "topic:attrs", reason: "topic-changed" },
+    { topic: "topic:attrs-next", reason: "disabled" }
+  ]);
+}
+
 async function testBootRootLoadTrigger(page) {
   await installFakeServer(page, {
     actionResponses: [{ body: '<span id="root-loaded">Root</span>' }]
@@ -1158,4 +1909,4 @@ if (failures > 0) {
   throw new Error(`${failures} Heimdall runtime test(s) failed.`);
 }
 
-console.log(`Heimdall runtime parity tests passed (${runtimes.length * tests.length} checks).`);
+console.log(`Heimdall runtime tests passed (${runtimes.length * tests.length} checks).`);

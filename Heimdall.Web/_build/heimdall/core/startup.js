@@ -43,8 +43,23 @@ export function createHeimdallRuntime({
             Promise.resolve().then(flush);
         }
 
+        const attributeFilter = [
+            "heimdall-sse",
+            "heimdall-sse-topic",
+            "heimdall-sse-target",
+            "heimdall-sse-swap",
+            "heimdall-sse-event",
+            "heimdall-sse-disable"
+        ];
+
         const obs = new MutationObserver((mutations) => {
             for (const m of mutations) {
+                if (m.type === "attributes") {
+                    if (m.target && m.target.nodeType === 1)
+                        pending.add(m.target);
+                    continue;
+                }
+
                 for (const n of m.addedNodes) {
                     if (!n || n.nodeType !== 1)
                         continue;
@@ -54,7 +69,7 @@ export function createHeimdallRuntime({
             if (pending.size) scheduleFlush();
         });
 
-        obs.observe(document.body, { childList: true, subtree: true });
+        obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter });
         Heimdall._observer = obs;
 
         dbg("MutationObserver installed");
@@ -105,6 +120,9 @@ export function createHeimdallRuntime({
 
             sseDefaultSwap: "none",
             sseEventName: "heimdall",
+            sseReconnectDelayMs: 250,
+            sseReconnectMaxDelayMs: 10000,
+            sseReconnectBackoffFactor: 2,
             sseSweepIntervalMs: 5000,
             ssePauseWhenHidden: false
         }

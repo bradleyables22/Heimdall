@@ -17,6 +17,8 @@ namespace Heimdall.Server
     /// intended for use in web applications that require real-time UI updates.</remarks>
 	public sealed class Bifrost
 	{
+        private const string DefaultEventName = "heimdall";
+
         private readonly ConcurrentDictionary<string, TopicSubscriptions> _subsByTopic
             = new(StringComparer.OrdinalIgnoreCase);
 
@@ -48,9 +50,29 @@ namespace Heimdall.Server
         /// <exception cref="ArgumentException">Thrown if topic is null, empty, or consists only of white-space characters.</exception>
         /// <exception cref="ArgumentNullException">Thrown if content is null.</exception>
         public ValueTask PublishAsync(string topic, IHtmlContent content, TimeSpan ttl, CancellationToken ct = default)
+            => PublishAsync(topic, DefaultEventName, content, ttl, ct);
+
+        /// <summary>
+        /// Publishes an HTML message to the specified topic and SSE event name with a given time-to-live (TTL) duration.
+        /// </summary>
+        /// <param name="topic">The topic to which the message will be published. Cannot be null, empty, or consist only of white-space
+        /// characters.</param>
+        /// <param name="eventName">The SSE event name to emit. If null, empty, or white-space, the default Heimdall event name is used.
+        /// Newline characters are not allowed.</param>
+        /// <param name="content">The HTML content to publish. Cannot be null.</param>
+        /// <param name="ttl">The duration for which the message remains valid. If less than or equal to zero, a default TTL of 5 seconds
+        /// is used.</param>
+        /// <param name="ct">A cancellation token that can be used to cancel the publish operation.</param>
+        /// <returns>A ValueTask that represents the asynchronous publish operation.</returns>
+        /// <exception cref="ArgumentException">Thrown if topic is null, empty, or consists only of white-space characters, or if
+        /// eventName contains newline characters.</exception>
+        /// <exception cref="ArgumentNullException">Thrown if content is null.</exception>
+        public ValueTask PublishAsync(string topic, string? eventName, IHtmlContent content, TimeSpan ttl, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(topic))
                 throw new ArgumentException("Topic is required.", nameof(topic));
+
+            eventName = NormalizeEventName(eventName);
 
             if (content is null)
                 throw new ArgumentNullException(nameof(content));
@@ -63,6 +85,7 @@ namespace Heimdall.Server
 
             var msg = new BifrostMessage(
                 Topic: topic,
+                EventName: eventName,
                 Id: Guid.NewGuid().ToString("N"),
                 Html: html,
                 CreatedUtc: now,
@@ -77,5 +100,17 @@ namespace Heimdall.Server
             return ValueTask.CompletedTask;
         }
 
+        private static string NormalizeEventName(string? eventName)
+        {
+            if (string.IsNullOrWhiteSpace(eventName))
+                return DefaultEventName;
+
+            eventName = eventName.Trim();
+
+            if (eventName.Contains('\r') || eventName.Contains('\n'))
+                throw new ArgumentException("SSE event names cannot contain newline characters.", nameof(eventName));
+
+            return eventName;
+        }
     }
 }

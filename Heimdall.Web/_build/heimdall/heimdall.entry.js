@@ -16,7 +16,7 @@ import {
     "use strict";
 
     // ============================================================================
-    // Heimdall.js
+    // Heimdall runtime
     // ---------------------------------------------------------------------------
     // API Version: v1
     // ---------------------------------------------------------------------------
@@ -315,6 +315,7 @@ import {
         dbg
     });
     const {
+        clearBifrostSubscribeToken,
         clearCsrfToken,
         ensureBifrostSubscribeToken,
         ensureCsrfToken
@@ -378,6 +379,7 @@ import {
         dbg,
         dom,
         boot: root => boot(root),
+        clearBifrostSubscribeToken,
         ensureBifrostSubscribeToken,
         matchesTriggerAttr,
         defaultBifrostEndpoint: DEFAULT_BIFROST_ENDPOINT

@@ -440,6 +440,39 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task BifrostStream_DeliversPublishedHtmlWithNamedEvent()
+    {
+        await using var app = await CreateAppAsync(configureHeimdall: options =>
+        {
+            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
+        });
+        using var client = app.GetTestClient();
+        var tokenResponse = await GetBifrostTokenAsync(client, "orders", "alice");
+        var token = await tokenResponse.Content.ReadFromJsonAsync<BifrostTokenResponse>();
+        using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/__heimdall/v1/bifrost?topic=orders&st={Uri.EscapeDataString(token!.Token!)}");
+        request.Headers.Add(TestAuthHandler.UserHeaderName, "alice");
+
+        var response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            streamCts.Token);
+        var stream = await response.Content.ReadAsStreamAsync(streamCts.Token);
+        var readTask = ReadUntilAsync(stream, "data: <span>changed</span>", streamCts.Token);
+
+        await app.Services.GetRequiredService<Bifrost>()
+            .PublishAsync("orders", "order.updated", Html.Span("changed"), TimeSpan.FromSeconds(5), streamCts.Token);
+        var body = await readTask;
+        await streamCts.CancelAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("event: order.updated", body);
+        Assert.Contains("data: <span>changed</span>", body);
+    }
+
+    [Fact]
     public async Task BifrostStream_SendsIdleHeartbeatComment()
     {
         await using var app = await CreateAppAsync(configureHeimdall: options =>

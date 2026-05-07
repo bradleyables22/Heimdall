@@ -36,7 +36,6 @@ The design goal:
 
 * `heimdall-bundle.min.js` production runtime
 * `heimdall-bundle.js` readable debugging runtime
-* `heimdall.js` reference runtime
 * Static web asset delivery via Razor Class Library
 * Automatic boot on DOM ready
 * Declarative action system
@@ -217,8 +216,12 @@ Features:
 
 * Auto reconnect
 * Token-gated subscription
+* Shared EventSource connections per topic
+* Named SSE event dispatch with `heimdall-sse-event`
 * OOB processing supported
 * Works alongside normal actions
+
+Multiple hosts on the same topic share one underlying EventSource. `heimdall-sse-event` filters which named server event a host handles inside that topic stream.
 
 ---
 

@@ -48,6 +48,19 @@ export function createSecurityTokens({
         _bifrostTokenPromiseByTopic.clear();
     }
 
+    function clearBifrostSubscribeToken(topic) {
+        const t = String(topic || "").trim();
+
+        if (!t) {
+            _bifrostTokenByTopic.clear();
+            _bifrostTokenPromiseByTopic.clear();
+            return;
+        }
+
+        _bifrostTokenByTopic.delete(t);
+        _bifrostTokenPromiseByTopic.delete(t);
+    }
+
     async function ensureBifrostSubscribeToken(topic) {
         const t = String(topic || "").trim();
         if (!t)
@@ -85,7 +98,10 @@ export function createSecurityTokens({
 
                 if (!res.ok) {
                     const body = await safeText(res);
-                    throw new Error(`Bifrost token fetch failed: ${res.status}. ${body || ""}`.trim());
+                    const error = new Error(`Bifrost token fetch failed: ${res.status}. ${body || ""}`.trim());
+                    error.status = res.status;
+                    error.body = body;
+                    throw error;
                 }
 
                 const data = await res.json();
@@ -110,6 +126,7 @@ export function createSecurityTokens({
     }
 
     return {
+        clearBifrostSubscribeToken,
         clearCsrfToken,
         ensureBifrostSubscribeToken,
         ensureCsrfToken

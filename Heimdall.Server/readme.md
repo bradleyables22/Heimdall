@@ -7,7 +7,7 @@ It exposes middleware, endpoints, and page primitives that enable **HTML-first a
 Most applications will use both packages:
 
 - **HeimdallFramework.Server** → server runtime
-- **HeimdallFramework.Web** → client runtime (`heimdall.js` static asset)
+- **HeimdallFramework.Web** → client runtime static assets
 
 ---
 
@@ -120,7 +120,7 @@ Client triggers → server executes → server returns HTML.
 
 Typical flow:
 
-User interaction → heimdall.js → POST content action → server returns HTML → DOM swap
+User interaction → Heimdall client runtime → POST content action → server returns HTML → DOM swap
 
 Responses may include `<invocation>` directives for out-of-band updates.
 
@@ -171,7 +171,7 @@ public static IHtmlContent FilterOrders(
 
 `[ContentPayload]` marks the single payload parameter. `[FromServices]` forces DI binding even if implicit service detection cannot classify the parameter.
 
-Server helpers cover the same trigger-routing and response directives supported by `heimdall.js`:
+Server helpers cover the same trigger-routing and response directives supported by the Heimdall client runtime:
 
 ```csharp
 Html.Button(
@@ -200,11 +200,20 @@ Executes a server action and returns HTML (optionally containing `<invocation>` 
 
 ### CSRF token  
 `GET /__heimdall/v1/csrf`  
-Returns an antiforgery token used by `heimdall.js` (cached client-side).
+Returns an antiforgery token used by the Heimdall client runtime (cached client-side).
 
 ### Bifrost (SSE)  
 `GET /__heimdall/v1/bifrost?topic=...`  
 Server-Sent Events stream for pushing HTML and/or `<invocation>` directives.
+
+Bifrost publishes on the default Heimdall SSE event unless an event name is supplied:
+
+```csharp
+await bifrost.PublishAsync("orders", Html.Span("Updated"), TimeSpan.FromSeconds(5));
+await bifrost.PublishAsync("orders", "order.updated", Html.Span("Updated"), TimeSpan.FromSeconds(5));
+```
+
+Use topics for subscription and authorization boundaries. Use named events to route different message types inside the same topic stream.
 
 ### Bifrost subscribe token  
 `GET /__heimdall/v1/bifrost/token?topic=...`  
