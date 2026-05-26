@@ -299,6 +299,26 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task UseHeimdall_IApplicationBuilder_RegistersHeimdallEndpoints()
+    {
+        await using var app = await CreateAppUsingIApplicationBuilderUseHeimdallAsync();
+        using var client = app.GetTestClient();
+
+        var csrfToken = await GetCsrfTokenAsync(client);
+        Assert.False(string.IsNullOrWhiteSpace(csrfToken.RequestToken));
+
+        var actionResponse = await PostContentActionAsync(client, "tests.auth.allow-anonymous");
+        var actionHtml = await actionResponse.Content.ReadAsStringAsync();
+        Assert.Equal(HttpStatusCode.OK, actionResponse.StatusCode);
+        Assert.Contains("public", actionHtml);
+
+        var bifrostResponse = await GetBifrostTokenAsync(client, "test-topic", "alice");
+        var bifrostToken = await bifrostResponse.Content.ReadFromJsonAsync<BifrostTokenResponse>();
+        Assert.Equal(HttpStatusCode.OK, bifrostResponse.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(bifrostToken?.Token));
+    }
+
+    [Fact]
     public async Task BifrostTokenEndpoint_UsesConfiguredTopicAuthorization()
     {
         await using var app = await CreateAppAsync(configureHeimdall: options =>
@@ -530,6 +550,35 @@ public sealed class ServerIntegrationTests
         app.UseAuthentication();
         app.UseAuthorization();
         app.UseHeimdall();
+        await app.StartAsync();
+        return app;
+    }
+
+    private static async Task<WebApplication> CreateAppUsingIApplicationBuilderUseHeimdallAsync()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddRouting();
+        builder.Services.AddAntiforgery();
+        builder.Services.AddAuthentication(TestAuthHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
+        builder.Services.AddAuthorization();
+        builder.Services.AddHeimdall(options =>
+        {
+            options.EnableDetailedErrors = true;
+            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
+        }, typeof(ServerIntegrationTests).Assembly);
+
+        var app = builder.Build();
+        app.UseRouting();
+        app.UseAntiforgery();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        ((IApplicationBuilder)app).UseHeimdall();
         await app.StartAsync();
         return app;
     }

@@ -68,6 +68,27 @@ namespace Heimdall.Server
             return app;
         }
 
+        /// <summary>
+        /// Enables Heimdall within an ASP.NET Core middleware pipeline that uses endpoint routing.
+        /// </summary>
+        /// <param name="app">
+        /// The <see cref="IApplicationBuilder"/> instance used to configure the request pipeline.
+        /// </param>
+        /// <returns>
+        /// The same <see cref="IApplicationBuilder"/> instance, allowing fluent pipeline configuration.
+        /// </returns>
+        public static IApplicationBuilder UseHeimdall(this IApplicationBuilder app)
+        {
+            app.UseEndpoints(endpoints =>
+            {
+                endpoints.MapHeimdallSecurityEndpoints();
+                endpoints.MapHeimdallContentEndpoints();
+                endpoints.MapHeimdallBifrostEndpoints();
+            });
+
+            return app;
+        }
+
         private static IServiceCollection AddHeimdallCore(
             IServiceCollection services,
             Action<HeimdallServiceSettings>? configure,

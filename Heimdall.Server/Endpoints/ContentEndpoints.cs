@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System.Reflection;
@@ -42,7 +43,7 @@ namespace Heimdall.Server
             return o;
         }
 
-        internal static WebApplication MapHeimdallContentEndpoints(this WebApplication app)
+        internal static IEndpointRouteBuilder MapHeimdallContentEndpoints(this IEndpointRouteBuilder app)
         {
             app.MapPost("__heimdall/v1/content/actions", async (
                 HttpContext ctx,
