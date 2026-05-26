@@ -68,6 +68,27 @@ namespace Heimdall.Server
             return app;
         }
 
+        /// <summary>
+        /// Enables Heimdall within the ASP.NET request pipeline.
+        /// 
+        /// This method finalizes Heimdall setup by registering its middleware,
+        /// endpoints, and supporting infrastructure required to serve Heimdall
+        /// pages and server actions at runtime.
+        /// </summary>
+        /// <param name="app">
+        /// The <see cref="WebApplication"/> instance used to configure the request pipeline.
+        /// </param>
+        /// <returns>
+        /// The same <see cref="WebApplication"/> instance, allowing fluent
+        /// pipeline configuration.
+        /// </returns>
+        public static IApplicationBuilder UseHeimdall(this IApplicationBuilder app)
+        {
+            return app.MapHeimdallSecurityEndpoints()
+                .MapHeimdallContentEndpoints()
+                .MapHeimdallBifrostEndpoints();
+        }
+
         private static IServiceCollection AddHeimdallCore(
             IServiceCollection services,
             Action<HeimdallServiceSettings>? configure,

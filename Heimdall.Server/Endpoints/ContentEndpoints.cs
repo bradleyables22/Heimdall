@@ -44,86 +44,130 @@ namespace Heimdall.Server
 
         internal static WebApplication MapHeimdallContentEndpoints(this WebApplication app)
         {
-            app.MapPost("__heimdall/v1/content/actions", async (
-                HttpContext ctx,
-                ContentRegistry registry,
-                IOptions<HeimdallServiceSettings> options) =>
-            {
-                var settings = options.Value;
-
-                var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-                await antiforgery.ValidateRequestAsync(ctx);
-
-                if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) ||
-                    string.IsNullOrWhiteSpace(values))
-                {
-                    return Results.BadRequest($"Missing {ActionHeader} header.");
-                }
-
-                var actionId = values.ToString();
-
-                if (!registry.TryGet(actionId, out var action))
-                    return Results.NotFound($"Unknown action '{actionId}'.");
-
-                var authorizationResult = await AuthorizeActionAsync(ctx, action);
-                if (authorizationResult is not null)
-                    return authorizationResult;
-
-                var timeoutScope = CreateRequestTimeoutScope(ctx, action);
-
-                try
-                {
-                    var args = await BindArgumentsAsync(ctx, action);
-                    var raw = await action.InvokeAsync(args);
-
-                    if (raw is null)
-                        return Results.NoContent();
-
-                    return Results.Content(raw.RenderHtml(), "text/html; charset=utf-8");
-                }
-                catch (OperationCanceledException) when (timeoutScope.TimedOut)
-                {
-                    return await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
-                }
-                catch (JsonException ex)
-                {
-                    if (settings.EnableDetailedErrors)
-                    {
-                        return Results.Problem(
-                            detail: ex.ToString(),
-                            title: "Invalid Heimdall action request body",
-                            statusCode: StatusCodes.Status400BadRequest);
-                    }
-
-                    return Results.BadRequest("Invalid JSON request body.");
-                }
-                catch (Exception ex)
-                {
-                    if (settings.EnableDetailedErrors)
-                    {
-                        var msg = ex is TargetInvocationException tie && tie.InnerException != null
-                            ? tie.InnerException.ToString()
-                            : ex.ToString();
-
-                        return Results.Problem(
-                            detail: msg,
-                            title: "Heimdall action invocation failed",
-                            statusCode: StatusCodes.Status500InternalServerError);
-                    }
-
-                    return Results.Problem(
-                        title: "Heimdall action invocation failed",
-                        statusCode: StatusCodes.Status500InternalServerError);
-                }
-                finally
-                {
-                    timeoutScope.Dispose();
-                }
-            }).ExcludeFromDescription();
+            var handler = BuildContentActionHandler();
+            app.MapPost("__heimdall/v1/content/actions", handler).ExcludeFromDescription();
 
             return app;
         }
 
+        internal static IApplicationBuilder MapHeimdallContentEndpoints(this IApplicationBuilder app)
+    {
+        var handler = BuildContentActionHandler();
+        app.UseEndpoints(endpoints => 
+            endpoints.MapPost("__heimdall/v1/content/actions", handler));
+
+        return app;
+    }
+    
+        private static RequestDelegate BuildContentActionHandler() =>
+            async ctx =>
+            {
+                // Validate antiforgery and extract action id
+                var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+                await antiforgery.ValidateRequestAsync(ctx);
+
+                var (ok, actionId, extractError) = TryExtractActionId(ctx);
+                if (!ok)
+                {
+                    await extractError!.ExecuteAsync(ctx);
+                    return;
+                }
+
+                // Resolve action and perform authorization
+                var (action, resolveError) = await TryResolveAndAuthorizeAsync(ctx, actionId!);
+                if (resolveError is not null)
+                {
+                    await resolveError.ExecuteAsync(ctx);
+                    return;
+                }
+
+                // Invoke action and produce a result to execute
+                var result = await InvokeActionAsync(ctx, action!);
+                if (result is not null)
+                {
+                    await result.ExecuteAsync(ctx);
+                }
+            };
+
+        private static (bool success, string? actionId, IResult? error) TryExtractActionId(HttpContext ctx)
+        {
+            if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) || string.IsNullOrWhiteSpace(values))
+            {
+                return (false, null, Results.BadRequest($"Missing {ActionHeader} header."));
+            }
+
+            return (true, values.ToString(), null);
+        }
+
+        private static async Task<(ContentActionDescriptor? action, IResult? error)> TryResolveAndAuthorizeAsync(HttpContext ctx, string actionId)
+        {
+            var registry = ctx.RequestServices.GetRequiredService<ContentRegistry>();
+            if (!registry.TryGet(actionId, out var action))
+                return (null, Results.NotFound($"Unknown action '{actionId}'."));
+
+            var authorizationResult = await AuthorizeActionAsync(ctx, action);
+            if (authorizationResult is not null)
+                return (null, authorizationResult);
+
+            return (action, null);
+        }
+
+        private static async Task<IResult?> InvokeActionAsync(HttpContext ctx, ContentActionDescriptor action)
+        {
+            var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
+            var settings = options.Value;
+
+            var timeoutScope = CreateRequestTimeoutScope(ctx, action);
+            try
+            {
+                var args = await BindArgumentsAsync(ctx, action);
+                var raw = await action.InvokeAsync(args);
+
+                if (raw is null)
+                    return Results.NoContent();
+
+                return Results.Content(raw.RenderHtml(), "text/html; charset=utf-8");
+            }
+            catch (OperationCanceledException) when (timeoutScope.TimedOut)
+            {
+                return await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
+            }
+            catch (JsonException ex)
+            {
+                if (settings.EnableDetailedErrors)
+                {
+                    return Results.Problem(
+                        detail: ex.ToString(),
+                        title: "Invalid Heimdall action request body",
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                return Results.BadRequest("Invalid JSON request body.");
+            }
+            catch (Exception ex)
+            {
+                if (settings.EnableDetailedErrors)
+                {
+                    var msg = ex is TargetInvocationException tie && tie.InnerException != null
+                        ? tie.InnerException.ToString()
+                        : ex.ToString();
+
+                    return Results.Problem(
+                        detail: msg,
+                        title: "Heimdall action invocation failed",
+                        statusCode: StatusCodes.Status500InternalServerError);
+                }
+
+                return Results.Problem(
+                    title: "Heimdall action invocation failed",
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+            finally
+            {
+                timeoutScope.Dispose();
+            }
+        }
+        
         private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, ContentActionDescriptor action)
         {
             if (action.Parameters.Count == 0)

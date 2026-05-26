@@ -16,64 +16,90 @@ namespace Heimdall.Server
 		internal static WebApplication MapHeimdallBifrostEndpoints(this WebApplication app)
 		{
 
-            app.MapGet("__heimdall/v1/bifrost/token", async (
-				HttpContext ctx,
-				IAntiforgery antiforgery,
-				BifrostSubscribeToken tokenSvc,
-				IOptions<HeimdallServiceSettings> options) =>
-            {
-                var topic = ctx.Request.Query["topic"].ToString()?.Trim();
+            var tokenHandler = BuildBifrostTokenHandler();
+            var streamHandler = BuildBifrostStreamHandler();
 
-                if (string.IsNullOrWhiteSpace(topic))
-                    return Results.BadRequest("Querystring 'topic' is required.");
+            app.MapGet("__heimdall/v1/bifrost/token", tokenHandler).ExcludeFromDescription();
+            app.MapGet("__heimdall/v1/bifrost", streamHandler).ExcludeFromDescription();
 
-                try
-                {
-                    await antiforgery.ValidateRequestAsync(ctx);
-                }
-                catch
-                {
-                    return Results.Unauthorized();
-                }
+            return app;
+		}
 
-				var authorizationResult = await AuthorizeBifrostTopicAsync(ctx, topic, options.Value);
-				if (authorizationResult is not null)
-					return authorizationResult;
+		internal static IApplicationBuilder MapHeimdallBifrostEndpoints(this IApplicationBuilder app)
+		{
+			var tokenHandler = BuildBifrostTokenHandler();
+			var streamHandler = BuildBifrostStreamHandler();
 
-                var st = tokenSvc.Create(topic, ctx.User, TimeSpan.FromMinutes(2));
-                return Results.Json(new { token = st, expiresInSeconds = 120 });
-
-            }).ExcludeFromDescription();
-
-
-
-            app.MapGet("__heimdall/v1/bifrost", async (
-				HttpContext ctx,
-				Bifrost bifrost,
-				BifrostSubscribeToken tokenSvc,
-				IOptions<HeimdallServiceSettings> options) =>
+			app.UseEndpoints(endpoints =>
 			{
+				endpoints.MapGet("__heimdall/v1/bifrost/token", tokenHandler);
+				endpoints.MapGet("__heimdall/v1/bifrost", streamHandler);
+			});
+
+			return app;
+		}
+
+		private static RequestDelegate BuildBifrostTokenHandler() =>
+			async ctx =>
+			{
+				var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+				var tokenSvc = ctx.RequestServices.GetRequiredService<BifrostSubscribeToken>();
+				var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
+
 				var topic = ctx.Request.Query["topic"].ToString()?.Trim();
 
 				if (string.IsNullOrWhiteSpace(topic))
-					return Results.BadRequest("Querystring 'topic' is required.");
+				{
+					await Results.BadRequest("Querystring 'topic' is required.").ExecuteAsync(ctx);
+					return;
+				}
 
-				var st = ctx.Request.Query["st"].ToString()?.Trim() ?? string.Empty;
-                if (!tokenSvc.TryValidate(topic, st, ctx.User))
-                    return Results.Unauthorized();
+				try
+				{
+					await antiforgery.ValidateRequestAsync(ctx);
+				}
+				catch
+				{
+					await Results.Unauthorized().ExecuteAsync(ctx);
+					return;
+				}
 
-                // SSE headers
-                ctx.Response.Headers.CacheControl = "no-cache";
-				ctx.Response.Headers["X-Accel-Buffering"] = "no"; 
-				ctx.Response.ContentType = "text/event-stream";
+				var authorizationResult = await AuthorizeBifrostTopicAsync(ctx, topic, options.Value);
+				if (authorizationResult is not null)
+				{
+					await authorizationResult.ExecuteAsync(ctx);
+					return;
+				}
+
+				var st = tokenSvc.Create(topic, ctx.User, TimeSpan.FromMinutes(2));
+				await Results.Json(new { token = st, expiresInSeconds = 120 }).ExecuteAsync(ctx);
+			};
+
+		private static RequestDelegate BuildBifrostStreamHandler() =>
+			async ctx =>
+			{
+				var bifrost = ctx.RequestServices.GetRequiredService<Bifrost>();
+				var tokenSvc = ctx.RequestServices.GetRequiredService<BifrostSubscribeToken>();
+				var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
+
+				// validate topic and token
+				var (valid, topic, tokenError) = TryValidateTopicAndToken(ctx, tokenSvc);
+				if (!valid)
+				{
+					await tokenError!.ExecuteAsync(ctx);
+					return;
+				}
+
+				// Set SSE headers
+				ConfigureSseHeaders(ctx);
 
 				var abort = ctx.RequestAborted;
 
-				// Subscribe to topic
-				var (id, reader, unsubscribe) = bifrost.Subscribe(topic);
+				// Subscribe to topic (discard subscription id)
+				var (_, reader, unsubscribe) = bifrost.Subscribe(topic!);
 				abort.Register(unsubscribe);
 
-				// Optional initial event (helps with debugging / client readiness)
+				// initial event
 				await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
 
 				var heartbeatInterval = options.Value.BifrostHeartbeatInterval;
@@ -82,38 +108,7 @@ namespace Heimdall.Server
 
 				try
 				{
-					while (!abort.IsCancellationRequested)
-					{
-						// Wait for messages, but wake on idle so proxies don't close quiet streams.
-						using var idle = CancellationTokenSource.CreateLinkedTokenSource(abort);
-						idle.CancelAfter(heartbeatInterval);
-
-						try
-						{
-							if (!await reader.WaitToReadAsync(idle.Token))
-								break;
-						}
-						catch (OperationCanceledException) when (!abort.IsCancellationRequested)
-						{
-							await WriteCommentAsync(ctx, "ping", abort);
-							continue;
-						}
-
-						while (reader.TryRead(out var msg))
-						{
-							// Drop expired messages
-							if (msg.ExpiresUtc <= DateTimeOffset.UtcNow)
-								continue;
-
-							await WriteEventAsync(
-								ctx,
-								eventName: msg.EventName,
-								data: msg.Html,
-								eventId: msg.Id,
-								ct: abort
-							);
-						}
-					}
+					await StreamReaderLoopAsync(ctx, reader, abort, heartbeatInterval);
 				}
 				catch (OperationCanceledException)
 				{
@@ -123,12 +118,89 @@ namespace Heimdall.Server
 				{
 					unsubscribe();
 				}
+			};
 
-				return Results.Empty;
-			})
-			.ExcludeFromDescription();
+		private static (bool valid, string? topic, IResult? error) TryValidateTopicAndToken(HttpContext ctx, BifrostSubscribeToken tokenSvc)
+		{
+			var topic = ctx.Request.Query["topic"].ToString()?.Trim();
 
-			return app;
+			if (string.IsNullOrWhiteSpace(topic))
+				return (false, null, Results.BadRequest("Querystring 'topic' is required."));
+
+			var st = ctx.Request.Query["st"].ToString()?.Trim() ?? string.Empty;
+			if (!tokenSvc.TryValidate(topic, st, ctx.User))
+				return (false, null, Results.Unauthorized());
+
+			return (true, topic, null);
+		}
+
+		private static void ConfigureSseHeaders(HttpContext ctx)
+		{
+			ctx.Response.Headers.CacheControl = "no-cache";
+			ctx.Response.Headers["X-Accel-Buffering"] = "no";
+			ctx.Response.ContentType = "text/event-stream";
+		}
+
+		private static async Task StreamReaderLoopAsync(HttpContext ctx, object readerObj, CancellationToken abort, TimeSpan heartbeatInterval)
+		{
+			var readerType = readerObj.GetType();
+
+			var waitToRead = readerType.GetMethod("WaitToReadAsync", new[] { typeof(CancellationToken) })
+				?? throw new InvalidOperationException("Reader does not support WaitToReadAsync(CancellationToken)");
+
+			var tryRead = readerType.GetMethod("TryRead")
+				?? throw new InvalidOperationException("Reader does not support TryRead(out T)");
+
+			while (!abort.IsCancellationRequested)
+			{
+				var hasMessages = await WaitForMessagesAsync(readerObj, waitToRead, ctx, abort, heartbeatInterval);
+				if (!hasMessages)
+					break;
+
+				await DrainReaderAsync(readerObj, tryRead, ctx, abort);
+			}
+		}
+
+		private static async Task<bool> WaitForMessagesAsync(object readerObj, System.Reflection.MethodInfo waitToRead, HttpContext ctx, CancellationToken abort, TimeSpan heartbeatInterval)
+		{
+			using var idle = CancellationTokenSource.CreateLinkedTokenSource(abort);
+			idle.CancelAfter(heartbeatInterval);
+
+			try
+			{
+				var resultObj = waitToRead.Invoke(readerObj, new object[] { idle.Token });
+				if (resultObj is null)
+					return false;
+
+				return await (dynamic)resultObj;
+			}
+			catch (OperationCanceledException) when (!abort.IsCancellationRequested)
+			{
+				await WriteCommentAsync(ctx, "ping", abort);
+				return false;
+			}
+		}
+
+		private static async Task DrainReaderAsync(object readerObj, System.Reflection.MethodInfo tryRead, HttpContext ctx, CancellationToken abort)
+		{
+			var args = new object[1];
+			while (true)
+			{
+				var invoked = tryRead.Invoke(readerObj, args);
+				if (!(invoked is bool ok) || !ok)
+					break;
+
+				var msg = args[0];
+				var expires = (DateTimeOffset)msg.GetType().GetProperty("ExpiresUtc")!.GetValue(msg)!;
+				if (expires <= DateTimeOffset.UtcNow)
+					continue;
+
+				var eventName = (string?)msg.GetType().GetProperty("EventName")!.GetValue(msg) ?? string.Empty;
+				var html = (string?)msg.GetType().GetProperty("Html")!.GetValue(msg) ?? string.Empty;
+				var id = (string?)msg.GetType().GetProperty("Id")!.GetValue(msg);
+
+				await WriteEventAsync(ctx, eventName, html, id, abort);
+			}
 		}
 
 		private static async Task<IResult?> AuthorizeBifrostTopicAsync(

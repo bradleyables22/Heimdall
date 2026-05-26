@@ -3,12 +3,10 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
-using Heimdall.Server;
 using Heimdall.Server.Rendering;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
@@ -299,6 +297,83 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task CsrfEndpoint_SetsNoCacheDirectives()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/__heimdall/v1/csrf");
+        var cacheControl = response.Headers.CacheControl?.ToString() ?? string.Empty;
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("no-store", cacheControl);
+        Assert.Contains("no-cache", cacheControl);
+        Assert.Contains("must-revalidate", cacheControl);
+    }
+
+    [Fact]
+    public async Task CsrfEndpoint_EmitsXHeimdallCsrfHeaderWhenDetailedErrorsEnabled()
+    {
+        await using var app = await CreateAppAsync(); // CreateAppAsync sets EnableDetailedErrors = true
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/__heimdall/v1/csrf");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.True(response.Headers.TryGetValues("X-Heimdall-Csrf", out var values));
+        Assert.Contains("issued", values);
+    }
+
+    [Fact]
+    public async Task CsrfEndpoint_DoesNotEmitXHeimdallCsrfHeaderWhenDetailedErrorsDisabled()
+    {
+        await using var app = await CreateAppAsync(configureHeimdall: options =>
+        {
+            options.EnableDetailedErrors = false;
+        });
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/__heimdall/v1/csrf");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.False(response.Headers.TryGetValues("X-Heimdall-Csrf", out _));
+    }
+
+    [Fact]
+    public async Task BifrostTokenEndpoint_ResponseIncludesExpiresInSeconds()
+    {
+        await using var app = await CreateAppWithOpenBifrostTopicsAsync();
+        using var client = app.GetTestClient();
+
+        var response = await GetBifrostTokenAsync(client, "events", "alice");
+        var json = await response.Content.ReadFromJsonAsync<BifrostTokenResponse>();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal(120, json?.ExpiresInSeconds);
+    }
+
+    [Fact]
+    public async Task UseHeimdall_IApplicationBuilder_RegistersAllHeimdallEndpoints()
+    {
+        await using var app = await CreateAppUsingIApplicationBuilderUseHeimdallAsync();
+
+        using var client = app.GetTestClient();
+
+        var (csrfResponse, csrfJson) = await GetCsrfResponseAsync(client);
+        Assert.Equal(HttpStatusCode.OK, csrfResponse.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(csrfJson?.RequestToken));
+
+        var (actionResponse, actionHtml) = await PostAllowAnonymousActionAsync(client);
+        Assert.Equal(HttpStatusCode.OK, actionResponse.StatusCode);
+        Assert.Contains("public", actionHtml);
+
+        var bifrostResponse = await GetBifrostTokenAsync(client, topic: "test-topic", userName: "alice");
+        var bifrostJson = await bifrostResponse.Content.ReadFromJsonAsync<BifrostTokenResponse>();
+        Assert.Equal(HttpStatusCode.OK, bifrostResponse.StatusCode);
+        Assert.False(string.IsNullOrWhiteSpace(bifrostJson?.Token));
+    }
+
+    [Fact]
     public async Task BifrostTokenEndpoint_UsesConfiguredTopicAuthorization()
     {
         await using var app = await CreateAppAsync(configureHeimdall: options =>
@@ -320,10 +395,7 @@ public sealed class ServerIntegrationTests
     [Fact]
     public async Task BifrostTokenEndpoint_RejectsMissingTopic()
     {
-        await using var app = await CreateAppAsync(configureHeimdall: options =>
-        {
-            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
-        });
+        await using var app = await CreateAppWithOpenBifrostTopicsAsync();
         using var client = app.GetTestClient();
         var csrfToken = await GetCsrfTokenAsync(client, "alice");
         using var request = new HttpRequestMessage(HttpMethod.Get, "/__heimdall/v1/bifrost/token");
@@ -339,10 +411,7 @@ public sealed class ServerIntegrationTests
     [Fact]
     public async Task BifrostTokenEndpoint_RejectsMissingCsrfToken()
     {
-        await using var app = await CreateAppAsync(configureHeimdall: options =>
-        {
-            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
-        });
+        await using var app = await CreateAppWithOpenBifrostTopicsAsync();
         using var client = app.GetTestClient();
         using var request = new HttpRequestMessage(HttpMethod.Get, "/__heimdall/v1/bifrost/token?topic=news");
         request.Headers.Add(TestAuthHandler.UserHeaderName, "alice");
@@ -408,29 +477,17 @@ public sealed class ServerIntegrationTests
     [Fact]
     public async Task BifrostStream_DeliversPublishedHtmlToAuthorizedSubscriber()
     {
-        await using var app = await CreateAppAsync(configureHeimdall: options =>
-        {
-            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
-        });
+        await using var app = await CreateAppWithOpenBifrostTopicsAsync();
         using var client = app.GetTestClient();
-        var tokenResponse = await GetBifrostTokenAsync(client, "news", "alice");
-        var token = await tokenResponse.Content.ReadFromJsonAsync<BifrostTokenResponse>();
         using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"/__heimdall/v1/bifrost?topic=news&st={Uri.EscapeDataString(token!.Token!)}");
-        request.Headers.Add(TestAuthHandler.UserHeaderName, "alice");
-
-        var response = await client.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            streamCts.Token);
-        var stream = await response.Content.ReadAsStreamAsync(streamCts.Token);
-        var readTask = ReadUntilAsync(stream, "data: <span>fresh</span>", streamCts.Token);
-
-        await app.Services.GetRequiredService<Bifrost>()
-            .PublishAsync("news", Html.Span("fresh"), TimeSpan.FromSeconds(5), streamCts.Token);
-        var body = await readTask;
+        var (response, body) = await PublishAndReadBifrostStreamAsync(
+            app,
+            client,
+            topic: "news",
+            userName: "alice",
+            expected: "data: <span>fresh</span>",
+            publishAsync: (bifrost, ct) => bifrost.PublishAsync("news", Html.Span("fresh"), TimeSpan.FromSeconds(5), ct),
+            cancellationToken: streamCts.Token);
         await streamCts.CancelAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -442,29 +499,17 @@ public sealed class ServerIntegrationTests
     [Fact]
     public async Task BifrostStream_DeliversPublishedHtmlWithNamedEvent()
     {
-        await using var app = await CreateAppAsync(configureHeimdall: options =>
-        {
-            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
-        });
+        await using var app = await CreateAppWithOpenBifrostTopicsAsync();
         using var client = app.GetTestClient();
-        var tokenResponse = await GetBifrostTokenAsync(client, "orders", "alice");
-        var token = await tokenResponse.Content.ReadFromJsonAsync<BifrostTokenResponse>();
         using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"/__heimdall/v1/bifrost?topic=orders&st={Uri.EscapeDataString(token!.Token!)}");
-        request.Headers.Add(TestAuthHandler.UserHeaderName, "alice");
-
-        var response = await client.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            streamCts.Token);
-        var stream = await response.Content.ReadAsStreamAsync(streamCts.Token);
-        var readTask = ReadUntilAsync(stream, "data: <span>changed</span>", streamCts.Token);
-
-        await app.Services.GetRequiredService<Bifrost>()
-            .PublishAsync("orders", "order.updated", Html.Span("changed"), TimeSpan.FromSeconds(5), streamCts.Token);
-        var body = await readTask;
+        var (response, body) = await PublishAndReadBifrostStreamAsync(
+            app,
+            client,
+            topic: "orders",
+            userName: "alice",
+            expected: "data: <span>changed</span>",
+            publishAsync: (bifrost, ct) => bifrost.PublishAsync("orders", "order.updated", Html.Span("changed"), TimeSpan.FromSeconds(5), ct),
+            cancellationToken: streamCts.Token);
         await streamCts.CancelAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -475,24 +520,14 @@ public sealed class ServerIntegrationTests
     [Fact]
     public async Task BifrostStream_SendsIdleHeartbeatComment()
     {
-        await using var app = await CreateAppAsync(configureHeimdall: options =>
+        await using var app = await CreateAppWithOpenBifrostTopicsAsync(configureHeimdall: options =>
         {
-            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
             options.BifrostHeartbeatInterval = TimeSpan.FromMilliseconds(100);
         });
         using var client = app.GetTestClient();
-        var tokenResponse = await GetBifrostTokenAsync(client, "quiet", "alice");
-        var token = await tokenResponse.Content.ReadFromJsonAsync<BifrostTokenResponse>();
         using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        using var request = new HttpRequestMessage(
-            HttpMethod.Get,
-            $"/__heimdall/v1/bifrost?topic=quiet&st={Uri.EscapeDataString(token!.Token!)}");
-        request.Headers.Add(TestAuthHandler.UserHeaderName, "alice");
-
-        var response = await client.SendAsync(
-            request,
-            HttpCompletionOption.ResponseHeadersRead,
-            streamCts.Token);
+        var token = await GetBifrostSubscribeTokenValueAsync(client, topic: "quiet", userName: "alice");
+        var response = await OpenBifrostStreamAsync(client, topic: "quiet", token, userName: "alice", streamCts.Token);
         var stream = await response.Content.ReadAsStreamAsync(streamCts.Token);
         var body = await ReadUntilAsync(stream, ": ping", streamCts.Token);
         await streamCts.CancelAsync();
@@ -532,6 +567,67 @@ public sealed class ServerIntegrationTests
         app.UseHeimdall();
         await app.StartAsync();
         return app;
+    }
+
+    private static Task<WebApplication> CreateAppWithOpenBifrostTopicsAsync(
+        Action<IServiceCollection>? configureServices = null,
+        Action<HeimdallServiceSettings>? configureHeimdall = null)
+        => CreateAppAsync(
+            configureServices,
+            options =>
+            {
+                options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
+                configureHeimdall?.Invoke(options);
+            });
+
+    private static async Task<WebApplication> CreateAppUsingIApplicationBuilderUseHeimdallAsync()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddRouting();
+        builder.Services.AddAntiforgery();
+        builder.Services.AddAuthentication(TestAuthHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
+        builder.Services.AddAuthorization();
+        builder.Services.AddHeimdall(options =>
+        {
+            options.EnableDetailedErrors = true;
+            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
+        }, typeof(ServerIntegrationTests).Assembly);
+
+        var app = builder.Build();
+        app.UseRouting();
+        app.UseAntiforgery();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        ((IApplicationBuilder)app).UseHeimdall();
+        await app.StartAsync();
+        return app;
+    }
+
+    private static async Task<(HttpResponseMessage Response, CsrfResponse? Payload)> GetCsrfResponseAsync(HttpClient client)
+    {
+        var response = await client.GetAsync("/__heimdall/v1/csrf");
+        var payload = await response.Content.ReadFromJsonAsync<CsrfResponse>();
+        return (response, payload);
+    }
+
+    private static async Task<(HttpResponseMessage Response, string Html)> PostAllowAnonymousActionAsync(HttpClient client)
+    {
+        var csrfToken = await GetCsrfTokenAsync(client);
+        using var actionRequest = new HttpRequestMessage(HttpMethod.Post, "/__heimdall/v1/content/actions");
+        actionRequest.Headers.Add("X-Heimdall-Content-Action", "tests.auth.allow-anonymous");
+        actionRequest.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        actionRequest.Headers.Add("Cookie", csrfToken.CookieHeader);
+        actionRequest.Content = JsonContent.Create(new { });
+
+        var response = await client.SendAsync(actionRequest);
+        var html = await response.Content.ReadAsStringAsync();
+        return (response, html);
     }
 
     private static async Task<HttpResponseMessage> PostContentActionAsync(
@@ -574,6 +670,49 @@ public sealed class ServerIntegrationTests
         request.Headers.Add("Cookie", csrfToken.CookieHeader);
         request.Headers.Add(TestAuthHandler.UserHeaderName, userName);
         return await client.SendAsync(request);
+    }
+
+    private static async Task<string> GetBifrostSubscribeTokenValueAsync(HttpClient client, string topic, string userName)
+    {
+        var response = await GetBifrostTokenAsync(client, topic, userName);
+        var tokenResponse = await response.Content.ReadFromJsonAsync<BifrostTokenResponse>();
+        return tokenResponse?.Token
+            ?? throw new InvalidOperationException("Bifrost token response did not include a token.");
+    }
+
+    private static async Task<HttpResponseMessage> OpenBifrostStreamAsync(
+        HttpClient client,
+        string topic,
+        string token,
+        string userName,
+        CancellationToken cancellationToken)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/__heimdall/v1/bifrost?topic={Uri.EscapeDataString(topic)}&st={Uri.EscapeDataString(token)}");
+        request.Headers.Add(TestAuthHandler.UserHeaderName, userName);
+
+        return await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+    }
+
+    private static async Task<(HttpResponseMessage Response, string Body)> PublishAndReadBifrostStreamAsync(
+        WebApplication app,
+        HttpClient client,
+        string topic,
+        string userName,
+        string expected,
+        Func<Bifrost, CancellationToken, ValueTask> publishAsync,
+        CancellationToken cancellationToken)
+    {
+        var token = await GetBifrostSubscribeTokenValueAsync(client, topic, userName);
+        var response = await OpenBifrostStreamAsync(client, topic, token, userName, cancellationToken);
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        var readTask = ReadUntilAsync(stream, expected, cancellationToken);
+
+        await publishAsync(app.Services.GetRequiredService<Bifrost>(), cancellationToken);
+        var body = await readTask;
+
+        return (response, body);
     }
 
     private static async Task<CsrfToken> GetCsrfTokenAsync(HttpClient client, string? userName = null)
@@ -629,6 +768,7 @@ public sealed class ServerIntegrationTests
     private sealed class BifrostTokenResponse
     {
         public string? Token { get; set; }
+        public int ExpiresInSeconds { get; set; }
     }
 
     private sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
