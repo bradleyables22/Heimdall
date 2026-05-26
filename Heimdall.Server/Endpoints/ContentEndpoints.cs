@@ -51,14 +51,14 @@ namespace Heimdall.Server
         }
 
         internal static IApplicationBuilder MapHeimdallContentEndpoints(this IApplicationBuilder app)
-    {
-        var handler = BuildContentActionHandler();
-        app.UseEndpoints(endpoints => 
-            endpoints.MapPost("__heimdall/v1/content/actions", handler));
+        {
+            var handler = BuildContentActionHandler();
+            app.UseEndpoints(endpoints =>
+                endpoints.MapPost("__heimdall/v1/content/actions", handler));
 
-        return app;
-    }
-    
+            return app;
+        }
+
         private static RequestDelegate BuildContentActionHandler() =>
             async ctx =>
             {
@@ -99,7 +99,8 @@ namespace Heimdall.Server
             return (true, values.ToString(), null);
         }
 
-        private static async Task<(ContentActionDescriptor? action, IResult? error)> TryResolveAndAuthorizeAsync(HttpContext ctx, string actionId)
+        private static async Task<(ContentActionDescriptor? action, IResult? error)> TryResolveAndAuthorizeAsync(
+            HttpContext ctx, string actionId)
         {
             var registry = ctx.RequestServices.GetRequiredService<ContentRegistry>();
             if (!registry.TryGet(actionId, out var action))
@@ -167,7 +168,7 @@ namespace Heimdall.Server
                 timeoutScope.Dispose();
             }
         }
-        
+
         private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, ContentActionDescriptor action)
         {
             if (action.Parameters.Count == 0)
@@ -244,9 +245,9 @@ namespace Heimdall.Server
             where T : notnull
         {
             return ctx.RequestServices.GetService<T>()
-                ?? throw new InvalidOperationException(
-                    $"Heimdall content action authorization requires '{typeof(T).FullName}'. " +
-                    "Register authorization services with services.AddAuthorization(...).");
+                   ?? throw new InvalidOperationException(
+                       $"Heimdall content action authorization requires '{typeof(T).FullName}'. " +
+                       "Register authorization services with services.AddAuthorization(...).");
         }
 
         private static ContentActionTimeoutScope CreateRequestTimeoutScope(
@@ -400,11 +401,11 @@ namespace Heimdall.Server
                 return true;
 
             return underlying == typeof(string)
-                || underlying == typeof(decimal)
-                || underlying == typeof(Guid)
-                || underlying == typeof(DateTime)
-                || underlying == typeof(DateTimeOffset)
-                || underlying == typeof(TimeSpan);
+                   || underlying == typeof(decimal)
+                   || underlying == typeof(Guid)
+                   || underlying == typeof(DateTime)
+                   || underlying == typeof(DateTimeOffset)
+                   || underlying == typeof(TimeSpan);
         }
 
         private static bool TryGetPropertyCaseInsensitive(
@@ -465,7 +466,8 @@ namespace Heimdall.Server
                 var timeout = policy.Timeout;
 
                 if (!timeout.HasValue || timeout.Value == System.Threading.Timeout.InfiniteTimeSpan)
-                    return new ContentActionTimeoutScope(ctx, originalRequestAborted, policy, timeoutCts: null, linkedCts: null);
+                    return new ContentActionTimeoutScope(ctx, originalRequestAborted, policy, timeoutCts: null,
+                        linkedCts: null);
 
                 var timeoutCts = new CancellationTokenSource();
                 timeoutCts.CancelAfter(timeout.Value);
