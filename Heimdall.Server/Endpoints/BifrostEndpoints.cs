@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using System.Text;
@@ -13,7 +14,7 @@ namespace Heimdall.Server
 	{
 		private static readonly RequestDelegate EmptyAuthorizationPipeline = _ => Task.CompletedTask;
 
-		internal static WebApplication MapHeimdallBifrostEndpoints(this WebApplication app)
+		internal static IEndpointRouteBuilder MapHeimdallBifrostEndpoints(this IEndpointRouteBuilder app)
 		{
 
             app.MapGet("__heimdall/v1/bifrost/token", async (
