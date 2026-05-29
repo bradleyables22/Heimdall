@@ -75,7 +75,7 @@ namespace Heimdall.Server
                 try
                 {
                     var args = await BindArgumentsAsync(ctx, action);
-                    var raw = await action.InvokeAsync(args);
+                    var raw = await action.InvokeAsync(ctx.RequestServices, args);
 
                     if (raw is null)
                         return Results.NoContent();

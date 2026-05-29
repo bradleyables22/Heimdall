@@ -44,19 +44,21 @@
 
 	<ItemGroup>
 		<Content Remove="_build\**" />
-		<Content Remove="build-heimdall.ps1" />
 		<Content Remove="build.mjs" />
 		<Content Remove="node_modules\**" />
 		<Content Remove="package-lock.json" />
 		<Content Remove="package.json" />
 		<Content Remove="tests\**" />
 		<None Remove="_build\**" />
-		<None Remove="build-heimdall.ps1" />
 		<None Remove="build.mjs" />
 		<None Remove="node_modules\**" />
 		<None Remove="package-lock.json" />
 		<None Remove="package.json" />
 		<None Remove="tests\**" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="_build\**" Pack="false" Visible="true" />
 	</ItemGroup>
 
 	<ItemGroup>

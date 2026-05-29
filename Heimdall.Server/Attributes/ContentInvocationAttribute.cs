@@ -19,7 +19,8 @@ namespace Heimdall.Server
 		public ContentInvocationAttribute(string invocation) => Invocation = invocation;
 
 		/// <summary>
-		/// Optional explicit invocation name. If null/empty, the dispatcher will default to the className.methodName.
+		/// Optional explicit invocation name. If null/empty, the dispatcher will default to the method name when
+		/// <see cref="ContentInvocationPrefixAttribute"/> is present, or className.methodName otherwise.
 		/// </summary>
 		public string? Invocation { get; init; }
 	}
