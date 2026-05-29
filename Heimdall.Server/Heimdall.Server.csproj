@@ -8,11 +8,11 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Server</PackageId>
-		<Version>1.0.7</Version>
+		<Version>2.0.0</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall server-side middleware, endpoints, and action pipeline for HTML-first server invocations.</Description>
-		<PackageTags>heimdall framework;html;SSR;rpc;aspnetcore;middleware;sse</PackageTags>
+		<PackageTags>heimdall framework;html;SSR;MVC;rpc;aspnetcore;middleware;sse</PackageTags>
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
