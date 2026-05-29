@@ -60,7 +60,6 @@ function assertNoInternalFiles(entries, label) {
     entry.includes("/_build/") ||
     entry.includes("/src/") ||
     entry === "build.mjs" ||
-    entry === "build-heimdall.ps1" ||
     entry === "package.json" ||
     entry === "package-lock.json" ||
     entry === "heimdall.entry.js" ||

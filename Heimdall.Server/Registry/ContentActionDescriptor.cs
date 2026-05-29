@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.Extensions.DependencyInjection;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -9,7 +10,9 @@ namespace Heimdall.Server
 {
     internal sealed class ContentActionDescriptor
     {
-        private readonly Func<object?[], object?> _invoker;
+        private readonly Func<object?, object?[], object?> _invoker;
+        private readonly ObjectFactory? _instanceFactory;
+        private readonly Type? _instanceType;
 
         public string ActionId { get; }
 
@@ -55,11 +58,19 @@ namespace Heimdall.Server
             AllowAnonymous = allowAnonymous;
             PayloadParameter = parameters.FirstOrDefault(x => x.Kind == ContentActionParameterKind.Payload);
             _invoker = CompileInvoker(method);
+            if (!method.IsStatic)
+            {
+                _instanceType = method.DeclaringType
+                    ?? throw new InvalidOperationException(
+                        $"Unable to resolve the declaring type for '{method.Name}'.");
+                _instanceFactory = ActivatorUtilities.CreateFactory(_instanceType, Type.EmptyTypes);
+            }
         }
 
-        public async ValueTask<IHtmlContent?> InvokeAsync(object?[] args)
+        public async ValueTask<IHtmlContent?> InvokeAsync(IServiceProvider services, object?[] args)
         {
-            var result = _invoker(args);
+            var target = CreateTarget(services);
+            var result = _invoker(target, args);
 
             if (result is null)
                 return null;
@@ -74,8 +85,18 @@ namespace Heimdall.Server
             };
         }
 
-        private static Func<object?[], object?> CompileInvoker(MethodInfo method)
+        private object? CreateTarget(IServiceProvider services)
         {
+            if (_instanceType is null)
+                return null;
+
+            var registered = services.GetService(_instanceType);
+            return registered ?? _instanceFactory!(services, null);
+        }
+
+        private static Func<object?, object?[], object?> CompileInvoker(MethodInfo method)
+        {
+            var targetParam = Expression.Parameter(typeof(object), "target");
             var argsParam = Expression.Parameter(typeof(object?[]), "args");
 
             var methodParams = method.GetParameters();
@@ -87,7 +108,18 @@ namespace Heimdall.Server
                 callArgs[i] = Expression.Convert(indexExpr, methodParams[i].ParameterType);
             }
 
-            var callExpr = Expression.Call(method, callArgs);
+            MethodCallExpression callExpr;
+            if (method.IsStatic)
+            {
+                callExpr = Expression.Call(method, callArgs);
+            }
+            else
+            {
+                var declaringType = method.DeclaringType
+                    ?? throw new InvalidOperationException(
+                        $"Unable to resolve the declaring type for '{method.Name}'.");
+                callExpr = Expression.Call(Expression.Convert(targetParam, declaringType), method, callArgs);
+            }
 
             Expression body;
 
@@ -104,7 +136,7 @@ namespace Heimdall.Server
                 body = Expression.TypeAs(callExpr, typeof(object));
             }
 
-            return Expression.Lambda<Func<object?[], object?>>(body, argsParam).Compile();
+            return Expression.Lambda<Func<object?, object?[], object?>>(body, targetParam, argsParam).Compile();
         }
     }
 }

@@ -32,12 +32,6 @@ From `Heimdall.Web`:
 npm run build
 ```
 
-or:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\build-heimdall.ps1
-```
-
 `dotnet build`, `dotnet publish`, and `dotnet pack` also run the JavaScript build through `Heimdall.Web.csproj`.
 
 ## Verify

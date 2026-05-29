@@ -124,6 +124,55 @@ User interaction → Heimdall client runtime → POST content action → server 
 
 Responses may include `<invocation>` directives for out-of-band updates.
 
+Content actions can be static functions or instance methods. Static actions are the smallest primitive:
+
+```csharp
+[ContentInvocation("cart.clear")]
+public static IHtmlContent ClearCart(HttpContext ctx)
+{
+    return CartSummary.Empty();
+}
+```
+
+For MVC-style applications, prefer action classes with constructor DI. Heimdall creates the action type from request services using ASP.NET Core DI. If the action type itself is registered, Heimdall uses that registration; otherwise it activates the type with `ActivatorUtilities`.
+
+```csharp
+public sealed class OrderActions(IOrderRepository orders)
+{
+    [ContentInvocation("orders.filter")]
+    public async Task<IHtmlContent> Filter(
+        [ContentPayload] OrderFilter filter,
+        CancellationToken ct)
+    {
+        var results = await orders.SearchAsync(filter, ct);
+        return OrderList.Render(results);
+    }
+}
+```
+
+Use `[ContentInvocationPrefix]` to namespace an action class without repeating the full id on every method:
+
+```csharp
+[ContentInvocationPrefix("orders")]
+public sealed class OrderActions(IOrderRepository orders)
+{
+    [ContentInvocation("filter")]
+    public async Task<IHtmlContent> Filter(OrderFilter filter, CancellationToken ct)
+    {
+        var results = await orders.SearchAsync(filter, ct);
+        return OrderList.Render(results);
+    }
+
+    [ContentInvocation]
+    public IHtmlContent Summary()
+    {
+        return OrderSummary.Render(orders.GetSummary());
+    }
+}
+```
+
+The resolved invocation ids are `orders.filter` and `orders.Summary`. Invocation ids are still globally unique after prefixing.
+
 Content actions honor ASP.NET Core request timeout metadata:
 
 ```csharp

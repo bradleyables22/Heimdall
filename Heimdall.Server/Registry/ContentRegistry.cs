@@ -17,16 +17,18 @@ namespace Heimdall.Server
         {
             foreach (var type in assembly.GetTypes())
             {
-                foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static))
+                foreach (var method in type.GetMethods(
+                    BindingFlags.Public |
+                    BindingFlags.NonPublic |
+                    BindingFlags.Static |
+                    BindingFlags.Instance |
+                    BindingFlags.DeclaredOnly))
                 {
                     var attr = method.GetCustomAttribute<ContentInvocationAttribute>();
                     if (attr is null)
                         continue;
 
-                    var actionId =
-                        string.IsNullOrWhiteSpace(attr.Invocation)
-                            ? $"{type.Name}.{method.Name}"
-                            : attr.Invocation;
+                    var actionId = ResolveActionId(type, method, attr);
 
                     if (_contentActions.ContainsKey(actionId))
                     {
@@ -44,12 +46,44 @@ namespace Heimdall.Server
         public bool TryGet(string actionId, out ContentActionDescriptor descriptor)
             => _contentActions.TryGetValue(actionId, out descriptor!);
 
+        private static string ResolveActionId(
+            Type type,
+            MethodInfo method,
+            ContentInvocationAttribute attr)
+        {
+            var prefix = type.GetCustomAttribute<ContentInvocationPrefixAttribute>(inherit: true)?.Prefix;
+            var invocation = string.IsNullOrWhiteSpace(attr.Invocation)
+                ? method.Name
+                : attr.Invocation;
+
+            invocation = NormalizeSegment(invocation!, nameof(ContentInvocationAttribute.Invocation));
+
+            if (string.IsNullOrWhiteSpace(prefix))
+            {
+                return string.IsNullOrWhiteSpace(attr.Invocation)
+                    ? $"{type.Name}.{invocation}"
+                    : invocation;
+            }
+
+            return $"{NormalizeSegment(prefix, nameof(ContentInvocationPrefixAttribute.Prefix))}.{invocation}";
+        }
+
+        private static string NormalizeSegment(string value, string name)
+        {
+            var normalized = value.Trim().Trim('.');
+
+            if (string.IsNullOrWhiteSpace(normalized))
+                throw new InvalidOperationException($"Content invocation {name} cannot be empty.");
+
+            return normalized;
+        }
+
         private static ContentActionDescriptor CreateDescriptor(
             string actionId,
             MethodInfo method,
             IServiceProvider services)
         {
-            ValidateStatic(method);
+            ValidateCallable(method);
             var returnKind = ValidateAndGetReturnKind(method);
             var parameters = BuildParameterPlan(method, services);
             var timeoutMetadata = ResolveRequestTimeoutMetadata(method);
@@ -66,12 +100,26 @@ namespace Heimdall.Server
                 authorizationMetadata.AllowAnonymous);
         }
 
-        private static void ValidateStatic(MethodInfo method)
+        private static void ValidateCallable(MethodInfo method)
         {
-            if (!method.IsStatic)
+            if (method.ContainsGenericParameters)
             {
                 throw new InvalidOperationException(
-                    $"[ContentInvocation] must be static: {method.DeclaringType?.FullName}.{method.Name}");
+                    $"[ContentInvocation] cannot be generic: {method.DeclaringType?.FullName}.{method.Name}");
+            }
+
+            if (method.IsStatic)
+                return;
+
+            var declaringType = method.DeclaringType
+                ?? throw new InvalidOperationException(
+                    $"[ContentInvocation] instance method '{method.Name}' does not have a declaring type.");
+
+            if (declaringType.IsAbstract || declaringType.ContainsGenericParameters)
+            {
+                throw new InvalidOperationException(
+                    $"[ContentInvocation] instance methods must be declared on a concrete, closed type: " +
+                    $"{declaringType.FullName}.{method.Name}");
             }
         }
 

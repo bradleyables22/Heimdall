@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Reflection;
+using System.Reflection.Emit;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -266,6 +268,180 @@ public sealed class ServerIntegrationTests
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Contains("hello from service", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_InstanceMethod_UsesConstructorDependencyAndPayload()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddSingleton(new GreetingService("hello from constructor"));
+        });
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(
+            client,
+            "tests.instance.greeting",
+            new { Name = "Ada" });
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("hello from constructor:Ada", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_InstanceMethod_UsesRegisteredActionTypeWhenAvailable()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddSingleton(new RegisteredInstanceContentActions("from-registration"));
+        });
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.instance.registered");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("from-registration", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_InstanceMethod_ActivatesUnregisteredActionTypePerRequest()
+    {
+        CountingInstanceContentActions.Reset();
+
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var first = await PostContentActionAsync(client, "tests.instance.activation-count");
+        var second = await PostContentActionAsync(client, "tests.instance.activation-count");
+        var firstHtml = await first.Content.ReadAsStringAsync();
+        var secondHtml = await second.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Contains("1", firstHtml);
+        Assert.Contains("2", secondHtml);
+        Assert.Equal(2, CountingInstanceContentActions.ConstructionCount);
+    }
+
+    [Fact]
+    public async Task ContentAction_InstanceMethod_UsesRegisteredActionTypeLifetime()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddSingleton<StatefulRegisteredInstanceContentActions>();
+        });
+        using var client = app.GetTestClient();
+
+        var first = await PostContentActionAsync(client, "tests.instance.registered-state");
+        var second = await PostContentActionAsync(client, "tests.instance.registered-state");
+        var firstHtml = await first.Content.ReadAsStringAsync();
+        var secondHtml = await second.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, first.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, second.StatusCode);
+        Assert.Contains("1", firstHtml);
+        Assert.Contains("2", secondHtml);
+    }
+
+    [Fact]
+    public async Task ContentAction_InstanceTypeAuthorization_HonorsAuthorizeAndAllowAnonymous()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var secureAnonymous = await PostContentActionAsync(client, "tests.instance.auth.secure");
+        var publicAnonymous = await PostContentActionAsync(client, "tests.instance.auth.public");
+        var secureAuthenticated = await PostContentActionAsync(
+            client,
+            "tests.instance.auth.secure",
+            userName: "alice");
+        var publicHtml = await publicAnonymous.Content.ReadAsStringAsync();
+        var secureHtml = await secureAuthenticated.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.Unauthorized, secureAnonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, publicAnonymous.StatusCode);
+        Assert.Equal(HttpStatusCode.OK, secureAuthenticated.StatusCode);
+        Assert.Contains("instance public", publicHtml);
+        Assert.Contains("alice", secureHtml);
+    }
+
+    [Fact]
+    public async Task ContentAction_InstanceTypeRequestTimeout_CancelsLongRunningAction()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.instance.timeout.slow");
+
+        Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task ContentAction_InvocationPrefix_PrefixesExplicitMethodInvocation()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.prefix.static.refresh");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("prefixed static", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_InvocationPrefix_PrefixesDefaultMethodInvocation()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddSingleton(new GreetingService("hello prefixed instance"));
+        });
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.prefix.instance.Render");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("hello prefixed instance", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_InvocationPrefix_NormalizesPrefixAndInvocationSegments()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.prefix.normalized.refresh");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("normalized prefix", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_WithoutInvocationPrefix_UsesTypeNameAndMethodNameDefault()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "DefaultContentActions.Ping");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("default action id", html);
+    }
+
+    [Fact]
+    public void ContentRegistry_InvocationPrefix_DetectsDuplicateResolvedActionIds()
+    {
+        var assembly = CreateDuplicateInvocationAssembly();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => AddAssemblyToContentRegistry(assembly));
+
+        Assert.Contains("Duplicate ContentInvocation id 'tests.collision.refresh'", ex.Message);
+        Assert.Contains("globally unique", ex.Message);
     }
 
     [Fact]
@@ -668,6 +844,84 @@ public sealed class ServerIntegrationTests
         throw new TimeoutException($"SSE stream did not include expected content: {expected}");
     }
 
+    private static void AddAssemblyToContentRegistry(Assembly assembly)
+    {
+        var registryType = typeof(ContentInvocationAttribute).Assembly.GetType(
+            "Heimdall.Server.ContentRegistry",
+            throwOnError: true)!;
+        var registry = Activator.CreateInstance(registryType, nonPublic: true)!;
+        using var services = new ServiceCollection().BuildServiceProvider();
+        var addFromAssembly = registryType.GetMethod(
+            "AddFromAssembly",
+            BindingFlags.Instance | BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException("Unable to find ContentRegistry.AddFromAssembly.");
+
+        try
+        {
+            addFromAssembly.Invoke(registry, [assembly, services]);
+        }
+        catch (TargetInvocationException ex) when (ex.InnerException is not null)
+        {
+            throw ex.InnerException;
+        }
+    }
+
+    private static Assembly CreateDuplicateInvocationAssembly()
+    {
+        var assemblyName = new AssemblyName($"HeimdallDuplicateInvocationTests{Guid.NewGuid():N}");
+        var assembly = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
+        var module = assembly.DefineDynamicModule("Main");
+
+        DefineContentActionType(
+            module,
+            "PrefixedCollisionActions",
+            prefix: "tests.collision",
+            invocation: "refresh",
+            methodName: "Refresh");
+        DefineContentActionType(
+            module,
+            "ExplicitCollisionActions",
+            prefix: null,
+            invocation: "tests.collision.refresh",
+            methodName: "Refresh");
+
+        return assembly;
+    }
+
+    private static void DefineContentActionType(
+        ModuleBuilder module,
+        string typeName,
+        string? prefix,
+        string invocation,
+        string methodName)
+    {
+        var type = module.DefineType(
+            typeName,
+            TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed);
+
+        if (prefix is not null)
+        {
+            var prefixCtor = typeof(ContentInvocationPrefixAttribute).GetConstructor([typeof(string)])
+                ?? throw new InvalidOperationException("Unable to find ContentInvocationPrefixAttribute constructor.");
+            type.SetCustomAttribute(new CustomAttributeBuilder(prefixCtor, [prefix]));
+        }
+
+        var method = type.DefineMethod(
+            methodName,
+            MethodAttributes.Public | MethodAttributes.Static,
+            typeof(IHtmlContent),
+            Type.EmptyTypes);
+        var invocationCtor = typeof(ContentInvocationAttribute).GetConstructor([typeof(string)])
+            ?? throw new InvalidOperationException("Unable to find ContentInvocationAttribute constructor.");
+        method.SetCustomAttribute(new CustomAttributeBuilder(invocationCtor, [invocation]));
+
+        var il = method.GetILGenerator();
+        il.Emit(OpCodes.Ldnull);
+        il.Emit(OpCodes.Ret);
+
+        type.CreateType();
+    }
+
     private sealed record CsrfToken(string RequestToken, string CookieHeader);
 
     private sealed class CsrfResponse
@@ -810,6 +1064,135 @@ public sealed class ServerIntegrationTests
         }
     }
 
+    private sealed class InstanceContentActions(GreetingService greeting)
+    {
+        [ContentInvocation("tests.instance.greeting")]
+        public IHtmlContent Greeting(InstancePayload payload)
+        {
+            return Html.Span($"{greeting.Message}:{payload.Name}");
+        }
+    }
+
+    private sealed class RegisteredInstanceContentActions(string message)
+    {
+        [ContentInvocation("tests.instance.registered")]
+        public IHtmlContent Registered()
+        {
+            return Html.Span(message);
+        }
+    }
+
+    private sealed class InstanceDiscoveryActions(ConstructedService service)
+    {
+        [ContentInvocation("tests.instance.discovery")]
+        public IHtmlContent Render()
+        {
+            return Html.Span(service.GetType().Name);
+        }
+    }
+
+    private sealed class CountingInstanceContentActions
+    {
+        private static int constructionCount;
+        private readonly int instanceNumber;
+
+        public CountingInstanceContentActions()
+        {
+            instanceNumber = Interlocked.Increment(ref constructionCount);
+        }
+
+        public static int ConstructionCount => constructionCount;
+
+        public static void Reset()
+        {
+            Interlocked.Exchange(ref constructionCount, 0);
+        }
+
+        [ContentInvocation("tests.instance.activation-count")]
+        public IHtmlContent Count()
+        {
+            return Html.Span(instanceNumber);
+        }
+    }
+
+    private sealed class StatefulRegisteredInstanceContentActions
+    {
+        private int calls;
+
+        [ContentInvocation("tests.instance.registered-state")]
+        public IHtmlContent Next()
+        {
+            return Html.Span(Interlocked.Increment(ref calls));
+        }
+    }
+
+    [Authorize]
+    private sealed class InstanceAuthorizedActions
+    {
+        [ContentInvocation("tests.instance.auth.secure")]
+        public IHtmlContent Secure(ClaimsPrincipal user)
+        {
+            return Html.Span(user.Identity?.Name ?? "anonymous");
+        }
+
+        [AllowAnonymous]
+        [ContentInvocation("tests.instance.auth.public")]
+        public IHtmlContent Public()
+        {
+            return Html.Span("instance public");
+        }
+    }
+
+    [RequestTimeout(50)]
+    private sealed class InstanceTimeoutActions
+    {
+        [ContentInvocation("tests.instance.timeout.slow")]
+        public async Task<IHtmlContent> Slow(CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            return Html.Span("done");
+        }
+    }
+
+    [ContentInvocationPrefix("tests.prefix.static")]
+    private static class PrefixedStaticContentActions
+    {
+        [ContentInvocation("refresh")]
+        public static IHtmlContent Refresh()
+        {
+            return Html.Span("prefixed static");
+        }
+    }
+
+    [ContentInvocationPrefix("tests.prefix.instance")]
+    private sealed class PrefixedInstanceContentActions(GreetingService greeting)
+    {
+        [ContentInvocation]
+        public IHtmlContent Render()
+        {
+            return Html.Span(greeting.Message);
+        }
+    }
+
+    [ContentInvocationPrefix(".tests.prefix.normalized.")]
+    private static class NormalizedPrefixContentActions
+    {
+        [ContentInvocation(".refresh.")]
+        public static IHtmlContent Refresh()
+        {
+            return Html.Span("normalized prefix");
+        }
+    }
+
+    private static class DefaultContentActions
+    {
+        [ContentInvocation]
+        public static IHtmlContent Ping()
+        {
+            return Html.Span("default action id");
+        }
+    }
+
     [Authorize]
     private static class TypeAuthorizedActions
     {
@@ -842,6 +1225,11 @@ public sealed class ServerIntegrationTests
         public bool Enabled { get; set; }
 
         public PayloadMode Mode { get; set; }
+    }
+
+    private sealed class InstancePayload
+    {
+        public string? Name { get; set; }
     }
 
     private enum PayloadMode
