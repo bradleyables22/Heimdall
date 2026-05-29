@@ -15,8 +15,13 @@ using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.Mvc.Rendering;
+using Microsoft.AspNetCore.Mvc.ViewEngines;
+using Microsoft.AspNetCore.Mvc.ViewFeatures;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -376,6 +381,92 @@ public sealed class ServerIntegrationTests
         var response = await PostContentActionAsync(client, "tests.instance.timeout.slow");
 
         Assert.Equal(HttpStatusCode.GatewayTimeout, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task AddHeimdallMvc_RegistersMvcRendererAndViewDependencies()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddHeimdallMvc();
+
+        await using var app = builder.Build();
+        using var scope = app.Services.CreateScope();
+
+        Assert.NotNull(app.Services.GetRequiredService<IHttpContextAccessor>());
+        Assert.NotNull(app.Services.GetRequiredService<ICompositeViewEngine>());
+        Assert.NotNull(scope.ServiceProvider.GetRequiredService<IHeimdallMvcRenderer>());
+    }
+
+    [Fact]
+    public void AddHeimdallMvc_PreservesCustomMvcRendererRegistration()
+    {
+        var services = new ServiceCollection();
+
+        services.AddScoped<IHeimdallMvcRenderer, CustomMvcRenderer>();
+        services.AddHeimdallMvc();
+
+        using var provider = services.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+
+        Assert.IsType<CustomMvcRenderer>(
+            scope.ServiceProvider.GetRequiredService<IHeimdallMvcRenderer>());
+    }
+
+    [Fact]
+    public async Task AddHeimdallMvc_RendersMvcPartialFromContentAction()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddHeimdallMvc();
+            services.RemoveAll<ICompositeViewEngine>();
+            services.AddSingleton<ICompositeViewEngine, FakeCompositeViewEngine>();
+        });
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(
+            client,
+            "tests.mvc.partial",
+            new { ViewName = "_Greeting", Name = "Ada" });
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("id=\"mvc-partial\"", html);
+        Assert.Contains("data-source=\"heimdall\"", html);
+        Assert.Contains("Hello Ada", html);
+
+        var pathResponse = await PostContentActionAsync(
+            client,
+            "tests.mvc.partial",
+            new { ViewName = "~/Views/Shared/_Greeting.cshtml", Name = "Grace" });
+        var pathHtml = await pathResponse.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, pathResponse.StatusCode);
+        Assert.Contains("Hello Grace", pathHtml);
+    }
+
+    [Fact]
+    public async Task AddHeimdallMvc_ReturnsDetailedErrorWhenPartialIsMissing()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddHeimdallMvc();
+            services.RemoveAll<ICompositeViewEngine>();
+            services.AddSingleton<ICompositeViewEngine, FakeCompositeViewEngine>();
+        });
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.mvc.missing");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Contains("Unable to find MVC partial view 'missing'", body);
+        Assert.Contains("/Views/Shared/missing.cshtml", body);
+        Assert.Contains("Heimdall action invocation failed", body);
     }
 
     [Fact]
@@ -1001,6 +1092,87 @@ public sealed class ServerIntegrationTests
         }
     }
 
+    private sealed class CustomMvcRenderer : IHeimdallMvcRenderer
+    {
+        public Task<IHtmlContent> PartialAsync(
+            string viewName,
+            object? model = null,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<IHtmlContent>(new HtmlString("custom renderer"));
+
+        public Task<IHtmlContent> PartialAsync(
+            string viewName,
+            object? model,
+            Action<ViewDataDictionary> configureViewData,
+            CancellationToken cancellationToken = default)
+        {
+            var viewData = new ViewDataDictionary(
+                new EmptyModelMetadataProvider(),
+                new ModelStateDictionary())
+            {
+                Model = model
+            };
+            configureViewData(viewData);
+            return Task.FromResult<IHtmlContent>(new HtmlString("custom renderer"));
+        }
+    }
+
+    private sealed class FakeCompositeViewEngine : ICompositeViewEngine
+    {
+        private static readonly IView FakeView = new FakeMvcPartialView();
+
+        public IReadOnlyList<IViewEngine> ViewEngines { get; } = Array.Empty<IViewEngine>();
+
+        public ViewEngineResult FindView(ActionContext context, string viewName, bool isMainPage)
+        {
+            if (string.Equals(viewName, "missing", StringComparison.Ordinal))
+            {
+                return ViewEngineResult.NotFound(
+                    viewName,
+                    [$"/Views/{viewName}.cshtml", $"/Views/Shared/{viewName}.cshtml"]);
+            }
+
+            return ViewEngineResult.Found(viewName, FakeView);
+        }
+
+        public ViewEngineResult GetView(string? executingFilePath, string viewPath, bool isMainPage)
+        {
+            if (string.Equals(viewPath, "missing", StringComparison.Ordinal))
+            {
+                return ViewEngineResult.NotFound(
+                    viewPath,
+                    [$"/Views/{viewPath}.cshtml", $"/Views/Shared/{viewPath}.cshtml"]);
+            }
+
+            if (viewPath.StartsWith("~/", StringComparison.Ordinal) ||
+                viewPath.StartsWith("/", StringComparison.Ordinal) ||
+                viewPath.EndsWith(".cshtml", StringComparison.OrdinalIgnoreCase))
+            {
+                return ViewEngineResult.Found(viewPath, FakeView);
+            }
+
+            return ViewEngineResult.NotFound(
+                viewPath,
+                [$"/Views/{viewPath}.cshtml", $"/Views/Shared/{viewPath}.cshtml"]);
+        }
+    }
+
+    private sealed class FakeMvcPartialView : IView
+    {
+        public string Path => "/Views/Shared/_Greeting.cshtml";
+
+        public Task RenderAsync(ViewContext context)
+        {
+            var payload = Assert.IsType<MvcPartialPayload>(context.ViewData.Model);
+            var source = Assert.IsType<string>(context.ViewData["source"]);
+
+            context.Writer.Write(
+                $"<div id=\"mvc-partial\" data-source=\"{source}\">Hello {payload.Name}</div>");
+
+            return Task.CompletedTask;
+        }
+    }
+
     private static class TestContentActions
     {
         [Authorize]
@@ -1154,6 +1326,24 @@ public sealed class ServerIntegrationTests
         }
     }
 
+    [ContentInvocationPrefix("tests.mvc")]
+    private sealed class MvcContentActions(IHeimdallMvcRenderer views)
+    {
+        [ContentInvocation("partial")]
+        public Task<IHtmlContent> Partial(MvcPartialPayload payload, CancellationToken cancellationToken)
+        {
+            return views.PartialAsync(
+                payload.ViewName ?? "_Greeting",
+                payload,
+                viewData => viewData["source"] = "heimdall",
+                cancellationToken);
+        }
+
+        [ContentInvocation("missing")]
+        public Task<IHtmlContent> Missing(CancellationToken cancellationToken)
+            => views.PartialAsync("missing", cancellationToken: cancellationToken);
+    }
+
     [ContentInvocationPrefix("tests.prefix.static")]
     private static class PrefixedStaticContentActions
     {
@@ -1229,6 +1419,13 @@ public sealed class ServerIntegrationTests
 
     private sealed class InstancePayload
     {
+        public string? Name { get; set; }
+    }
+
+    private sealed class MvcPartialPayload
+    {
+        public string? ViewName { get; set; }
+
         public string? Name { get; set; }
     }
 

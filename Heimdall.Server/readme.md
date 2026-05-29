@@ -220,6 +220,38 @@ public static IHtmlContent FilterOrders(
 
 `[ContentPayload]` marks the single payload parameter. `[FromServices]` forces DI binding even if implicit service detection cannot classify the parameter.
 
+### MVC partial rendering
+
+MVC apps can keep their existing Razor partials and render them from Heimdall content actions.
+
+```csharp
+builder.Services.AddHeimdall(options =>
+{
+    options.EnableDetailedErrors = true;
+});
+
+builder.Services.AddHeimdallMvc();
+```
+
+`AddHeimdallMvc()` adds MVC view services, `IHttpContextAccessor`, and `IHeimdallMvcRenderer`. It does not map controller routes; call `MapControllerRoute(...)` or `MapControllers()` separately if the app also serves normal MVC controllers.
+
+```csharp
+[ContentInvocationPrefix("orders")]
+public sealed class OrderActions(
+    IOrderRepository orders,
+    IHeimdallMvcRenderer views)
+{
+    [ContentInvocation("filter")]
+    public async Task<IHtmlContent> Filter(OrderFilter filter, CancellationToken ct)
+    {
+        var results = await orders.SearchAsync(filter, ct);
+        return await views.PartialAsync("_OrderList", results, ct);
+    }
+}
+```
+
+Partial names are resolved through the MVC view engine. You can also pass an application-relative path such as `~/Views/Orders/_OrderList.cshtml` when you want to avoid controller-based lookup assumptions.
+
 Server helpers cover the same trigger-routing and response directives supported by the Heimdall client runtime:
 
 ```csharp

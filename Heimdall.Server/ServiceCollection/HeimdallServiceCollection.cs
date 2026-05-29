@@ -1,6 +1,7 @@
 ﻿using Heimdall.Server.Endpoints;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using System.Reflection;
 
 namespace Heimdall.Server
@@ -45,6 +46,24 @@ namespace Heimdall.Server
             Action<HeimdallServiceSettings> configure,
             params Assembly[] assemblies)
             => AddHeimdallCore(services, configure, assemblies);
+
+        /// <summary>
+        /// Registers MVC view rendering support for Heimdall content actions.
+        /// </summary>
+        /// <remarks>
+        /// This method adds ASP.NET Core MVC view services, an HTTP context accessor, and
+        /// <see cref="IHeimdallMvcRenderer"/> so instance content actions can render MVC partial views.
+        /// It does not map controller routes; applications should configure their MVC endpoints separately
+        /// when they also need normal controllers or Razor views.
+        /// </remarks>
+        public static IServiceCollection AddHeimdallMvc(this IServiceCollection services)
+        {
+            services.AddControllersWithViews();
+            services.AddHttpContextAccessor();
+            services.TryAddScoped<IHeimdallMvcRenderer, HeimdallMvcRenderer>();
+
+            return services;
+        }
 
         /// <summary>
         /// Enables Heimdall within the ASP.NET request pipeline.
