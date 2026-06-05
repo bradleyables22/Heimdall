@@ -8,8 +8,11 @@ Info on the bootstrap implementation:
 https://github.com/bradleyables22/Heimdall/tree/master/Heimdall.Bootstrap
 
 
-Info on the Template implementation:
+Info on the Minimal Fluent Template implementation:
 https://github.com/bradleyables22/Heimdall-Template-App
+
+Info on the MVC Template implementation:
+https://github.com/bradleyables22/Heimdall-Mvc-Template
 
 Full Usage Documentation:
 https://heimdall-framework.org
