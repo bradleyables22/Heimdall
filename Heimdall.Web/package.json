@@ -13,6 +13,7 @@
   },
   "devDependencies": {
     "esbuild": "0.28.0",
+    "eslint": "^10.5.0",
     "playwright": "1.59.1"
   }
 }

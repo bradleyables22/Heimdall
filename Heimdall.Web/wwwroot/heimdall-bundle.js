@@ -526,6 +526,11 @@
       for (const s of scripts)
         s.remove();
     }
+    function containsTag(html, tagName) {
+      if (!html)
+        return false;
+      return html.toLowerCase().indexOf("<" + tagName.toLowerCase()) !== -1;
+    }
     function parseHtmlToTemplate(html) {
       const tpl = document.createElement("template");
       tpl.innerHTML = html || "";
@@ -614,10 +619,10 @@
     function sanitizeHtmlStringNoApply(html) {
       if (!html)
         return html;
-      const hasScript = html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1;
-      const hasInv = html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1;
-      const hasAbort = html.indexOf("<Abort") !== -1 || html.indexOf("<abort") !== -1;
-      const hasRedirect = html.indexOf("<Redirect") !== -1 || html.indexOf("<redirect") !== -1;
+      const hasScript = containsTag(html, "script");
+      const hasInv = containsTag(html, "invocation");
+      const hasAbort = containsTag(html, "abort");
+      const hasRedirect = containsTag(html, "redirect");
       if (!hasScript && !hasInv && !hasAbort && !hasRedirect)
         return html;
       const tpl = parseHtmlToTemplate(html);
@@ -627,10 +632,10 @@
       return fragmentToHtml(tpl.content);
     }
     function processOob(html, sourceEl) {
-      const hasInv = html && (html.indexOf("<Invocation") !== -1 || html.indexOf("<invocation") !== -1);
-      const hasScript = html && (html.indexOf("<script") !== -1 || html.indexOf("<SCRIPT") !== -1);
-      const hasAbort = html && (html.indexOf("<Abort") !== -1 || html.indexOf("<abort") !== -1);
-      const hasRedirect = html && (html.indexOf("<Redirect") !== -1 || html.indexOf("<redirect") !== -1);
+      const hasScript = containsTag(html, "script");
+      const hasInv = containsTag(html, "invocation");
+      const hasAbort = containsTag(html, "abort");
+      const hasRedirect = containsTag(html, "redirect");
       if (!hasInv && !hasScript && !hasAbort && !hasRedirect) {
         return {
           html: html || "",

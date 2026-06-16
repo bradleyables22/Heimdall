@@ -12,7 +12,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Web</PackageId>
-		<Version>2.0.1</Version>
+		<Version>2.0.2</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall JavaScript library.</Description>
@@ -49,6 +49,7 @@
 		<Content Remove="package-lock.json" />
 		<Content Remove="package.json" />
 		<Content Remove="tests\**" />
+
 		<None Remove="_build\**" />
 		<None Remove="build.mjs" />
 		<None Remove="node_modules\**" />
@@ -59,6 +60,7 @@
 
 	<ItemGroup>
 		<None Include="_build\**" Pack="false" Visible="true" />
+		<None Include="tests\**" Pack="false" Visible="true" />
 	</ItemGroup>
 
 	<ItemGroup>
