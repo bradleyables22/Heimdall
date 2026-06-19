@@ -200,6 +200,31 @@ Scripts are stripped for safety.
 
 ---
 
+## JavaScript Void Invocation
+
+Server responses may include JavaScript void invocation directives:
+
+```html
+<javascript
+  function="window.App.toast.success"
+  args='["Saved"]'
+  timing="after">
+</javascript>
+```
+
+Rules:
+
+* `function` must be an explicit dotted path rooted at `window.`, `globalThis.`, or `document.`
+* `args` must be a JSON array
+* `timing` is `after` by default, or `before` to run before response swaps
+* Return values are ignored
+* The directive element is stripped and never rendered
+* `<redirect>` is a hard stop and prevents JavaScript invocation
+
+Heimdall does not evaluate JavaScript source from responses.
+
+---
+
 ## SSE (Bifrost)
 
 Real-time HTML streaming via EventSource.

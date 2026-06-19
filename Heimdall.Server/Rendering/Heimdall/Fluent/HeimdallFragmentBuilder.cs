@@ -68,6 +68,42 @@ namespace Heimdall.Server.Rendering
 			}
 
 			/// <summary>
+			/// Adds a JavaScript void invocation directive that runs after response swaps.
+			/// </summary>
+			/// <param name="functionPath">An explicitly rooted function path such as <c>window.App.saved</c>.</param>
+			/// <param name="args">Arguments passed to the JavaScript function.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallFragmentBuilder JsInvokeVoid(string functionPath, params object?[] args)
+			{
+				_f.Add(HeimdallHtml.JsInvokeVoid(functionPath, args));
+				return this;
+			}
+
+			/// <summary>
+			/// Adds a JavaScript void invocation directive that runs before response swaps.
+			/// </summary>
+			/// <param name="functionPath">An explicitly rooted function path such as <c>window.App.prepare</c>.</param>
+			/// <param name="args">Arguments passed to the JavaScript function.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallFragmentBuilder JsInvokeVoidBefore(string functionPath, params object?[] args)
+			{
+				_f.Add(HeimdallHtml.JsInvokeVoidBefore(functionPath, args));
+				return this;
+			}
+
+			/// <summary>
+			/// Adds a JavaScript void invocation directive that runs after response swaps.
+			/// </summary>
+			/// <param name="functionPath">An explicitly rooted function path such as <c>window.App.saved</c>.</param>
+			/// <param name="args">Arguments passed to the JavaScript function.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallFragmentBuilder JsInvokeVoidAfter(string functionPath, params object?[] args)
+			{
+				_f.Add(HeimdallHtml.JsInvokeVoidAfter(functionPath, args));
+				return this;
+			}
+
+			/// <summary>
 			/// Adds HTML content directly to the fragment.
 			/// </summary>
 			/// <param name="content">The content to append.</param>

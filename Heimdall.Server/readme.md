@@ -375,6 +375,16 @@ Redirect:
 return HeimdallHtml.Redirect("/login");
 ```
 
+Invoke a JavaScript void function:
+
+```csharp
+return Html.Fragment(
+    SavedBanner.Render(),
+    HeimdallHtml.JsInvokeVoid("window.App.toast.success", "Saved"));
+```
+
+JavaScript invocation paths must be explicit dotted paths rooted at `window.`, `globalThis.`, or `document.`. Bare paths such as `App.toast.success` are rejected. The default timing is after response swaps; use `JsInvokeVoidBefore(...)` when the function must run before swaps are applied.
+
 ---
 
 ## MVC Partial Rendering

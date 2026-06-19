@@ -3,6 +3,7 @@ import { createBootTriggers } from "./core/boot-triggers.js";
 import { createDiagnostics } from "./core/diagnostics.js";
 import { createDomPipeline } from "./core/dom.js";
 import { createEventDelegates } from "./core/event-delegates.js";
+import { createJsInvokeVoidRuntime } from "./core/js-invoke-void.js";
 import { createPayloadResolver } from "./core/payloads.js";
 import { createSecurityTokens } from "./core/security-tokens.js";
 import { createHeimdallRuntime } from "./core/startup.js";
@@ -309,10 +310,17 @@ import {
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
     const { payloadFromElement } = createPayloadResolver(global);
     const { emit, dbg } = createDiagnostics(getRuntimeConfig);
+    const jsInvokeVoid = createJsInvokeVoidRuntime({
+        global,
+        emit,
+        dbg,
+        getConfig: getRuntimeConfig
+    });
     const dom = createDomPipeline({
         getConfig: getRuntimeConfig,
         boot: root => boot(root),
-        dbg
+        dbg,
+        jsInvokeVoid
     });
     const {
         clearBifrostSubscribeToken,

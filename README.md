@@ -45,6 +45,7 @@ Browser runtime distributed as Razor Class Library static web assets:
 - DOM swaps
 - out-of-band `<invocation>` handling
 - abort and redirect directives
+- JavaScript void invocation directives
 - SSE client runtime
 - MutationObserver auto-boot
 
