@@ -279,14 +279,18 @@ But designed specifically for ASP.NET.
 
 ## Versioning
 
-Alpha releases may change:
+HeimdallFramework.Web is on the v2 package line, with v3 development underway in the main repository.
+
+The public runtime is intended for real application use. v3 may introduce deliberate breaking changes where they improve the framework contract, especially around JavaScript command invocation, response orchestration, and static generation support.
+
+The client runtime currently reports `apiVersion = 1`, and the default server endpoints remain under `/__heimdall/v1/...`. That version identifies the Heimdall browser/server wire protocol, not the NuGet package generation.
+
+Changes may still occur across major package versions in:
 
 * Attribute names
 * Runtime behavior
 * Endpoint contracts
 * SSE details
-
-Avoid long-term API assumptions until v1.
 
 ---
 

@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -19,9 +20,9 @@ namespace Heimdall.Server
 
             app.MapGet("__heimdall/v1/bifrost/token", async (
 				HttpContext ctx,
-				IAntiforgery antiforgery,
-				BifrostSubscribeToken tokenSvc,
-				IOptions<HeimdallServiceSettings> options) =>
+				[FromServices] IAntiforgery antiforgery,
+				[FromServices] BifrostSubscribeToken tokenSvc,
+				[FromServices] IOptions<HeimdallServiceSettings> options) =>
             {
                 var topic = ctx.Request.Query["topic"].ToString()?.Trim();
 
@@ -50,9 +51,9 @@ namespace Heimdall.Server
 
             app.MapGet("__heimdall/v1/bifrost", async (
 				HttpContext ctx,
-				Bifrost bifrost,
-				BifrostSubscribeToken tokenSvc,
-				IOptions<HeimdallServiceSettings> options) =>
+				[FromServices] Bifrost bifrost,
+				[FromServices] BifrostSubscribeToken tokenSvc,
+				[FromServices] IOptions<HeimdallServiceSettings> options) =>
 			{
 				var topic = ctx.Request.Query["topic"].ToString()?.Trim();
 

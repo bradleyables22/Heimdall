@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Options;
 
@@ -11,7 +12,10 @@ namespace Heimdall.Server.Endpoints
 	{
 		internal static IEndpointRouteBuilder MapHeimdallSecurityEndpoints(this IEndpointRouteBuilder app)
 		{
-			app.MapGet("__heimdall/v1/csrf", (HttpContext ctx, IAntiforgery antiforgery, IOptions<HeimdallServiceSettings> options) =>
+			app.MapGet("__heimdall/v1/csrf", (
+				HttpContext ctx,
+				[FromServices] IAntiforgery antiforgery,
+				[FromServices] IOptions<HeimdallServiceSettings> options) =>
 			{
 				var settings = options.Value;
 
