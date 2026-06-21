@@ -1,0 +1,46 @@
+<Project>
+  <PropertyGroup>
+    <GenerateHeimdallStaticSiteOnBuild Condition="'$(GenerateHeimdallStaticSiteOnBuild)' == ''">false</GenerateHeimdallStaticSiteOnBuild>
+    <GenerateHeimdallStaticSiteOnPublish Condition="'$(GenerateHeimdallStaticSiteOnPublish)' == ''">false</GenerateHeimdallStaticSiteOnPublish>
+    <HeimdallStaticSiteGenerationCommand Condition="'$(HeimdallStaticSiteGenerationCommand)' == ''">--heimdall-generate-static</HeimdallStaticSiteGenerationCommand>
+    <HeimdallStaticSiteGenerationWorkingDirectory Condition="'$(HeimdallStaticSiteGenerationWorkingDirectory)' == ''">$(MSBuildProjectDirectory)</HeimdallStaticSiteGenerationWorkingDirectory>
+    <HeimdallStaticSiteGenerationDotNetCommand Condition="'$(HeimdallStaticSiteGenerationDotNetCommand)' == ''">dotnet</HeimdallStaticSiteGenerationDotNetCommand>
+    <HeimdallStaticSiteGenerationTimeout Condition="'$(HeimdallStaticSiteGenerationTimeout)' == ''">120000</HeimdallStaticSiteGenerationTimeout>
+    <HeimdallStaticSiteGenerationEnvironment Condition="'$(HeimdallStaticSiteGenerationEnvironment)' == ''">Production</HeimdallStaticSiteGenerationEnvironment>
+    <HeimdallStaticSiteGenerationEnvironmentVariables Condition="'$(HeimdallStaticSiteGenerationEnvironmentVariables)' == ''">DOTNET_ENVIRONMENT=$(HeimdallStaticSiteGenerationEnvironment);ASPNETCORE_ENVIRONMENT=$(HeimdallStaticSiteGenerationEnvironment)</HeimdallStaticSiteGenerationEnvironmentVariables>
+    <HeimdallStaticSiteGenerationNoBuildArgument Condition="'$(HeimdallStaticSiteGenerationNoBuildArgument)' == ''">--no-build</HeimdallStaticSiteGenerationNoBuildArgument>
+    <HeimdallStaticSiteGenerationNoLaunchProfileArgument Condition="'$(HeimdallStaticSiteGenerationNoLaunchProfileArgument)' == ''">--no-launch-profile</HeimdallStaticSiteGenerationNoLaunchProfileArgument>
+    <HeimdallStaticSiteExcludeGeneratedStaticWebAssets Condition="'$(HeimdallStaticSiteExcludeGeneratedStaticWebAssets)' == ''">true</HeimdallStaticSiteExcludeGeneratedStaticWebAssets>
+    <HeimdallStaticSiteGenerationFrameworkArgument Condition="'$(TargetFramework)' != ''">--framework &quot;$(TargetFramework)&quot;</HeimdallStaticSiteGenerationFrameworkArgument>
+    <HeimdallStaticSiteGenerationRunCommand>$(HeimdallStaticSiteGenerationDotNetCommand) run $(HeimdallStaticSiteGenerationNoLaunchProfileArgument) --project &quot;$(MSBuildProjectFullPath)&quot; --configuration &quot;$(Configuration)&quot; $(HeimdallStaticSiteGenerationNoBuildArgument) $(HeimdallStaticSiteGenerationFrameworkArgument) -- $(HeimdallStaticSiteGenerationCommand)</HeimdallStaticSiteGenerationRunCommand>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(HeimdallStaticSiteExcludeGeneratedStaticWebAssets)' == 'true'">
+    <Content Remove="wwwroot\_content\**" />
+    <None Remove="wwwroot\_content\**" />
+  </ItemGroup>
+
+  <Target Name="GenerateHeimdallStaticSite"
+          Condition="'$(IsCrossTargetingBuild)' != 'true' and '$(OutputType)' == 'Exe'">
+    <Message Importance="High" Text="Generating Heimdall static site with command: $(HeimdallStaticSiteGenerationRunCommand)" />
+    <Exec Command="$(HeimdallStaticSiteGenerationRunCommand)"
+          WorkingDirectory="$(HeimdallStaticSiteGenerationWorkingDirectory)"
+          Timeout="$(HeimdallStaticSiteGenerationTimeout)"
+          EnvironmentVariables="$(HeimdallStaticSiteGenerationEnvironmentVariables)" />
+  </Target>
+
+  <Target Name="GenerateHeimdallStaticSite_InvalidProject"
+          Condition="'$(IsCrossTargetingBuild)' != 'true' and '$(OutputType)' != 'Exe' and ('$(GenerateHeimdallStaticSiteOnBuild)' == 'true' or '$(GenerateHeimdallStaticSiteOnPublish)' == 'true')">
+    <Error Text="Heimdall static site generation can only run from an executable app project. Disable GenerateHeimdallStaticSiteOnBuild/GenerateHeimdallStaticSiteOnPublish for '$(MSBuildProjectName)' or move the setting to the web app project." />
+  </Target>
+
+  <Target Name="GenerateHeimdallStaticSiteOnBuild"
+          AfterTargets="Build"
+          DependsOnTargets="GenerateHeimdallStaticSite_InvalidProject;GenerateHeimdallStaticSite"
+          Condition="'$(GenerateHeimdallStaticSiteOnBuild)' == 'true'" />
+
+  <Target Name="GenerateHeimdallStaticSiteOnPublish"
+          AfterTargets="Publish"
+          DependsOnTargets="GenerateHeimdallStaticSite_InvalidProject;GenerateHeimdallStaticSite"
+          Condition="'$(GenerateHeimdallStaticSiteOnPublish)' == 'true'" />
+</Project>

@@ -1,9 +1,10 @@
 import {
     getAttr,
+    isElement,
     resolveTarget
 } from "./utils.js";
 
-export function createDomPipeline({ getConfig, boot, dbg }) {
+export function createDomPipeline({ getConfig, boot, dbg, jsInvokeVoid }) {
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -87,6 +88,72 @@ export function createDomPipeline({ getConfig, boot, dbg }) {
             redirectEl.remove();
     }
 
+    function normalizeJsInvokeTiming(value) {
+        return jsInvokeVoid && typeof jsInvokeVoid.normalizeTiming === "function"
+            ? jsInvokeVoid.normalizeTiming(value)
+            : (String(value || "after").toLowerCase().trim() === "before" ? "before" : "after");
+    }
+
+    function collectJsInvokeVoidDirectives(rootNode) {
+        const directives = [];
+
+        function visit(node) {
+            if (!node || !node.querySelectorAll)
+                return;
+
+            const jsEls = [];
+            if (isElement(node) && String(node.localName || "").toLowerCase() === "javascript")
+                jsEls.push(node);
+
+            for (const jsEl of Array.from(node.querySelectorAll("javascript")))
+                jsEls.push(jsEl);
+
+            for (const jsEl of jsEls) {
+                directives.push({
+                    functionPath: getAttr(jsEl, "function"),
+                    argsJson: getAttr(jsEl, "args"),
+                    timing: normalizeJsInvokeTiming(getAttr(jsEl, "timing")),
+                    sourceEl: jsEl
+                });
+
+                jsEl.remove();
+            }
+
+            for (const tpl of Array.from(node.querySelectorAll("template"))) {
+                if (tpl.content)
+                    visit(tpl.content);
+            }
+        }
+
+        visit(rootNode);
+        return directives;
+    }
+
+    function stripJsInvokeVoidFromFragment(fragment) {
+        collectJsInvokeVoidDirectives(fragment);
+    }
+
+    function splitJsInvokeVoidDirectives(directives) {
+        const before = [];
+        const after = [];
+
+        for (const directive of directives || []) {
+            if (normalizeJsInvokeTiming(directive.timing) === "before")
+                before.push(directive);
+            else
+                after.push(directive);
+        }
+
+        return { before, after };
+    }
+
+    function invokeJsInvokeVoidDirectives(directives, context) {
+        if (!jsInvokeVoid || typeof jsInvokeVoid.invokeAll !== "function")
+            return 0;
+
+        return jsInvokeVoid.invokeAll(directives, context);
+    }
+
     function extractRedirectFromFragment(fragment) {
         if (!fragment || !fragment.querySelector)
             return null;
@@ -126,30 +193,34 @@ export function createDomPipeline({ getConfig, boot, dbg }) {
         const hasInv = containsTag(html, "invocation");
         const hasAbort = containsTag(html, "abort");
         const hasRedirect = containsTag(html, "redirect");
+        const hasJsInvokeVoid = containsTag(html, "javascript");
 
-        if (!hasScript && !hasInv && !hasAbort && !hasRedirect)
+        if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid)
             return html;
 
         const tpl = parseHtmlToTemplate(html);
         stripInvocationsFromFragment(tpl.content);
         stripAbortsFromFragment(tpl.content);
         stripRedirectsFromFragment(tpl.content);
+        stripJsInvokeVoidFromFragment(tpl.content);
         return fragmentToHtml(tpl.content);
     }
 
-    function processOob(html, sourceEl) {
+    function processOob(html, sourceEl, context) {
         const hasScript = containsTag(html, "script");
         const hasInv = containsTag(html, "invocation");
         const hasAbort = containsTag(html, "abort");
         const hasRedirect = containsTag(html, "redirect");
+        const hasJsInvokeVoid = containsTag(html, "javascript");
 
-        if (!hasInv && !hasScript && !hasAbort && !hasRedirect) {
+        if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid) {
             return {
                 html: html || "",
                 applied: 0,
                 abortSwap: false,
                 abortReason: null,
-                redirectUrl: null
+                redirectUrl: null,
+                jsAfter: []
             };
         }
 
@@ -164,9 +235,14 @@ export function createDomPipeline({ getConfig, boot, dbg }) {
                 applied: 0,
                 abortSwap: true,
                 abortReason: "redirect",
-                redirectUrl: redirect.url
+                redirectUrl: redirect.url,
+                jsAfter: []
             };
         }
+
+        const jsDirectives = collectJsInvokeVoidDirectives(fragment);
+        const jsGroups = splitJsInvokeVoidDirectives(jsDirectives);
+        invokeJsInvokeVoidDirectives(jsGroups.before, Object.assign({ phase: "before", sourceEl }, context || {}));
 
         const aborts = fragment.querySelectorAll("abort");
         let abortSwap = false;
@@ -189,7 +265,8 @@ export function createDomPipeline({ getConfig, boot, dbg }) {
                 applied: 0,
                 abortSwap,
                 abortReason,
-                redirectUrl: null
+                redirectUrl: null,
+                jsAfter: jsGroups.after
             };
         }
 
@@ -200,7 +277,8 @@ export function createDomPipeline({ getConfig, boot, dbg }) {
                 applied: 0,
                 abortSwap,
                 abortReason,
-                redirectUrl: null
+                redirectUrl: null,
+                jsAfter: jsGroups.after
             };
         }
 
@@ -255,7 +333,8 @@ export function createDomPipeline({ getConfig, boot, dbg }) {
             applied,
             abortSwap,
             abortReason,
-            redirectUrl: null
+            redirectUrl: null,
+            jsAfter: jsGroups.after
         };
     }
 
@@ -264,8 +343,10 @@ export function createDomPipeline({ getConfig, boot, dbg }) {
         parseHtmlToTemplate,
         processOob,
         sanitizeHtmlStringNoApply,
+        invokeJsInvokeVoidDirectives,
         stripAbortsFromFragment,
         stripInvocationsFromFragment,
+        stripJsInvokeVoidFromFragment,
         stripRedirectsFromFragment
     };
 }

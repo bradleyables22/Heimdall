@@ -100,13 +100,23 @@ export function createActionInvoker({
         let abortSwap = false;
         let abortReason = null;
         let redirectUrl = null;
+        let jsAfter = [];
 
         if (res.ok) {
-            const oob = dom.processOob(html, options && options.sourceEl ? options.sourceEl : null);
+            const oob = dom.processOob(html, options && options.sourceEl ? options.sourceEl : null, {
+                kind: "action",
+                actionId,
+                payload,
+                target: targetEl,
+                swap,
+                endpoint: url.toString(),
+                status: res.status
+            });
             html = oob.html;
             abortSwap = !!oob.abortSwap;
             abortReason = oob.abortReason || null;
             redirectUrl = oob.redirectUrl || null;
+            jsAfter = oob.jsAfter || [];
         } else {
             html = dom.sanitizeHtmlStringNoApply(html);
         }
@@ -148,6 +158,7 @@ export function createActionInvoker({
             dom.stripInvocationsFromFragment(mainTpl.content);
             dom.stripAbortsFromFragment(mainTpl.content);
             dom.stripRedirectsFromFragment(mainTpl.content);
+            dom.stripJsInvokeVoidFromFragment(mainTpl.content);
 
             const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swap);
 
@@ -157,6 +168,19 @@ export function createActionInvoker({
                 }
                 catch { /* ignore */ }
             }
+        }
+
+        if (res.ok) {
+            dom.invokeJsInvokeVoidDirectives(jsAfter, {
+                phase: "after",
+                kind: "action",
+                actionId,
+                payload,
+                target: targetEl,
+                swap,
+                endpoint: url.toString(),
+                status: res.status
+            });
         }
 
         const result = {

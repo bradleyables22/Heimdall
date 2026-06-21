@@ -30,6 +30,42 @@ namespace Heimdall.Server.Tests;
 public sealed class ServerIntegrationTests
 {
     [Fact]
+    public async Task UseHeimdall_ThrowsClearErrorWhenAddHeimdallWasNotCalled()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+
+        await using var app = builder.Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => app.UseHeimdall());
+
+        Assert.Contains("UseHeimdall() requires Heimdall runtime services", ex.Message);
+        Assert.Contains("AddHeimdall", ex.Message);
+    }
+
+    [Fact]
+    public async Task IApplicationBuilderUseHeimdall_ThrowsClearErrorWhenAddHeimdallWasNotCalled()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddRouting();
+
+        await using var app = builder.Build();
+        app.UseRouting();
+
+        var ex = Assert.Throws<InvalidOperationException>(() => ((IApplicationBuilder)app).UseHeimdall());
+
+        Assert.Contains("UseHeimdall() requires Heimdall runtime services", ex.Message);
+        Assert.Contains("AddHeimdall", ex.Message);
+    }
+
+    [Fact]
     public async Task AuthorizedContentAction_RejectsAnonymousRequests()
     {
         await using var app = await CreateAppAsync();

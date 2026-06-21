@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -47,8 +48,8 @@ namespace Heimdall.Server
         {
             app.MapPost("__heimdall/v1/content/actions", async (
                 HttpContext ctx,
-                ContentRegistry registry,
-                IOptions<HeimdallServiceSettings> options) =>
+                [FromServices] ContentRegistry registry,
+                [FromServices] IOptions<HeimdallServiceSettings> options) =>
             {
                 var settings = options.Value;
 

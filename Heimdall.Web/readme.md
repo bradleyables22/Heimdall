@@ -200,6 +200,31 @@ Scripts are stripped for safety.
 
 ---
 
+## JavaScript Void Invocation
+
+Server responses may include JavaScript void invocation directives:
+
+```html
+<javascript
+  function="window.App.toast.success"
+  args='["Saved"]'
+  timing="after">
+</javascript>
+```
+
+Rules:
+
+* `function` must be an explicit dotted path rooted at `window.`, `globalThis.`, or `document.`
+* `args` must be a JSON array
+* `timing` is `after` by default, or `before` to run before response swaps
+* Return values are ignored
+* The directive element is stripped and never rendered
+* `<redirect>` is a hard stop and prevents JavaScript invocation
+
+Heimdall does not evaluate JavaScript source from responses.
+
+---
+
 ## SSE (Bifrost)
 
 Real-time HTML streaming via EventSource.
@@ -279,14 +304,18 @@ But designed specifically for ASP.NET.
 
 ## Versioning
 
-Alpha releases may change:
+HeimdallFramework.Web is on the v2 package line, with v3 development underway in the main repository.
+
+The public runtime is intended for real application use. v3 may introduce deliberate breaking changes where they improve the framework contract, especially around JavaScript command invocation, response orchestration, and static generation support.
+
+The client runtime currently reports `apiVersion = 1`, and the default server endpoints remain under `/__heimdall/v1/...`. That version identifies the Heimdall browser/server wire protocol, not the NuGet package generation.
+
+Changes may still occur across major package versions in:
 
 * Attribute names
 * Runtime behavior
 * Endpoint contracts
 * SSE details
-
-Avoid long-term API assumptions until v1.
 
 ---
 

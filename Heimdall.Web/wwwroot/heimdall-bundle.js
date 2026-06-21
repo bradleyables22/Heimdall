@@ -160,12 +160,22 @@
       let abortSwap = false;
       let abortReason = null;
       let redirectUrl = null;
+      let jsAfter = [];
       if (res.ok) {
-        const oob = dom.processOob(html, options && options.sourceEl ? options.sourceEl : null);
+        const oob = dom.processOob(html, options && options.sourceEl ? options.sourceEl : null, {
+          kind: "action",
+          actionId,
+          payload,
+          target: targetEl,
+          swap,
+          endpoint: url.toString(),
+          status: res.status
+        });
         html = oob.html;
         abortSwap = !!oob.abortSwap;
         abortReason = oob.abortReason || null;
         redirectUrl = oob.redirectUrl || null;
+        jsAfter = oob.jsAfter || [];
       } else {
         html = dom.sanitizeHtmlStringNoApply(html);
       }
@@ -202,6 +212,7 @@
         dom.stripInvocationsFromFragment(mainTpl.content);
         dom.stripAbortsFromFragment(mainTpl.content);
         dom.stripRedirectsFromFragment(mainTpl.content);
+        dom.stripJsInvokeVoidFromFragment(mainTpl.content);
         const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swap);
         if (didApply && !getConfig().observeDom) {
           try {
@@ -209,6 +220,18 @@
           } catch {
           }
         }
+      }
+      if (res.ok) {
+        dom.invokeJsInvokeVoidDirectives(jsAfter, {
+          phase: "after",
+          kind: "action",
+          actionId,
+          payload,
+          target: targetEl,
+          swap,
+          endpoint: url.toString(),
+          status: res.status
+        });
       }
       const result = {
         ok: res.ok,
@@ -518,7 +541,7 @@
   }
 
   // core/dom.js
-  function createDomPipeline({ getConfig, boot, dbg }) {
+  function createDomPipeline({ getConfig, boot, dbg, jsInvokeVoid }) {
     function stripScripts(rootNode) {
       if (!rootNode || !rootNode.querySelectorAll)
         return;
@@ -591,6 +614,55 @@
       for (const redirectEl of redirects)
         redirectEl.remove();
     }
+    function normalizeJsInvokeTiming(value) {
+      return jsInvokeVoid && typeof jsInvokeVoid.normalizeTiming === "function" ? jsInvokeVoid.normalizeTiming(value) : String(value || "after").toLowerCase().trim() === "before" ? "before" : "after";
+    }
+    function collectJsInvokeVoidDirectives(rootNode) {
+      const directives = [];
+      function visit(node) {
+        if (!node || !node.querySelectorAll)
+          return;
+        const jsEls = [];
+        if (isElement(node) && String(node.localName || "").toLowerCase() === "javascript")
+          jsEls.push(node);
+        for (const jsEl of Array.from(node.querySelectorAll("javascript")))
+          jsEls.push(jsEl);
+        for (const jsEl of jsEls) {
+          directives.push({
+            functionPath: getAttr(jsEl, "function"),
+            argsJson: getAttr(jsEl, "args"),
+            timing: normalizeJsInvokeTiming(getAttr(jsEl, "timing")),
+            sourceEl: jsEl
+          });
+          jsEl.remove();
+        }
+        for (const tpl of Array.from(node.querySelectorAll("template"))) {
+          if (tpl.content)
+            visit(tpl.content);
+        }
+      }
+      visit(rootNode);
+      return directives;
+    }
+    function stripJsInvokeVoidFromFragment(fragment) {
+      collectJsInvokeVoidDirectives(fragment);
+    }
+    function splitJsInvokeVoidDirectives(directives) {
+      const before = [];
+      const after = [];
+      for (const directive of directives || []) {
+        if (normalizeJsInvokeTiming(directive.timing) === "before")
+          before.push(directive);
+        else
+          after.push(directive);
+      }
+      return { before, after };
+    }
+    function invokeJsInvokeVoidDirectives(directives, context) {
+      if (!jsInvokeVoid || typeof jsInvokeVoid.invokeAll !== "function")
+        return 0;
+      return jsInvokeVoid.invokeAll(directives, context);
+    }
     function extractRedirectFromFragment(fragment) {
       if (!fragment || !fragment.querySelector)
         return null;
@@ -623,26 +695,30 @@
       const hasInv = containsTag(html, "invocation");
       const hasAbort = containsTag(html, "abort");
       const hasRedirect = containsTag(html, "redirect");
-      if (!hasScript && !hasInv && !hasAbort && !hasRedirect)
+      const hasJsInvokeVoid = containsTag(html, "javascript");
+      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid)
         return html;
       const tpl = parseHtmlToTemplate(html);
       stripInvocationsFromFragment(tpl.content);
       stripAbortsFromFragment(tpl.content);
       stripRedirectsFromFragment(tpl.content);
+      stripJsInvokeVoidFromFragment(tpl.content);
       return fragmentToHtml(tpl.content);
     }
-    function processOob(html, sourceEl) {
+    function processOob(html, sourceEl, context) {
       const hasScript = containsTag(html, "script");
       const hasInv = containsTag(html, "invocation");
       const hasAbort = containsTag(html, "abort");
       const hasRedirect = containsTag(html, "redirect");
-      if (!hasInv && !hasScript && !hasAbort && !hasRedirect) {
+      const hasJsInvokeVoid = containsTag(html, "javascript");
+      if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid) {
         return {
           html: html || "",
           applied: 0,
           abortSwap: false,
           abortReason: null,
-          redirectUrl: null
+          redirectUrl: null,
+          jsAfter: []
         };
       }
       const tpl = parseHtmlToTemplate(html);
@@ -655,9 +731,13 @@
           applied: 0,
           abortSwap: true,
           abortReason: "redirect",
-          redirectUrl: redirect.url
+          redirectUrl: redirect.url,
+          jsAfter: []
         };
       }
+      const jsDirectives = collectJsInvokeVoidDirectives(fragment);
+      const jsGroups = splitJsInvokeVoidDirectives(jsDirectives);
+      invokeJsInvokeVoidDirectives(jsGroups.before, Object.assign({ phase: "before", sourceEl }, context || {}));
       const aborts = fragment.querySelectorAll("abort");
       let abortSwap = false;
       let abortReason = null;
@@ -677,7 +757,8 @@
           applied: 0,
           abortSwap,
           abortReason,
-          redirectUrl: null
+          redirectUrl: null,
+          jsAfter: jsGroups.after
         };
       }
       if (!getConfig().oobEnabled) {
@@ -687,7 +768,8 @@
           applied: 0,
           abortSwap,
           abortReason,
-          redirectUrl: null
+          redirectUrl: null,
+          jsAfter: jsGroups.after
         };
       }
       let applied = 0;
@@ -732,7 +814,8 @@
         applied,
         abortSwap,
         abortReason,
-        redirectUrl: null
+        redirectUrl: null,
+        jsAfter: jsGroups.after
       };
     }
     return {
@@ -740,8 +823,10 @@
       parseHtmlToTemplate,
       processOob,
       sanitizeHtmlStringNoApply,
+      invokeJsInvokeVoidDirectives,
       stripAbortsFromFragment,
       stripInvocationsFromFragment,
+      stripJsInvokeVoidFromFragment,
       stripRedirectsFromFragment
     };
   }
@@ -983,6 +1068,107 @@
       handleMouseOut,
       handleMouseOver,
       handleSubmit
+    };
+  }
+
+  // core/js-invoke-void.js
+  function createJsInvokeVoidRuntime({ global, emit, dbg, getConfig }) {
+    const validSegment = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+    function normalizeTiming(value) {
+      return String(value || "after").toLowerCase().trim() === "before" ? "before" : "after";
+    }
+    function parseArgs(argsJson) {
+      if (argsJson == null || String(argsJson).trim() === "")
+        return [];
+      const parsed = JSON.parse(argsJson);
+      if (!Array.isArray(parsed))
+        throw new Error("Heimdall JavaScript invocation args must be a JSON array.");
+      return parsed;
+    }
+    function resolveRoot(name) {
+      switch (name) {
+        case "window":
+          return global;
+        case "globalThis":
+          return global.globalThis || global;
+        case "document":
+          return global.document;
+        default:
+          return void 0;
+      }
+    }
+    function resolveFunction(functionPath) {
+      const path = String(functionPath || "").trim();
+      const parts = path.split(".").filter(Boolean);
+      if (parts.length < 2)
+        throw new Error("Heimdall JavaScript invocation requires an explicitly rooted function path.");
+      const root = resolveRoot(parts[0]);
+      if (!root)
+        throw new Error("Heimdall JavaScript invocation paths must start with window., globalThis., or document.");
+      for (const part of parts) {
+        if (!validSegment.test(part))
+          throw new Error("Heimdall JavaScript invocation paths support dotted property access only.");
+      }
+      let owner = root;
+      for (let i = 1; i < parts.length - 1; i++) {
+        owner = owner == null ? void 0 : owner[parts[i]];
+      }
+      const functionName = parts[parts.length - 1];
+      const fn = owner == null ? void 0 : owner[functionName];
+      if (typeof fn !== "function")
+        throw new Error(`Heimdall JavaScript function '${path}' was not found.`);
+      return { owner, fn, path };
+    }
+    function emitError(directive, error, context) {
+      const detail = {
+        functionPath: directive && directive.functionPath ? directive.functionPath : null,
+        timing: normalizeTiming(directive && directive.timing),
+        args: directive && Array.isArray(directive.args) ? directive.args : null,
+        sourceEl: directive && directive.sourceEl ? directive.sourceEl : null,
+        context: context || null,
+        error
+      };
+      emit("heimdall:javascript-error", detail);
+      if (getConfig && getConfig().debug) {
+        console.error("[Heimdall] JavaScript invocation failed", detail);
+      }
+    }
+    function invokeDirective(directive, context) {
+      const invocation = Object.assign({}, directive || {});
+      try {
+        invocation.timing = normalizeTiming(invocation.timing);
+        invocation.args = Array.isArray(invocation.args) ? invocation.args : parseArgs(invocation.argsJson);
+        const resolved = resolveFunction(invocation.functionPath);
+        const result = resolved.fn.apply(resolved.owner, invocation.args);
+        if (result && typeof result.then === "function") {
+          result.then(null, (error) => {
+            emitError(invocation, error, context);
+          });
+        }
+        dbg("js invoke void", {
+          functionPath: resolved.path,
+          timing: invocation.timing,
+          args: invocation.args
+        });
+        return true;
+      } catch (error) {
+        emitError(invocation, error, context);
+        return false;
+      }
+    }
+    function invokeAll(directives, context) {
+      if (!Array.isArray(directives) || directives.length === 0)
+        return 0;
+      let count = 0;
+      for (const directive of directives) {
+        if (invokeDirective(directive, context))
+          count++;
+      }
+      return count;
+    }
+    return {
+      invokeAll,
+      normalizeTiming
     };
   }
 
@@ -1791,12 +1977,22 @@ ${topic}`;
       let abortSwap = false;
       let abortReason = null;
       let redirectUrl = null;
+      let jsAfter = [];
       try {
-        const oob = dom.processOob(html, state.el);
+        const oob = dom.processOob(html, state.el, {
+          phase: "before",
+          kind: "sse",
+          topic: state.topic,
+          event: state.eventName,
+          url,
+          target: targetEl,
+          swap: swapMode
+        });
         html = oob.html;
         abortSwap = !!oob.abortSwap;
         abortReason = oob.abortReason || null;
         redirectUrl = oob.redirectUrl || null;
+        jsAfter = oob.jsAfter || [];
       } catch (e) {
         emit("heimdall:sse-error", { topic: state.topic, url, el: state.el, error: e });
         if (getConfig().debug) {
@@ -1824,6 +2020,7 @@ ${topic}`;
         dom.stripInvocationsFromFragment(mainTpl.content);
         dom.stripAbortsFromFragment(mainTpl.content);
         dom.stripRedirectsFromFragment(mainTpl.content);
+        dom.stripJsInvokeVoidFromFragment(mainTpl.content);
         const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swapMode);
         if (didApply && !getConfig().observeDom) {
           try {
@@ -1832,6 +2029,15 @@ ${topic}`;
           }
         }
       }
+      dom.invokeJsInvokeVoidDirectives(jsAfter, {
+        phase: "after",
+        kind: "sse",
+        topic: state.topic,
+        event: state.eventName,
+        url,
+        target: targetEl,
+        swap: swapMode
+      });
       emit("heimdall:sse-message", {
         topic: state.topic,
         event: state.eventName,
@@ -2056,10 +2262,17 @@ ${topic}`;
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
     const { payloadFromElement } = createPayloadResolver(global);
     const { emit, dbg } = createDiagnostics(getRuntimeConfig);
+    const jsInvokeVoid = createJsInvokeVoidRuntime({
+      global,
+      emit,
+      dbg,
+      getConfig: getRuntimeConfig
+    });
     const dom = createDomPipeline({
       getConfig: getRuntimeConfig,
       boot: (root) => boot(root),
-      dbg
+      dbg,
+      jsInvokeVoid
     });
     const {
       clearBifrostSubscribeToken,

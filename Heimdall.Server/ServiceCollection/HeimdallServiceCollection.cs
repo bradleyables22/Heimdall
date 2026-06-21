@@ -81,6 +81,8 @@ namespace Heimdall.Server
         /// </returns>
         public static WebApplication UseHeimdall(this WebApplication app)
         {
+            EnsureHeimdallServicesRegistered(app.Services);
+
             app.MapHeimdallSecurityEndpoints();
             app.MapHeimdallContentEndpoints();
             app.MapHeimdallBifrostEndpoints();
@@ -98,6 +100,8 @@ namespace Heimdall.Server
         /// </returns>
         public static IApplicationBuilder UseHeimdall(this IApplicationBuilder app)
         {
+            EnsureHeimdallServicesRegistered(app.ApplicationServices);
+
             app.UseEndpoints(endpoints =>
             {
                 endpoints.MapHeimdallSecurityEndpoints();
@@ -106,6 +110,34 @@ namespace Heimdall.Server
             });
 
             return app;
+        }
+
+        private static void EnsureHeimdallServicesRegistered(IServiceProvider services)
+        {
+            var serviceInspector = services.GetService<IServiceProviderIsService>();
+
+            if (IsRegistered<ContentRegistry>(services, serviceInspector) &&
+                IsRegistered<BifrostSubscribeToken>(services, serviceInspector) &&
+                IsRegistered<Bifrost>(services, serviceInspector))
+            {
+                return;
+            }
+
+            throw new InvalidOperationException(
+                "UseHeimdall() requires Heimdall runtime services. " +
+                "Call builder.Services.AddHeimdall(...) before builder.Build(), " +
+                "or omit UseHeimdall() for static-site-generation-only apps.");
+        }
+
+        private static bool IsRegistered<T>(
+            IServiceProvider services,
+            IServiceProviderIsService? serviceInspector)
+            where T : class
+        {
+            if (serviceInspector is not null)
+                return serviceInspector.IsService(typeof(T));
+
+            return services.GetService<T>() is not null;
         }
 
         private static IServiceCollection AddHeimdallCore(

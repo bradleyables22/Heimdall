@@ -30,6 +30,22 @@ public sealed class RenderingHelperTests
     }
 
     [Fact]
+    public void StaticHelpers_RenderJsInvokeVoidDirective()
+    {
+        var html = Render(Html.Fragment(
+            HeimdallHtml.JsInvokeVoid("window.App.toast", "Saved", new { Id = 7 }),
+            HeimdallHtml.JsInvokeVoidBefore("document.body.focus")));
+
+        Assert.Contains("<javascript", html);
+        Assert.Contains("function=\"window.App.toast\"", html);
+        Assert.Contains("args=\"[&quot;Saved&quot;,{&quot;Id&quot;:7}]\"", html);
+        Assert.Contains("timing=\"after\"", html);
+        Assert.Contains("function=\"document.body.focus\"", html);
+        Assert.Contains("args=\"[]\"", html);
+        Assert.Contains("timing=\"before\"", html);
+    }
+
+    [Fact]
     public void StaticHelpers_RenderTriggerPayloadStateAndSseAttributes()
     {
         var html = Render(Html.Button(
@@ -77,6 +93,9 @@ public sealed class RenderingHelperTests
     {
         Assert.Throws<ArgumentException>(() => HeimdallHtml.Redirect(" "));
         Assert.Throws<ArgumentException>(() => HeimdallHtml.Invocation(" "));
+        Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid(" "));
+        Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid("App.toast"));
+        Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid("window.App['toast']"));
     }
 
     [Fact]
@@ -102,7 +121,8 @@ public sealed class RenderingHelperTests
             f.Heimdall()
                 .Abort()
                 .Redirect("/next")
-                .Invocation("#status", payload: Html.Span("Done"));
+                .Invocation("#status", payload: Html.Span("Done"))
+                .JsInvokeVoid("window.App.done", "ok");
         }));
 
         Assert.Contains("heimdall-content-click=\"tests.save\"", button);
@@ -116,6 +136,8 @@ public sealed class RenderingHelperTests
         Assert.Contains("<redirect url=\"/next\"></redirect>", fragment);
         Assert.Contains("<invocation", fragment);
         Assert.Contains("<span>Done</span>", fragment);
+        Assert.Contains("function=\"window.App.done\"", fragment);
+        Assert.Contains("args=\"[&quot;ok&quot;]\"", fragment);
     }
 
     private static string Render(IHtmlContent content)

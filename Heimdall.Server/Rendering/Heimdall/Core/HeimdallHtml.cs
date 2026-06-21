@@ -120,5 +120,20 @@ namespace Heimdall.Server.Rendering
 			/// </summary>
 			None
 		}
+
+		/// <summary>
+		/// Defines when a JavaScript void invocation directive should run.
+		/// </summary>
+		public enum JsInvokeTiming
+		{
+			/// <summary>
+			/// Run before Heimdall applies response swaps.
+			/// </summary>
+			Before,
+			/// <summary>
+			/// Run after Heimdall applies response swaps.
+			/// </summary>
+			After
+		}
 	}
 }

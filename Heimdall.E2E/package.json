@@ -1,0 +1,11 @@
+{
+  "name": "heimdall-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/e2e.spec.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.59.1"
+  }
+}
