@@ -23,6 +23,7 @@ const tests = [
   ["honors scope, ignore, prevent-default, and disable modifiers", testEventBehaviorModifiers],
   ["invokes JavaScript before and after swaps", testJsInvokeVoid],
   ["receives deterministic Bifrost SSE updates, OOB, and JS directives", testHarnessSse],
+  ["navigates cookie auth redirects from content actions", testAuthRedirectNavigation],
   [
     "returns detailed content action errors",
     testDetailedActionErrors,
@@ -615,6 +616,47 @@ async function testHarnessSse(page, baseUrl) {
   assert.deepEqual(await page.evaluate(() => window.HeimdallE2E.sseCalls), [
     { value: "sse-ok", targetText: "SSE JS main" }
   ]);
+}
+
+async function testAuthRedirectNavigation(page, baseUrl) {
+  await openHarness(page, baseUrl, "/e2e");
+  await waitForText(page.locator("#e2e-auth-target"), "Auth target original");
+
+  await page.evaluate(() => {
+    localStorage.removeItem("heimdall-e2e-auth-action");
+    localStorage.removeItem("heimdall-e2e-auth-redirect-url");
+    localStorage.removeItem("heimdall-e2e-auth-target-text");
+
+    document.addEventListener("heimdall:redirect", event => {
+      const detail = event.detail || {};
+      if (detail.actionId !== "e2e.auth.required")
+        return;
+
+      const target = document.querySelector("#e2e-auth-target");
+      localStorage.setItem("heimdall-e2e-auth-action", detail.actionId || "");
+      localStorage.setItem("heimdall-e2e-auth-redirect-url", detail.url || "");
+      localStorage.setItem("heimdall-e2e-auth-target-text", target ? target.textContent.trim() : "");
+    });
+  });
+
+  const navigation = page.waitForURL(url => {
+    return url.pathname === "/e2e-signin" &&
+      url.searchParams.get("ReturnUrl")?.includes("/__heimdall/v1/content/actions");
+  });
+
+  await page.locator("#e2e-auth-button").click();
+  await navigation;
+  await waitForText(page.locator("#e2e-signin-page"), "Sign in required");
+
+  const redirectState = await page.evaluate(() => ({
+    actionId: localStorage.getItem("heimdall-e2e-auth-action"),
+    redirectUrl: localStorage.getItem("heimdall-e2e-auth-redirect-url"),
+    targetText: localStorage.getItem("heimdall-e2e-auth-target-text")
+  }));
+
+  assert.equal(redirectState.actionId, "e2e.auth.required");
+  assert.match(redirectState.redirectUrl, /\/e2e-signin\?ReturnUrl=/);
+  assert.equal(redirectState.targetText, "Auth target original");
 }
 
 async function testDetailedActionErrors(page, baseUrl) {

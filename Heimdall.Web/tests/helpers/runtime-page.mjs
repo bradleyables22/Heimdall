@@ -107,12 +107,22 @@ export async function installFakeServer(page, options = {}) {
         await new Promise(resolve => setTimeout(resolve, Number(response.delayMs)));
       }
 
-      return new Response(response.body || "", {
+      const result = new Response(response.body || "", {
         status: response.status || 200,
         headers: {
           "Content-Type": response.contentType || "text/html; charset=utf-8"
         }
       });
+
+      if (typeof response.redirected === "boolean") {
+        Object.defineProperty(result, "redirected", { value: response.redirected });
+      }
+
+      if (response.url) {
+        Object.defineProperty(result, "url", { value: response.url });
+      }
+
+      return result;
     };
   }, options);
 }

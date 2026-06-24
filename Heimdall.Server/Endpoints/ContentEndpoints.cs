@@ -54,7 +54,22 @@ namespace Heimdall.Server
                 var settings = options.Value;
 
                 var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-                await antiforgery.ValidateRequestAsync(ctx);
+                try
+                {
+                    await antiforgery.ValidateRequestAsync(ctx);
+                }
+                catch (AntiforgeryValidationException ex)
+                {
+                    if (settings.EnableDetailedErrors)
+                    {
+                        return Results.Problem(
+                            detail: ex.ToString(),
+                            title: "Invalid Heimdall antiforgery token",
+                            statusCode: StatusCodes.Status400BadRequest);
+                    }
+
+                    return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                }
 
                 if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) ||
                     string.IsNullOrWhiteSpace(values))

@@ -8,6 +8,7 @@ using System.Text.Encodings.Web;
 using Heimdall.Server;
 using Heimdall.Server.Rendering;
 using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -588,6 +589,46 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task ContentAction_InvalidAntiforgeryTokenReturnsBadRequestInsteadOfThrowing()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var csrfToken = await GetCsrfTokenAsync(client, "alice");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/__heimdall/v1/content/actions");
+        request.Headers.Add("X-Heimdall-Content-Action", "tests.auth.allow-anonymous");
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+        request.Headers.Add(TestAuthHandler.UserHeaderName, "bob");
+        request.Content = JsonContent.Create(new { });
+
+        var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("antiforgery", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task CookieAuthContentAction_AnonymousAuthorizedActionRedirectsToConfiguredSignIn()
+    {
+        await using var app = await CreateCookieAuthAppAsync();
+        using var client = app.GetTestClient();
+        var csrfToken = await GetCsrfTokenAsync(client);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/__heimdall/v1/content/actions");
+        request.Headers.Add("X-Heimdall-Content-Action", "tests.auth.secure");
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+        request.Content = JsonContent.Create(new { });
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.NotNull(response.Headers.Location);
+        Assert.Equal("/signin", response.Headers.Location!.AbsolutePath);
+        Assert.Contains("ReturnUrl=", response.Headers.Location.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CsrfEndpoint_IssuesRequestTokenWithNoStoreHeaders()
     {
         await using var app = await CreateAppAsync();
@@ -882,6 +923,38 @@ public sealed class ServerIntegrationTests
         app.UseAuthentication();
         app.UseAuthorization();
         ((IApplicationBuilder)app).UseHeimdall();
+        await app.StartAsync();
+        return app;
+    }
+
+    private static async Task<WebApplication> CreateCookieAuthAppAsync()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddAntiforgery();
+        builder.Services
+            .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(options =>
+            {
+                options.LoginPath = "/signin";
+                options.AccessDeniedPath = "/denied";
+            });
+        builder.Services.AddAuthorization();
+        builder.Services.AddHeimdall(options =>
+        {
+            options.EnableDetailedErrors = true;
+        }, typeof(ServerIntegrationTests).Assembly);
+
+        var app = builder.Build();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseAntiforgery();
+        app.UseHeimdall();
+        app.MapGet("/signin", () => Results.Content("<h1>Sign in</h1>", "text/html; charset=utf-8"));
         await app.StartAsync();
         return app;
     }

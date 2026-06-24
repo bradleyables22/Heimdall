@@ -1,6 +1,7 @@
 using Bs = Heimdall.Bootstrap.Bootstrap;
 using Heimdall.Server;
 using Heimdall.Server.Rendering;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
@@ -39,6 +40,7 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_Marker = "e2e.marker";
 		public const string Action_SlowDisable = "e2e.slow-disable";
 		public const string Action_Error = "e2e.error";
+		public const string Action_AuthRequired = "e2e.auth.required";
 
 		private const string SseTopic = "e2e-harness";
 
@@ -132,6 +134,7 @@ window.HeimdallE2E = {
 					RenderJsSection(),
 					RenderFormSection(),
 					RenderSseSection(),
+					RenderAuthSection(),
 					RenderErrorSection(),
 					RenderRedirectSection());
 			});
@@ -368,6 +371,12 @@ window.HeimdallE2E = {
 		[RequestTimeout(3000)]
 		public static IHtmlContent Error()
 			=> throw new InvalidOperationException("E2E expected failure.");
+
+		[Authorize]
+		[ContentInvocation(Action_AuthRequired)]
+		[RequestTimeout(3000)]
+		public static IHtmlContent AuthRequired()
+			=> Status("e2e-auth-result", "Authenticated content should not render for anonymous users");
 
 		private static IHtmlContent RenderLoadSection()
 			=> Section("e2e-load-section", "Load", body =>
@@ -784,6 +793,17 @@ window.HeimdallE2E = {
 			=> Section("e2e-error-section", "Error", body =>
 			{
 				body.Div(target => target.Id("e2e-error-target").Text("Error target original"));
+			});
+
+		private static IHtmlContent RenderAuthSection()
+			=> Section("e2e-auth-section", "Auth Redirect", body =>
+			{
+				body.Div(target => target.Id("e2e-auth-target").Text("Auth target original"))
+				.Add(ActionButton(
+					id: "e2e-auth-button",
+					label: "Run auth redirect",
+					action: Action_AuthRequired,
+					targetSelector: "#e2e-auth-target"));
 			});
 
 		private static IHtmlContent RenderRedirectSection()

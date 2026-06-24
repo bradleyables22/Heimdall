@@ -53,6 +53,7 @@ const tests = [
   ["honors abort directives while keeping OOB updates", testAbortDirective],
   ["honors redirect directives", testRedirectDirective],
   ["honors redirect text content", testRedirectTextDirective],
+  ["navigates on fetch-followed auth redirects", testFetchFollowedAuthRedirect],
   ["strips OOB invocations when OOB is disabled", testOobDisabled],
   ["retries once after suspected CSRF failure", testCsrfRetry],
   ["mints SSE subscribe tokens with CSRF", testSseSubscribeToken],
@@ -1126,6 +1127,46 @@ async function testRedirectTextDirective(page) {
   assert.equal(result.abortReason, "redirect");
   assert.equal(await page.locator("#main").innerHTML(), "Keep");
   assert.equal(new URL(page.url()).hash, "#text-redirected");
+}
+
+async function testFetchFollowedAuthRedirect(page) {
+  const signInUrl = "http://heimdall.test/signin?ReturnUrl=%2F__heimdall%2Fv1%2Fcontent%2Factions";
+
+  await installFakeServer(page, {
+    actionResponses: [{
+      body: '<form id="login-form">Sign in</form>',
+      redirected: true,
+      url: signInUrl
+    }]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="main">Secure content</div>';
+    const result = await window.Heimdall.invoke("Secure.Refresh", {}, { target: "#main" });
+
+    return {
+      result: {
+        ok: result.ok,
+        status: result.status,
+        redirectUrl: result.redirectUrl,
+        abortSwap: result.abortSwap,
+        abortReason: result.abortReason
+      },
+      targetHtml: document.querySelector("#main").innerHTML
+    };
+  });
+
+  await page.waitForURL(signInUrl);
+
+  assert.deepEqual(state.result, {
+    ok: true,
+    status: 200,
+    redirectUrl: signInUrl,
+    abortSwap: true,
+    abortReason: "redirect"
+  });
+  assert.equal(state.targetHtml, "Secure content");
+  assert.equal(page.url(), signInUrl);
 }
 
 async function testOobDisabled(page) {

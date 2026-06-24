@@ -2,11 +2,20 @@ using Heimdall.E2E.Rendering.Layouts;
 using Heimdall.E2E.Rendering.Pages;
 using Heimdall.Server;
 using Heimdall.Server.Rendering;
+using Microsoft.AspNetCore.Authentication.Cookies;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddAntiforgery();
 builder.Services.AddCors();
+builder.Services
+	.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+	.AddCookie(options =>
+	{
+		options.LoginPath = "/e2e-signin";
+		options.AccessDeniedPath = "/e2e-denied";
+	});
+builder.Services.AddAuthorization();
 builder.Services.AddHeimdall(options =>
 	options.EnableDetailedErrors = true
 );
@@ -36,6 +45,8 @@ var app = builder.Build();
 
 StaticAssets.Discover(app.Environment.WebRootPath);
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 app.UseCors();
 
@@ -54,6 +65,11 @@ app.MapHeimdallPage("/e2e", (_, ctx) =>
 {
 	return MainLayout.Render(E2EHarnessPage.Render(), "E2E Harness");
 });
+
+app.MapGet("/e2e-signin", () =>
+	Results.Content(
+		"<!doctype html><html><body><main id=\"e2e-signin-page\">Sign in required</main></body></html>",
+		"text/html; charset=utf-8"));
 
 await app.RunWithHeimdallStaticSiteGenerationAsync(args);
 

@@ -96,6 +96,33 @@ export function createActionInvoker({
             }
         }
 
+        if (res.redirected && res.url) {
+            emit("heimdall:redirect", {
+                actionId,
+                payload,
+                target: targetEl,
+                swap,
+                endpoint: url.toString(),
+                status: res.status,
+                url: res.url
+            });
+
+            dbg("redirecting", { actionId, url: res.url });
+            global.location.href = res.url;
+
+            return {
+                ok: res.ok,
+                status: res.status,
+                html: null,
+                error: null,
+                response: res,
+                ms,
+                abortSwap: true,
+                abortReason: "redirect",
+                redirectUrl: res.url
+            };
+        }
+
         let html = rawHtml;
         let abortSwap = false;
         let abortReason = null;
