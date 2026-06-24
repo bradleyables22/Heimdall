@@ -6,7 +6,7 @@
     <Nullable>enable</Nullable>
 
 	  <PackageId>HeimdallFramework.Bootstrap</PackageId>
-	  <Version>5.0.0</Version>
+	  <Version>5.0.1</Version>
 	  <PackageReadmeFile>readme.md</PackageReadmeFile>
 	  <Authors>Bradley Ables</Authors>
 	  <Description>Heimdall strongly typed Bootstrap classes.</Description>
@@ -15,7 +15,7 @@
 	  <RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 	  <RepositoryType>git</RepositoryType>
 	  <PackageLicenseExpression>MIT</PackageLicenseExpression>
-	  <PackageIcon>heimdall-128.png</PackageIcon>
+	  <PackageIcon>favicon.png</PackageIcon>
 
 	  <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 	  <Deterministic>true</Deterministic>
@@ -25,7 +25,7 @@
 	  <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
 	<ItemGroup>
-		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
+		<None Include="Favicon.png" Pack="true" PackagePath="favicon.png" />
 		<None Include="..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
 		<None Include="readme.md" Pack="true" PackagePath="\" />
 	</ItemGroup>

@@ -22,7 +22,7 @@
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 
-		<PackageIcon>heimdall-128.png</PackageIcon>
+		<PackageIcon>favicon.png</PackageIcon>
 
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 		<Deterministic>true</Deterministic>
@@ -37,7 +37,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="heimdall-128.png" Pack="true" PackagePath="\" />
+		<None Include="Favicon.png" Pack="true" PackagePath="favicon.png" />
 		<None Include="..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
 		<None Include="readme.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
