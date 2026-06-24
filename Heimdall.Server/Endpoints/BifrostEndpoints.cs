@@ -33,9 +33,17 @@ namespace Heimdall.Server
                 {
                     await antiforgery.ValidateRequestAsync(ctx);
                 }
-                catch
+                catch (AntiforgeryValidationException ex)
                 {
-                    return Results.Unauthorized();
+                    if (options.Value.EnableDetailedErrors)
+                    {
+                        return Results.Problem(
+                            detail: ex.ToString(),
+                            title: "Invalid Heimdall antiforgery token",
+                            statusCode: StatusCodes.Status400BadRequest);
+                    }
+
+                    return Results.BadRequest("Invalid Heimdall antiforgery token.");
                 }
 
 				var authorizationResult = await AuthorizeBifrostTopicAsync(ctx, topic, options.Value);

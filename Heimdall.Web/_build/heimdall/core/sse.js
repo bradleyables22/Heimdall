@@ -535,6 +535,9 @@ export function createSseRuntime({
                 return;
 
             connection.connecting = false;
+            if (e && e.redirectUrl)
+                return;
+
             emitForConnectionSubscribers(connection, "heimdall:sse-error", { error: e });
             if (getConfig().debug) {
                 // eslint-disable-next-line no-console

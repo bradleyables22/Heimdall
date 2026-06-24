@@ -38,7 +38,7 @@ export async function installFakeServer(page, options = {}) {
 
     window.fetch = async (input, init = {}) => {
       const url = typeof input === "string" ? input : input.url;
-      const headers = Object.fromEntries(new Headers(init.headers || {}).entries());
+      const requestHeaders = Object.fromEntries(new Headers(init.headers || {}).entries());
       const bodyText = init.body == null ? null : String(init.body);
 
       let jsonBody = null;
@@ -53,7 +53,7 @@ export async function installFakeServer(page, options = {}) {
       window.__heimdallFetches.push({
         url,
         method: init.method || "GET",
-        headers,
+        headers: requestHeaders,
         bodyText,
         jsonBody
       });
@@ -86,10 +86,30 @@ export async function installFakeServer(page, options = {}) {
             });
           }
 
-          return new Response(response.body || "", {
+          const responseHeaders = {
+            "Content-Type": response.contentType || "text/plain; charset=utf-8"
+          };
+          if (response.location) {
+            responseHeaders.Location = response.location;
+          }
+          if (response.headers) {
+            Object.assign(responseHeaders, response.headers);
+          }
+
+          const result = new Response(response.body || "", {
             status: response.status || 200,
-            headers: { "Content-Type": response.contentType || "text/plain; charset=utf-8" }
+            headers: responseHeaders
           });
+
+          if (typeof response.redirected === "boolean") {
+            Object.defineProperty(result, "redirected", { value: response.redirected });
+          }
+
+          if (response.url) {
+            Object.defineProperty(result, "url", { value: response.url });
+          }
+
+          return result;
         }
 
         const token = bifrostTokens.length > 1 ? bifrostTokens.shift() : bifrostTokens[0];
@@ -107,11 +127,19 @@ export async function installFakeServer(page, options = {}) {
         await new Promise(resolve => setTimeout(resolve, Number(response.delayMs)));
       }
 
+      const responseHeaders = {
+        "Content-Type": response.contentType || "text/html; charset=utf-8"
+      };
+      if (response.location) {
+        responseHeaders.Location = response.location;
+      }
+      if (response.headers) {
+        Object.assign(responseHeaders, response.headers);
+      }
+
       const result = new Response(response.body || "", {
         status: response.status || 200,
-        headers: {
-          "Content-Type": response.contentType || "text/html; charset=utf-8"
-        }
+        headers: responseHeaders
       });
 
       if (typeof response.redirected === "boolean") {

@@ -5,6 +5,10 @@ import {
     safeText,
     truthyAttr
 } from "./utils.js";
+import {
+    getAuthRedirectUrlFromResponse,
+    normalizeFollowedAuthRedirectUrl
+} from "./auth-redirects.js";
 
 export function createActionInvoker({
     global,
@@ -21,33 +25,6 @@ export function createActionInvoker({
 }) {
     async function invoke(actionId, payload, options) {
         return _invokeWithRetry(actionId, payload, options, true);
-    }
-
-    function getCurrentPageReturnUrl() {
-        const location = global.location;
-        if (!location)
-            return "/";
-
-        return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
-    }
-
-    function normalizeFollowedRedirectUrl(redirectUrl) {
-        const config = getConfig();
-        const returnUrlParameter = config.authReturnUrlParameter || "ReturnUrl";
-
-        if (!returnUrlParameter)
-            return redirectUrl;
-
-        try {
-            const nextUrl = new URL(redirectUrl, global.location?.origin || undefined);
-            if (!nextUrl.searchParams.has(returnUrlParameter))
-                return nextUrl.toString();
-
-            nextUrl.searchParams.set(returnUrlParameter, getCurrentPageReturnUrl());
-            return nextUrl.toString();
-        } catch {
-            return redirectUrl;
-        }
     }
 
     async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
@@ -123,8 +100,9 @@ export function createActionInvoker({
             }
         }
 
-        if (res.redirected && res.url) {
-            const redirectUrl = normalizeFollowedRedirectUrl(res.url);
+        const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+        if (authRedirectUrl) {
+            const redirectUrl = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
 
             emit("heimdall:redirect", {
                 actionId,

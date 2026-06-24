@@ -330,6 +330,8 @@ import {
     } = createSecurityTokens({
         global,
         getConfig: getRuntimeConfig,
+        emit,
+        dbg,
         safeText,
         csrfHeader: CSRF_HEADER,
         defaultBifrostTokenEndpoint: DEFAULT_BIFROST_TOKEN_ENDPOINT

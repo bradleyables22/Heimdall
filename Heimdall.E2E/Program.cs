@@ -17,8 +17,13 @@ builder.Services
 	});
 builder.Services.AddAuthorization();
 builder.Services.AddHeimdall(options =>
-	options.EnableDetailedErrors = true
-);
+{
+	options.EnableDetailedErrors = true;
+	options.AuthorizeBifrostTopic = (context, topic) =>
+		ValueTask.FromResult(
+			topic != E2EHarnessPage.SseTopic_AuthRequired ||
+			context.User.Identity?.IsAuthenticated == true);
+});
 
 var staticOutputPath = Environment.GetEnvironmentVariable("HEIMDALL_E2E_STATIC_OUTPUT");
 if (string.IsNullOrWhiteSpace(staticOutputPath))

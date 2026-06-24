@@ -1,6 +1,13 @@
+import {
+    getAuthRedirectUrlFromResponse,
+    normalizeFollowedAuthRedirectUrl
+} from "./auth-redirects.js";
+
 export function createSecurityTokens({
     global,
     getConfig,
+    emit,
+    dbg,
     safeText,
     csrfHeader,
     defaultBifrostTokenEndpoint
@@ -61,6 +68,88 @@ export function createSecurityTokens({
         _bifrostTokenPromiseByTopic.delete(t);
     }
 
+    function isAntiforgeryFailure(status, body) {
+        if (Number(status) !== 400)
+            return false;
+
+        const lower = String(body || "").toLowerCase();
+        return lower.includes("csrf") || lower.includes("antiforgery");
+    }
+
+    async function fetchBifrostSubscribeToken(t, shouldRetry) {
+        const csrf = await ensureCsrfToken();
+        const config = getConfig();
+
+        const base = config.endpoints && config.endpoints.bifrostToken
+            ? config.endpoints.bifrostToken
+            : defaultBifrostTokenEndpoint;
+
+        const url = new URL(base, global.location?.origin || undefined);
+        url.searchParams.set("topic", t);
+
+        const res = await global.fetch(url.toString(), {
+            method: "GET",
+            credentials: "same-origin",
+            headers: {
+                "X-Requested-With": "XMLHttpRequest",
+                [csrfHeader]: csrf
+            }
+        });
+
+        const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+        if (authRedirectUrl) {
+            const redirectUrl = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
+            const error = new Error(`Bifrost token fetch redirected: ${redirectUrl}`);
+            error.status = res.status;
+            error.redirectUrl = redirectUrl;
+
+            if (typeof emit === "function") {
+                emit("heimdall:sse-redirect", {
+                    topic: t,
+                    url: url.toString(),
+                    status: res.status,
+                    redirectUrl
+                });
+            }
+
+            if (typeof dbg === "function")
+                dbg("sse token redirecting", { topic: t, redirectUrl });
+
+            global.location.href = redirectUrl;
+            throw error;
+        }
+
+        if (!res.ok) {
+            const body = await safeText(res);
+
+            if (shouldRetry && isAntiforgeryFailure(res.status, body)) {
+                if (typeof dbg === "function")
+                    dbg("bifrost csrf validation suspected; retrying once with fresh token", { topic: t });
+
+                clearCsrfToken();
+                return fetchBifrostSubscribeToken(t, false);
+            }
+
+            const error = new Error(`Bifrost token fetch failed: ${res.status}. ${body || ""}`.trim());
+            error.status = res.status;
+            error.body = body;
+            throw error;
+        }
+
+        const data = await res.json();
+        const token = data && (data.token || data.st);
+        const expiresInSeconds = data && (data.expiresInSeconds || data.expires_in_seconds || 120);
+
+        if (!token)
+            throw new Error("Bifrost token response missing token.");
+
+        const ttlMs = Math.max(5, parseInt(expiresInSeconds, 10) || 120) * 1000;
+        const expiresAtMs = Date.now() + Math.max(5000, ttlMs - 5000);
+
+        _bifrostTokenByTopic.set(t, { token, expiresAtMs });
+        return token;
+    }
+
     async function ensureBifrostSubscribeToken(topic) {
         const t = String(topic || "").trim();
         if (!t)
@@ -77,45 +166,7 @@ export function createSecurityTokens({
 
         const p = (async () => {
             try {
-                const csrf = await ensureCsrfToken();
-                const config = getConfig();
-
-                const base = config.endpoints && config.endpoints.bifrostToken
-                    ? config.endpoints.bifrostToken
-                    : defaultBifrostTokenEndpoint;
-
-                const url = new URL(base, global.location?.origin || undefined);
-                url.searchParams.set("topic", t);
-
-                const res = await global.fetch(url.toString(), {
-                    method: "GET",
-                    credentials: "same-origin",
-                    headers: {
-                        "X-Requested-With": "XMLHttpRequest",
-                        [csrfHeader]: csrf
-                    }
-                });
-
-                if (!res.ok) {
-                    const body = await safeText(res);
-                    const error = new Error(`Bifrost token fetch failed: ${res.status}. ${body || ""}`.trim());
-                    error.status = res.status;
-                    error.body = body;
-                    throw error;
-                }
-
-                const data = await res.json();
-                const token = data && (data.token || data.st);
-                const expiresInSeconds = data && (data.expiresInSeconds || data.expires_in_seconds || 120);
-
-                if (!token)
-                    throw new Error("Bifrost token response missing token.");
-
-                const ttlMs = Math.max(5, parseInt(expiresInSeconds, 10) || 120) * 1000;
-                const expiresAtMs = Date.now() + Math.max(5000, ttlMs - 5000);
-
-                _bifrostTokenByTopic.set(t, { token, expiresAtMs });
-                return token;
+                return await fetchBifrostSubscribeToken(t, true);
             } finally {
                 _bifrostTokenPromiseByTopic.delete(t);
             }

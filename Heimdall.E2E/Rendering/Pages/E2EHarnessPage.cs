@@ -43,6 +43,7 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_AuthRequired = "e2e.auth.required";
 
 		private const string SseTopic = "e2e-harness";
+		public const string SseTopic_AuthRequired = "e2e-auth-required";
 
 		private const string ClientHarnessScript = """
 window.HeimdallE2E = {

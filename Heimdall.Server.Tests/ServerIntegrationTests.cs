@@ -629,6 +629,24 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task CookieAuthBifrostToken_AnonymousProtectedTopicRedirectsToConfiguredSignIn()
+    {
+        await using var app = await CreateCookieAuthAppAsync();
+        using var client = app.GetTestClient();
+        var csrfToken = await GetCsrfTokenAsync(client);
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/__heimdall/v1/bifrost/token?topic=secure-topic");
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.Redirect, response.StatusCode);
+        Assert.NotNull(response.Headers.Location);
+        Assert.Equal("/signin", response.Headers.Location!.AbsolutePath);
+        Assert.Contains("ReturnUrl=", response.Headers.Location.Query, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CsrfEndpoint_IssuesRequestTokenWithNoStoreHeaders()
     {
         await using var app = await CreateAppAsync();
@@ -713,7 +731,28 @@ public sealed class ServerIntegrationTests
 
         var response = await client.SendAsync(request);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task BifrostTokenEndpoint_InvalidAntiforgeryTokenReturnsBadRequestInsteadOfThrowing()
+    {
+        await using var app = await CreateAppAsync(configureHeimdall: options =>
+        {
+            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
+        });
+        using var client = app.GetTestClient();
+        var csrfToken = await GetCsrfTokenAsync(client, "alice");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/__heimdall/v1/bifrost/token?topic=news");
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+        request.Headers.Add(TestAuthHandler.UserHeaderName, "bob");
+
+        var response = await client.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("antiforgery", body, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -947,6 +986,8 @@ public sealed class ServerIntegrationTests
         builder.Services.AddHeimdall(options =>
         {
             options.EnableDetailedErrors = true;
+            options.AuthorizeBifrostTopic = (context, topic) =>
+                ValueTask.FromResult(topic != "secure-topic" || context.User.Identity?.IsAuthenticated == true);
         }, typeof(ServerIntegrationTests).Assembly);
 
         var app = builder.Build();

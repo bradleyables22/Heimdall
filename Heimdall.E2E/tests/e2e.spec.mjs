@@ -25,6 +25,11 @@ const tests = [
   ["receives deterministic Bifrost SSE updates, OOB, and JS directives", testHarnessSse],
   ["navigates cookie auth redirects from content actions", testAuthRedirectNavigation],
   [
+    "navigates cookie auth redirects from SSE token fetches",
+    testSseAuthRedirectNavigation,
+    { allowedBrowserErrors: [/Failed to load resource: the server responded with a status of (401|403)/] }
+  ],
+  [
     "returns detailed content action errors",
     testDetailedActionErrors,
     { allowedBrowserErrors: [/Failed to load resource: the server responded with a status of (404|500)/] }
@@ -658,6 +663,44 @@ async function testAuthRedirectNavigation(page, baseUrl) {
   assert.match(redirectState.redirectUrl, /\/e2e-signin\?ReturnUrl=/);
   assert.equal(new URL(redirectState.redirectUrl).searchParams.get("ReturnUrl"), "/e2e");
   assert.equal(redirectState.targetText, "Auth target original");
+}
+
+async function testSseAuthRedirectNavigation(page, baseUrl) {
+  await openHarness(page, baseUrl, "/e2e");
+
+  await page.evaluate(() => {
+    localStorage.removeItem("heimdall-e2e-sse-auth-topic");
+    localStorage.removeItem("heimdall-e2e-sse-auth-redirect-url");
+
+    document.addEventListener("heimdall:sse-redirect", event => {
+      const detail = event.detail || {};
+      if (detail.topic !== "e2e-auth-required")
+        return;
+
+      localStorage.setItem("heimdall-e2e-sse-auth-topic", detail.topic || "");
+      localStorage.setItem("heimdall-e2e-sse-auth-redirect-url", detail.redirectUrl || "");
+    });
+
+    window.Heimdall.sse.connect("e2e-auth-required", {
+      element: document.querySelector("#e2e-harness"),
+      event: "message"
+    });
+  });
+
+  await page.waitForURL(url => {
+    return url.pathname === "/e2e-signin" &&
+      url.searchParams.get("ReturnUrl") === "/e2e";
+  });
+  await waitForText(page.locator("#e2e-signin-page"), "Sign in required");
+
+  const redirectState = await page.evaluate(() => ({
+    topic: localStorage.getItem("heimdall-e2e-sse-auth-topic"),
+    redirectUrl: localStorage.getItem("heimdall-e2e-sse-auth-redirect-url")
+  }));
+
+  assert.equal(redirectState.topic, "e2e-auth-required");
+  assert.match(redirectState.redirectUrl, /\/e2e-signin\?ReturnUrl=/);
+  assert.equal(new URL(redirectState.redirectUrl).searchParams.get("ReturnUrl"), "/e2e");
 }
 
 async function testDetailedActionErrors(page, baseUrl) {

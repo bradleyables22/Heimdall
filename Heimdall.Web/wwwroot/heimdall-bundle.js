@@ -80,6 +80,54 @@
     return cur;
   }
 
+  // core/auth-redirects.js
+  function getCurrentPageReturnUrl(global) {
+    const location = global.location;
+    if (!location)
+      return "/";
+    return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
+  }
+  function getMatchingSearchParamNames(searchParams, name) {
+    const lowerName = String(name || "").toLowerCase();
+    const matches = [];
+    for (const key of searchParams.keys()) {
+      if (String(key || "").toLowerCase() === lowerName && !matches.includes(key))
+        matches.push(key);
+    }
+    return matches;
+  }
+  function normalizeFollowedAuthRedirectUrl(global, getConfig, redirectUrl) {
+    const config = typeof getConfig === "function" ? getConfig() || {} : {};
+    const returnUrlParameter = config.authReturnUrlParameter || "ReturnUrl";
+    if (!returnUrlParameter)
+      return redirectUrl;
+    try {
+      const nextUrl = new URL(redirectUrl, global.location?.origin || void 0);
+      const matchingNames = getMatchingSearchParamNames(nextUrl.searchParams, returnUrlParameter);
+      if (matchingNames.length === 0)
+        return nextUrl.toString();
+      for (const name of matchingNames)
+        nextUrl.searchParams.set(name, getCurrentPageReturnUrl(global));
+      return nextUrl.toString();
+    } catch {
+      return redirectUrl;
+    }
+  }
+  function getAuthRedirectUrlFromResponse(response) {
+    if (!response)
+      return null;
+    if (response.redirected && response.url)
+      return response.url;
+    const status = Number(response.status);
+    if (status !== 401 && status !== 403)
+      return null;
+    try {
+      return response.headers && typeof response.headers.get === "function" ? response.headers.get("Location") : null;
+    } catch {
+      return null;
+    }
+  }
+
   // core/actions.js
   function createActionInvoker({
     global,
@@ -96,27 +144,6 @@
   }) {
     async function invoke(actionId, payload, options) {
       return _invokeWithRetry(actionId, payload, options, true);
-    }
-    function getCurrentPageReturnUrl() {
-      const location = global.location;
-      if (!location)
-        return "/";
-      return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
-    }
-    function normalizeFollowedRedirectUrl(redirectUrl) {
-      const config = getConfig();
-      const returnUrlParameter = config.authReturnUrlParameter || "ReturnUrl";
-      if (!returnUrlParameter)
-        return redirectUrl;
-      try {
-        const nextUrl = new URL(redirectUrl, global.location?.origin || void 0);
-        if (!nextUrl.searchParams.has(returnUrlParameter))
-          return nextUrl.toString();
-        nextUrl.searchParams.set(returnUrlParameter, getCurrentPageReturnUrl());
-        return nextUrl.toString();
-      } catch {
-        return redirectUrl;
-      }
     }
     async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
       options = options || {};
@@ -177,8 +204,9 @@
           return _invokeWithRetry(actionId, payload, options, false);
         }
       }
-      if (res.redirected && res.url) {
-        const redirectUrl2 = normalizeFollowedRedirectUrl(res.url);
+      const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+      if (authRedirectUrl) {
+        const redirectUrl2 = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
         emit("heimdall:redirect", {
           actionId,
           payload,
@@ -1297,6 +1325,8 @@
   function createSecurityTokens({
     global,
     getConfig,
+    emit,
+    dbg,
     safeText: safeText2,
     csrfHeader,
     defaultBifrostTokenEndpoint
@@ -1346,6 +1376,68 @@
       _bifrostTokenByTopic.delete(t);
       _bifrostTokenPromiseByTopic.delete(t);
     }
+    function isAntiforgeryFailure(status, body) {
+      if (Number(status) !== 400)
+        return false;
+      const lower = String(body || "").toLowerCase();
+      return lower.includes("csrf") || lower.includes("antiforgery");
+    }
+    async function fetchBifrostSubscribeToken(t, shouldRetry) {
+      const csrf = await ensureCsrfToken();
+      const config = getConfig();
+      const base = config.endpoints && config.endpoints.bifrostToken ? config.endpoints.bifrostToken : defaultBifrostTokenEndpoint;
+      const url = new URL(base, global.location?.origin || void 0);
+      url.searchParams.set("topic", t);
+      const res = await global.fetch(url.toString(), {
+        method: "GET",
+        credentials: "same-origin",
+        headers: {
+          "X-Requested-With": "XMLHttpRequest",
+          [csrfHeader]: csrf
+        }
+      });
+      const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+      if (authRedirectUrl) {
+        const redirectUrl = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
+        const error = new Error(`Bifrost token fetch redirected: ${redirectUrl}`);
+        error.status = res.status;
+        error.redirectUrl = redirectUrl;
+        if (typeof emit === "function") {
+          emit("heimdall:sse-redirect", {
+            topic: t,
+            url: url.toString(),
+            status: res.status,
+            redirectUrl
+          });
+        }
+        if (typeof dbg === "function")
+          dbg("sse token redirecting", { topic: t, redirectUrl });
+        global.location.href = redirectUrl;
+        throw error;
+      }
+      if (!res.ok) {
+        const body = await safeText2(res);
+        if (shouldRetry && isAntiforgeryFailure(res.status, body)) {
+          if (typeof dbg === "function")
+            dbg("bifrost csrf validation suspected; retrying once with fresh token", { topic: t });
+          clearCsrfToken();
+          return fetchBifrostSubscribeToken(t, false);
+        }
+        const error = new Error(`Bifrost token fetch failed: ${res.status}. ${body || ""}`.trim());
+        error.status = res.status;
+        error.body = body;
+        throw error;
+      }
+      const data = await res.json();
+      const token = data && (data.token || data.st);
+      const expiresInSeconds = data && (data.expiresInSeconds || data.expires_in_seconds || 120);
+      if (!token)
+        throw new Error("Bifrost token response missing token.");
+      const ttlMs = Math.max(5, parseInt(expiresInSeconds, 10) || 120) * 1e3;
+      const expiresAtMs = Date.now() + Math.max(5e3, ttlMs - 5e3);
+      _bifrostTokenByTopic.set(t, { token, expiresAtMs });
+      return token;
+    }
     async function ensureBifrostSubscribeToken(topic) {
       const t = String(topic || "").trim();
       if (!t)
@@ -1359,35 +1451,7 @@
         return inflight;
       const p = (async () => {
         try {
-          const csrf = await ensureCsrfToken();
-          const config = getConfig();
-          const base = config.endpoints && config.endpoints.bifrostToken ? config.endpoints.bifrostToken : defaultBifrostTokenEndpoint;
-          const url = new URL(base, global.location?.origin || void 0);
-          url.searchParams.set("topic", t);
-          const res = await global.fetch(url.toString(), {
-            method: "GET",
-            credentials: "same-origin",
-            headers: {
-              "X-Requested-With": "XMLHttpRequest",
-              [csrfHeader]: csrf
-            }
-          });
-          if (!res.ok) {
-            const body = await safeText2(res);
-            const error = new Error(`Bifrost token fetch failed: ${res.status}. ${body || ""}`.trim());
-            error.status = res.status;
-            error.body = body;
-            throw error;
-          }
-          const data = await res.json();
-          const token = data && (data.token || data.st);
-          const expiresInSeconds = data && (data.expiresInSeconds || data.expires_in_seconds || 120);
-          if (!token)
-            throw new Error("Bifrost token response missing token.");
-          const ttlMs = Math.max(5, parseInt(expiresInSeconds, 10) || 120) * 1e3;
-          const expiresAtMs = Date.now() + Math.max(5e3, ttlMs - 5e3);
-          _bifrostTokenByTopic.set(t, { token, expiresAtMs });
-          return token;
+          return await fetchBifrostSubscribeToken(t, true);
         } finally {
           _bifrostTokenPromiseByTopic.delete(t);
         }
@@ -1951,6 +2015,8 @@ ${topic}`;
         if (connection.closed || attemptId !== connection.connectAttempt)
           return;
         connection.connecting = false;
+        if (e && e.redirectUrl)
+          return;
         emitForConnectionSubscribers(connection, "heimdall:sse-error", { error: e });
         if (getConfig().debug) {
           console.error(`[Heimdall] SSE token/connect failed`, e);
@@ -2329,6 +2395,8 @@ ${topic}`;
     } = createSecurityTokens({
       global,
       getConfig: getRuntimeConfig,
+      emit,
+      dbg,
       safeText,
       csrfHeader: CSRF_HEADER,
       defaultBifrostTokenEndpoint: DEFAULT_BIFROST_TOKEN_ENDPOINT
