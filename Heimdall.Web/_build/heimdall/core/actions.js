@@ -23,6 +23,33 @@ export function createActionInvoker({
         return _invokeWithRetry(actionId, payload, options, true);
     }
 
+    function getCurrentPageReturnUrl() {
+        const location = global.location;
+        if (!location)
+            return "/";
+
+        return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
+    }
+
+    function normalizeFollowedRedirectUrl(redirectUrl) {
+        const config = getConfig();
+        const returnUrlParameter = config.authReturnUrlParameter || "ReturnUrl";
+
+        if (!returnUrlParameter)
+            return redirectUrl;
+
+        try {
+            const nextUrl = new URL(redirectUrl, global.location?.origin || undefined);
+            if (!nextUrl.searchParams.has(returnUrlParameter))
+                return nextUrl.toString();
+
+            nextUrl.searchParams.set(returnUrlParameter, getCurrentPageReturnUrl());
+            return nextUrl.toString();
+        } catch {
+            return redirectUrl;
+        }
+    }
+
     async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
         options = options || {};
 
@@ -97,6 +124,8 @@ export function createActionInvoker({
         }
 
         if (res.redirected && res.url) {
+            const redirectUrl = normalizeFollowedRedirectUrl(res.url);
+
             emit("heimdall:redirect", {
                 actionId,
                 payload,
@@ -104,11 +133,11 @@ export function createActionInvoker({
                 swap,
                 endpoint: url.toString(),
                 status: res.status,
-                url: res.url
+                url: redirectUrl
             });
 
-            dbg("redirecting", { actionId, url: res.url });
-            global.location.href = res.url;
+            dbg("redirecting", { actionId, url: redirectUrl });
+            global.location.href = redirectUrl;
 
             return {
                 ok: res.ok,
@@ -119,7 +148,7 @@ export function createActionInvoker({
                 ms,
                 abortSwap: true,
                 abortReason: "redirect",
-                redirectUrl: res.url
+                redirectUrl
             };
         }
 

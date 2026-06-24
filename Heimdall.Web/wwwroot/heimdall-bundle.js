@@ -97,6 +97,27 @@
     async function invoke(actionId, payload, options) {
       return _invokeWithRetry(actionId, payload, options, true);
     }
+    function getCurrentPageReturnUrl() {
+      const location = global.location;
+      if (!location)
+        return "/";
+      return `${location.pathname || "/"}${location.search || ""}${location.hash || ""}`;
+    }
+    function normalizeFollowedRedirectUrl(redirectUrl) {
+      const config = getConfig();
+      const returnUrlParameter = config.authReturnUrlParameter || "ReturnUrl";
+      if (!returnUrlParameter)
+        return redirectUrl;
+      try {
+        const nextUrl = new URL(redirectUrl, global.location?.origin || void 0);
+        if (!nextUrl.searchParams.has(returnUrlParameter))
+          return nextUrl.toString();
+        nextUrl.searchParams.set(returnUrlParameter, getCurrentPageReturnUrl());
+        return nextUrl.toString();
+      } catch {
+        return redirectUrl;
+      }
+    }
     async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
       options = options || {};
       const config = getConfig();
@@ -157,6 +178,7 @@
         }
       }
       if (res.redirected && res.url) {
+        const redirectUrl2 = normalizeFollowedRedirectUrl(res.url);
         emit("heimdall:redirect", {
           actionId,
           payload,
@@ -164,10 +186,10 @@
           swap,
           endpoint: url.toString(),
           status: res.status,
-          url: res.url
+          url: redirectUrl2
         });
-        dbg("redirecting", { actionId, url: res.url });
-        global.location.href = res.url;
+        dbg("redirecting", { actionId, url: redirectUrl2 });
+        global.location.href = redirectUrl2;
         return {
           ok: res.ok,
           status: res.status,
@@ -177,7 +199,7 @@
           ms,
           abortSwap: true,
           abortReason: "redirect",
-          redirectUrl: res.url
+          redirectUrl: redirectUrl2
         };
       }
       let html = rawHtml;
@@ -1473,6 +1495,7 @@
         },
         observeDom: true,
         debug: false,
+        authReturnUrlParameter: "ReturnUrl",
         inputDebounceMs: 250,
         hoverDelayMs: 150,
         scrollThresholdPx: 120,

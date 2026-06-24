@@ -104,6 +104,7 @@ export function createHeimdallRuntime({
 
             observeDom: true,
             debug: false,
+            authReturnUrlParameter: "ReturnUrl",
 
             inputDebounceMs: 250,
             hoverDelayMs: 150,

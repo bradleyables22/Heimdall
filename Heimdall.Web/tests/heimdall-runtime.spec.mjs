@@ -1130,13 +1130,14 @@ async function testRedirectTextDirective(page) {
 }
 
 async function testFetchFollowedAuthRedirect(page) {
-  const signInUrl = "http://heimdall.test/signin?ReturnUrl=%2F__heimdall%2Fv1%2Fcontent%2Factions";
+  const serverSignInUrl = "http://heimdall.test/signin?ReturnUrl=%2F__heimdall%2Fv1%2Fcontent%2Factions";
+  const expectedSignInUrl = "http://heimdall.test/signin?ReturnUrl=%2F";
 
   await installFakeServer(page, {
     actionResponses: [{
       body: '<form id="login-form">Sign in</form>',
       redirected: true,
-      url: signInUrl
+      url: serverSignInUrl
     }]
   });
 
@@ -1156,17 +1157,17 @@ async function testFetchFollowedAuthRedirect(page) {
     };
   });
 
-  await page.waitForURL(signInUrl);
+  await page.waitForURL(expectedSignInUrl);
 
   assert.deepEqual(state.result, {
     ok: true,
     status: 200,
-    redirectUrl: signInUrl,
+    redirectUrl: expectedSignInUrl,
     abortSwap: true,
     abortReason: "redirect"
   });
   assert.equal(state.targetHtml, "Secure content");
-  assert.equal(page.url(), signInUrl);
+  assert.equal(page.url(), expectedSignInUrl);
 }
 
 async function testOobDisabled(page) {

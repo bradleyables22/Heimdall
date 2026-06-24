@@ -641,7 +641,7 @@ async function testAuthRedirectNavigation(page, baseUrl) {
 
   const navigation = page.waitForURL(url => {
     return url.pathname === "/e2e-signin" &&
-      url.searchParams.get("ReturnUrl")?.includes("/__heimdall/v1/content/actions");
+      url.searchParams.get("ReturnUrl") === "/e2e";
   });
 
   await page.locator("#e2e-auth-button").click();
@@ -656,6 +656,7 @@ async function testAuthRedirectNavigation(page, baseUrl) {
 
   assert.equal(redirectState.actionId, "e2e.auth.required");
   assert.match(redirectState.redirectUrl, /\/e2e-signin\?ReturnUrl=/);
+  assert.equal(new URL(redirectState.redirectUrl).searchParams.get("ReturnUrl"), "/e2e");
   assert.equal(redirectState.targetText, "Auth target original");
 }
 
