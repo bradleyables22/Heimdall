@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Reflection;
 using System.Text.Json;
@@ -46,6 +47,10 @@ namespace Heimdall.Server
 
         internal static IEndpointRouteBuilder MapHeimdallContentEndpoints(this IEndpointRouteBuilder app)
         {
+            var logger = app.ServiceProvider
+                .GetService<ILoggerFactory>()
+                ?.CreateLogger("Heimdall.Server.ContentEndpoints");
+
             app.MapPost("__heimdall/v1/content/actions", async (
                 HttpContext ctx,
                 [FromServices] ContentRegistry registry,
@@ -60,6 +65,13 @@ namespace Heimdall.Server
                 }
                 catch (AntiforgeryValidationException ex)
                 {
+                    logger?.LogWarning(
+                        ex,
+                        "Heimdall content action request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
                     if (settings.EnableDetailedErrors)
                     {
                         return Results.Problem(
@@ -100,10 +112,27 @@ namespace Heimdall.Server
                 }
                 catch (OperationCanceledException) when (timeoutScope.TimedOut)
                 {
+                    var statusCode = timeoutScope.Policy?.TimeoutStatusCode ?? StatusCodes.Status504GatewayTimeout;
+                    logger?.LogWarning(
+                        "Heimdall action {ActionId} timed out for {Method} {Path}; returning status {StatusCode}. TraceIdentifier: {TraceIdentifier}.",
+                        actionId,
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        statusCode,
+                        ctx.TraceIdentifier);
+
                     return await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
                 }
                 catch (JsonException ex)
                 {
+                    logger?.LogWarning(
+                        ex,
+                        "Invalid JSON body for Heimdall action {ActionId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        actionId,
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
                     if (settings.EnableDetailedErrors)
                     {
                         return Results.Problem(
@@ -116,14 +145,19 @@ namespace Heimdall.Server
                 }
                 catch (Exception ex)
                 {
+                    var loggedException = UnwrapInvocationException(ex);
+                    logger?.LogError(
+                        loggedException,
+                        "Heimdall action {ActionId} invocation failed for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        actionId,
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
                     if (settings.EnableDetailedErrors)
                     {
-                        var msg = ex is TargetInvocationException tie && tie.InnerException != null
-                            ? tie.InnerException.ToString()
-                            : ex.ToString();
-
                         return Results.Problem(
-                            detail: msg,
+                            detail: loggedException.ToString(),
                             title: "Heimdall action invocation failed",
                             statusCode: StatusCodes.Status500InternalServerError);
                     }
@@ -140,6 +174,11 @@ namespace Heimdall.Server
 
             return app;
         }
+
+        private static Exception UnwrapInvocationException(Exception ex)
+            => ex is TargetInvocationException { InnerException: Exception inner }
+                ? inner
+                : ex;
 
         private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, ContentActionDescriptor action)
         {

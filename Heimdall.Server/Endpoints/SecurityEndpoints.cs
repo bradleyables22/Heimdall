@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Heimdall.Server.Endpoints
@@ -12,6 +14,10 @@ namespace Heimdall.Server.Endpoints
 	{
 		internal static IEndpointRouteBuilder MapHeimdallSecurityEndpoints(this IEndpointRouteBuilder app)
 		{
+			var logger = app.ServiceProvider
+				.GetService<ILoggerFactory>()
+				?.CreateLogger("Heimdall.Server.SecurityEndpoints");
+
 			app.MapGet("__heimdall/v1/csrf", (
 				HttpContext ctx,
 				[FromServices] IAntiforgery antiforgery,
@@ -36,6 +42,13 @@ namespace Heimdall.Server.Endpoints
 				}
 				catch (Exception ex)
 				{
+					logger?.LogError(
+						ex,
+						"Failed to issue Heimdall CSRF token for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+						ctx.Request.Method,
+						ctx.Request.Path,
+						ctx.TraceIdentifier);
+
 					if (settings.EnableDetailedErrors)
 					{
 						return Results.Problem(

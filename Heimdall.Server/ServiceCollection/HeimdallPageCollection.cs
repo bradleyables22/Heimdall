@@ -3,6 +3,8 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
@@ -43,6 +45,10 @@ namespace Heimdall.Server
             if (renderAsync is null)
                 throw new ArgumentNullException(nameof(renderAsync));
 
+            var logger = app.ServiceProvider
+                .GetService<ILoggerFactory>()
+                ?.CreateLogger("Heimdall.Server.PageEndpoints");
+
             var builder = app.MapGet(pattern, async (HttpContext ctx) =>
             {
                 var sp = ctx.RequestServices;
@@ -62,6 +68,14 @@ namespace Heimdall.Server
                 }
                 catch (Exception ex)
                 {
+                    logger?.LogError(
+                        ex,
+                        "Heimdall page render failed for route pattern {Pattern} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        pattern,
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
                     return Results.Problem(
                         title: "Heimdall page render failed.",
                         detail: ex.Message,

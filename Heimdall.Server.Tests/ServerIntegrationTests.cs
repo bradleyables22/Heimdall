@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using Heimdall.Server;
 using Heimdall.Server.Rendering;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
@@ -277,6 +278,33 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task ContentAction_MalformedJsonPayloadLogsWarning()
+    {
+        var logs = new TestLoggerProvider();
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddLogging(builder => builder.AddProvider(logs));
+        });
+        using var client = app.GetTestClient();
+        var csrfToken = await GetCsrfTokenAsync(client);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/__heimdall/v1/content/actions");
+        request.Headers.Add("X-Heimdall-Content-Action", "tests.payload.complex");
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+        request.Content = new StringContent("{ bad json", Encoding.UTF8, "application/json");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(
+            logs.Entries,
+            entry => entry.Category == "Heimdall.Server.ContentEndpoints" &&
+                entry.Level == LogLevel.Warning &&
+                entry.Message.Contains("tests.payload.complex", StringComparison.Ordinal) &&
+                entry.Exception is not null);
+    }
+
+    [Fact]
     public async Task ContentPayloadAttribute_ForcesRegisteredTypeToBindFromRequestBody()
     {
         await using var app = await CreateAppAsync(services =>
@@ -507,6 +535,28 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task ContentAction_InvocationFailureLogsHandledException()
+    {
+        var logs = new TestLoggerProvider();
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddLogging(builder => builder.AddProvider(logs));
+        });
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.logging.failure");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Contains(
+            logs.Entries,
+            entry => entry.Category == "Heimdall.Server.ContentEndpoints" &&
+                entry.Level == LogLevel.Error &&
+                entry.Message.Contains("tests.logging.failure", StringComparison.Ordinal) &&
+                entry.Exception is InvalidOperationException exception &&
+                exception.Message == "Expected logged action failure.");
+    }
+
+    [Fact]
     public async Task ContentAction_InvocationPrefix_PrefixesExplicitMethodInvocation()
     {
         await using var app = await CreateAppAsync();
@@ -609,6 +659,34 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task ContentAction_InvalidAntiforgeryTokenLogsWarning()
+    {
+        var logs = new TestLoggerProvider();
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddLogging(builder => builder.AddProvider(logs));
+        });
+        using var client = app.GetTestClient();
+        var csrfToken = await GetCsrfTokenAsync(client, "alice");
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/__heimdall/v1/content/actions");
+        request.Headers.Add("X-Heimdall-Content-Action", "tests.auth.allow-anonymous");
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+        request.Headers.Add(TestAuthHandler.UserHeaderName, "bob");
+        request.Content = JsonContent.Create(new { });
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(
+            logs.Entries,
+            entry => entry.Category == "Heimdall.Server.ContentEndpoints" &&
+                entry.Level == LogLevel.Warning &&
+                entry.Message.Contains("antiforgery", StringComparison.OrdinalIgnoreCase) &&
+                entry.Exception is AntiforgeryValidationException);
+    }
+
+    [Fact]
     public async Task CookieAuthContentAction_AnonymousAuthorizedActionRedirectsToConfiguredSignIn()
     {
         await using var app = await CreateCookieAuthAppAsync();
@@ -658,6 +736,58 @@ public sealed class ServerIntegrationTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.False(string.IsNullOrWhiteSpace(token?.RequestToken));
         Assert.Contains("no-store", response.Headers.CacheControl?.ToString());
+    }
+
+    [Fact]
+    public async Task CsrfEndpoint_IssuanceFailureLogsHandledException()
+    {
+        var logs = new TestLoggerProvider();
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.RemoveAll<IAntiforgery>();
+            services.AddSingleton<IAntiforgery, ThrowingAntiforgery>();
+            services.AddLogging(builder => builder.AddProvider(logs));
+        });
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/__heimdall/v1/csrf");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Contains(
+            logs.Entries,
+            entry => entry.Category == "Heimdall.Server.SecurityEndpoints" &&
+                entry.Level == LogLevel.Error &&
+                entry.Exception is InvalidOperationException exception &&
+                exception.Message == "Expected CSRF issuance failure.");
+    }
+
+    [Fact]
+    public async Task HeimdallPage_RenderFailureLogsHandledException()
+    {
+        var logs = new TestLoggerProvider();
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+        builder.Services.AddLogging(logging => logging.AddProvider(logs));
+
+        await using var app = builder.Build();
+        app.MapHeimdallPage("/broken", () =>
+            throw new InvalidOperationException("Expected page render failure."));
+        await app.StartAsync();
+        using var client = app.GetTestClient();
+
+        var response = await client.GetAsync("/broken");
+
+        Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
+        Assert.Contains(
+            logs.Entries,
+            entry => entry.Category == "Heimdall.Server.PageEndpoints" &&
+                entry.Level == LogLevel.Error &&
+                entry.Message.Contains("/broken", StringComparison.Ordinal) &&
+                entry.Exception is InvalidOperationException exception &&
+                exception.Message == "Expected page render failure.");
     }
 
     [Fact]
@@ -753,6 +883,37 @@ public sealed class ServerIntegrationTests
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Contains("antiforgery", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task BifrostTokenEndpoint_InvalidAntiforgeryTokenLogsWarning()
+    {
+        var logs = new TestLoggerProvider();
+        await using var app = await CreateAppAsync(
+            services =>
+            {
+                services.AddLogging(builder => builder.AddProvider(logs));
+            },
+            options =>
+            {
+                options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
+            });
+        using var client = app.GetTestClient();
+        var csrfToken = await GetCsrfTokenAsync(client, "alice");
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/__heimdall/v1/bifrost/token?topic=news");
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+        request.Headers.Add(TestAuthHandler.UserHeaderName, "bob");
+
+        var response = await client.SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains(
+            logs.Entries,
+            entry => entry.Category == "Heimdall.Server.BifrostEndpoints" &&
+                entry.Level == LogLevel.Warning &&
+                entry.Message.Contains("news", StringComparison.Ordinal) &&
+                entry.Exception is AntiforgeryValidationException);
     }
 
     [Fact]
@@ -1384,6 +1545,12 @@ public sealed class ServerIntegrationTests
         {
             return Html.Span(service.Message);
         }
+
+        [ContentInvocation("tests.logging.failure")]
+        public static IHtmlContent LoggedFailure()
+        {
+            throw new InvalidOperationException("Expected logged action failure.");
+        }
     }
 
     private sealed class InstanceContentActions(GreetingService greeting)
@@ -1618,4 +1785,102 @@ public sealed class ServerIntegrationTests
             ConstructedService.throwOnConstruct = throwOnConstruct;
         }
     }
+
+    private sealed class ThrowingAntiforgery : IAntiforgery
+    {
+        public AntiforgeryTokenSet GetAndStoreTokens(HttpContext httpContext)
+            => throw new InvalidOperationException("Expected CSRF issuance failure.");
+
+        public AntiforgeryTokenSet GetTokens(HttpContext httpContext)
+            => throw new NotSupportedException();
+
+        public Task<bool> IsRequestValidAsync(HttpContext httpContext)
+            => Task.FromResult(false);
+
+        public void SetCookieTokenAndHeader(HttpContext httpContext)
+            => throw new NotSupportedException();
+
+        public Task ValidateRequestAsync(HttpContext httpContext)
+            => throw new AntiforgeryValidationException("Expected antiforgery validation failure.");
+    }
+
+    private sealed class TestLoggerProvider : ILoggerProvider
+    {
+        private readonly object gate = new();
+        private readonly List<TestLogEntry> entries = [];
+
+        public IReadOnlyList<TestLogEntry> Entries
+        {
+            get
+            {
+                lock (gate)
+                {
+                    return entries.ToArray();
+                }
+            }
+        }
+
+        public ILogger CreateLogger(string categoryName)
+            => new TestLogger(categoryName, this);
+
+        public void Add(TestLogEntry entry)
+        {
+            lock (gate)
+            {
+                entries.Add(entry);
+            }
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class TestLogger(string categoryName, TestLoggerProvider provider) : ILogger
+    {
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+            => TestLoggerScope.Instance;
+
+        public bool IsEnabled(LogLevel logLevel)
+            => logLevel != LogLevel.None;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (!IsEnabled(logLevel))
+                return;
+
+            provider.Add(new TestLogEntry(
+                categoryName,
+                logLevel,
+                eventId,
+                formatter(state, exception),
+                exception));
+        }
+    }
+
+    private sealed class TestLoggerScope : IDisposable
+    {
+        public static readonly TestLoggerScope Instance = new();
+
+        private TestLoggerScope()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed record TestLogEntry(
+        string Category,
+        LogLevel Level,
+        EventId EventId,
+        string Message,
+        Exception? Exception);
 }

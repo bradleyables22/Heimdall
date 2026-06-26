@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Text;
 
@@ -17,6 +18,9 @@ namespace Heimdall.Server
 
 		internal static IEndpointRouteBuilder MapHeimdallBifrostEndpoints(this IEndpointRouteBuilder app)
 		{
+			var logger = app.ServiceProvider
+				.GetService<ILoggerFactory>()
+				?.CreateLogger("Heimdall.Server.BifrostEndpoints");
 
             app.MapGet("__heimdall/v1/bifrost/token", async (
 				HttpContext ctx,
@@ -35,6 +39,14 @@ namespace Heimdall.Server
                 }
                 catch (AntiforgeryValidationException ex)
                 {
+                    logger?.LogWarning(
+                        ex,
+                        "Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        topic,
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
                     if (options.Value.EnableDetailedErrors)
                     {
                         return Results.Problem(
