@@ -2,7 +2,15 @@
 
 A strongly-typed, server-first Bootstrap helper library for building HTML with Heimdall and ASP.NET Core.
 
-This library provides a typed abstraction over Bootstrap’s class system, eliminating stringly-typed CSS while preserving full control over markup and layout.
+**Current release:** `5.0.1` | **Target framework:** .NET 10 | **License:** MIT
+
+This library provides a typed vocabulary for Bootstrap’s class system, reducing raw class strings while preserving full control over markup and layout.
+
+The package targets the Bootstrap 5 class vocabulary. It does not include Bootstrap CSS or JavaScript; applications must supply those assets separately. Some helpers represent utilities introduced in later Bootstrap 5.x releases, so use a Bootstrap version that contains the classes your application selects.
+
+- [Full documentation](https://heimdall-framework.org/bootstrap)
+- [Source and issue tracker](https://github.com/bradleyables22/Heimdall)
+- [NuGet package](https://www.nuget.org/packages/HeimdallFramework.Bootstrap)
 
 ---
 
@@ -49,6 +57,8 @@ This is not a component framework. It is a typed vocabulary for Bootstrap.
 dotnet add package HeimdallFramework.Bootstrap
 ```
 
+The package contains class-name helpers and has no dependency on the Heimdall server runtime. The `FluentHtml` examples below also require `HeimdallFramework.Server`.
+
 ---
 
 ## Usage
@@ -56,6 +66,9 @@ dotnet add package HeimdallFramework.Bootstrap
 ### Basic Example
 
 ```csharp
+using Heimdall.Bootstrap;
+using Heimdall.Server.Rendering;
+
 FluentHtml.Div(div =>
 {
     div.Class(
@@ -70,7 +83,7 @@ FluentHtml.Div(div =>
 
         col.P(p =>
         {
-            p.Class(Bootstrap.Typography.Lead)
+            p.Class(Bootstrap.Text.Lead)
              .Text("Hello from Heimdall");
         });
     });
@@ -82,10 +95,7 @@ FluentHtml.Div(div =>
 ### Buttons
 
 ```csharp
-button.Class(
-    Bootstrap.Btn.Base,
-    Bootstrap.Btn.Primary
-);
+button.Class(Bootstrap.Btn.Primary);
 ```
 
 ---
@@ -133,8 +143,8 @@ Bootstrap.Spacing.P(4)
 
 ```csharp
 Bootstrap.Display.Flex
-Bootstrap.Layout.JustifyContentBetween
-Bootstrap.Layout.AlignItemsCenter
+Bootstrap.Flex.JustifyBetween
+Bootstrap.Flex.AlignItemsCenter
 ```
 
 ---
@@ -225,7 +235,7 @@ FluentHtml.Div(div =>
 
 ## Versioning
 
-This package follows semantic versioning:
+This package is versioned independently from `HeimdallFramework.Server` and `HeimdallFramework.Web` and follows semantic versioning:
 
 - Major – breaking changes to class helpers or structure
 - Minor – new helpers or Bootstrap coverage
@@ -244,4 +254,4 @@ This package follows semantic versioning:
 
 ## License
 
-MIT
+[MIT](https://github.com/bradleyables22/Heimdall/blob/master/LICENSE)

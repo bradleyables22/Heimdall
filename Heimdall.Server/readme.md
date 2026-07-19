@@ -2,6 +2,8 @@
 
 HeimdallFramework.Server provides the ASP.NET Core server runtime for Heimdall: page endpoints, content action execution, antiforgery integration, Bifrost server-sent events, MVC partial rendering support, and static site generation.
 
+**Current release:** `3.0.5` | **Target framework:** .NET 10 | **License:** MIT
+
 Heimdall is an HTML-first framework for server-driven UI. The server renders documents and HTML fragments, and the browser applies targeted DOM updates through the Heimdall client runtime.
 
 Most applications use:
@@ -10,7 +12,11 @@ Most applications use:
 - **HeimdallFramework.Web** - client runtime static assets
 - **HeimdallFramework.Bootstrap** - optional strongly typed Bootstrap helpers
 
-Heimdall v2 is the current released package line. v3 development is underway in this repository. Endpoint paths that include `/v1/` refer to the Heimdall wire protocol version, not the NuGet package generation.
+`HeimdallFramework.Server` and `HeimdallFramework.Web` are released together. Endpoint paths that include `/v1/` refer to the Heimdall wire protocol version, not the NuGet package generation.
+
+- [Full documentation](https://heimdall-framework.org)
+- [Source and issue tracker](https://github.com/bradleyables22/Heimdall)
+- [NuGet package](https://www.nuget.org/packages/HeimdallFramework.Server)
 
 ---
 
@@ -35,6 +41,7 @@ Heimdall content actions and Bifrost subscribe tokens use ASP.NET Core antiforge
 
 ```csharp
 using Heimdall.Server;
+using Heimdall.Server.Rendering;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -508,12 +515,12 @@ Use **HeimdallFramework.Web** for the browser runtime assets.
 
 ## Versioning
 
-HeimdallFramework.Server is on the v2 package line, with v3 development underway.
+`HeimdallFramework.Server` `3.0.5` is the current release and targets .NET 10. The Server and Web packages use matching release versions.
 
-The v2 APIs are intended for real application use. v3 may introduce deliberate breaking changes where they improve the framework contract, especially around static generation, JavaScript command invocation, and response orchestration. Endpoint paths remain under `/__heimdall/v1/...` until the wire protocol itself changes.
+Heimdall is available for real application use, but the framework is still young. Upgrade deliberately between major versions. Endpoint paths remain under `/__heimdall/v1/...` until the wire protocol itself changes.
 
 ---
 
 ## License
 
-MIT
+[MIT](https://github.com/bradleyables22/Heimdall/blob/master/LICENSE)

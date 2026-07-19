@@ -1,5 +1,7 @@
 # HeimdallFramework.Web
 
+**Current release:** `3.0.5` | **Target framework:** .NET 10 | **License:** MIT
+
 > **HeimdallFramework.Web** distributes the **Heimdall JavaScript runtime** as Razor Class Library (RCL) static web assets.
 >
 > This package contains **only the client runtime**.
@@ -12,6 +14,10 @@
 > * ASP.NET middleware
 >
 > For the server implementation, install **HeimdallFramework.Server**.
+
+* [Full documentation](https://heimdall-framework.org)
+* [Source and issue tracker](https://github.com/bradleyables22/Heimdall)
+* [NuGet package](https://www.nuget.org/packages/HeimdallFramework.Web)
 
 ---
 
@@ -304,9 +310,9 @@ But designed specifically for ASP.NET.
 
 ## Versioning
 
-HeimdallFramework.Web is on the v2 package line, with v3 development underway in the main repository.
+`HeimdallFramework.Web` `3.0.5` is the current release and targets .NET 10. The Web and Server packages use matching release versions.
 
-The public runtime is intended for real application use. v3 may introduce deliberate breaking changes where they improve the framework contract, especially around JavaScript command invocation, response orchestration, and static generation support.
+The public runtime is intended for real application use, but the framework is still young. Upgrade deliberately between major versions.
 
 The client runtime currently reports `apiVersion = 1`, and the default server endpoints remain under `/__heimdall/v1/...`. That version identifies the Heimdall browser/server wire protocol, not the NuGet package generation.
 
@@ -321,4 +327,4 @@ Changes may still occur across major package versions in:
 
 ## License
 
-MIT
+[MIT](https://github.com/bradleyables22/Heimdall/blob/master/LICENSE)

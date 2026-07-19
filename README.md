@@ -1,63 +1,46 @@
 # Heimdall
 
-Heimdall is an HTML-first framework for ASP.NET Core applications.
+[![Heimdall Server on NuGet](https://img.shields.io/nuget/v/HeimdallFramework.Server?label=HeimdallFramework.Server)](https://www.nuget.org/packages/HeimdallFramework.Server)
+[![NuGet downloads](https://img.shields.io/nuget/dt/HeimdallFramework.Server?label=server%20downloads)](https://www.nuget.org/packages/HeimdallFramework.Server)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-The core idea is simple:
+Heimdall is an HTML-first framework for building interactive ASP.NET Core applications without moving the UI into a single-page application.
 
 ```text
-event -> server action -> HTML -> targeted DOM update
+browser event -> ASP.NET action -> HTML response -> targeted DOM update
 ```
 
-Instead of moving rendering and orchestration into a SPA, Heimdall keeps the server as the source of truth and treats HTML as the transport format. Pages render as normal documents, interactions call server content actions, and responses return HTML fragments that the browser swaps into the DOM.
+The server remains the source of truth. Pages render as normal documents, interactions invoke server-side content actions, and responses return HTML fragments that the browser swaps into the DOM.
 
-Heimdall v2 is the current released package line. v3 development is underway in this repository.
+**Current release:** `3.0.5` | **Target framework:** .NET 10 | **License:** MIT
 
-Endpoint paths such as `/__heimdall/v1/content/actions` use the Heimdall wire protocol version. That `/v1/` segment is separate from the NuGet package version.
+The `/v1/` segment in endpoints such as `/__heimdall/v1/content/actions` identifies the browser/server wire protocol. It is independent of the NuGet package version.
 
----
+## Why Heimdall
+
+Heimdall provides a complete ASP.NET-oriented HTML-over-the-wire stack:
+
+- server-rendered pages and HTML fragments
+- content actions with dependency injection and JSON payload binding
+- ASP.NET Core authorization, antiforgery, and request-timeout integration
+- targeted and out-of-band DOM updates
+- MVC and Razor partial rendering
+- Bifrost server-sent events with authorized topic subscriptions
+- static site generation with manifests, assets, sitemap, robots.txt, and path-base support
+- strongly typed HTML, Heimdall attribute, and optional Bootstrap helpers
+- a dependency-free browser runtime distributed as a Razor Class Library asset
+
+Heimdall is intentionally opinionated. It is designed for ASP.NET applications that want server-owned UI and a consistent action protocol. It is not a client-side router, state manager, virtual DOM, or backend-agnostic replacement for every hypermedia library.
 
 ## Packages
 
-### HeimdallFramework.Server
+| Package | Purpose |
+| --- | --- |
+| [`HeimdallFramework.Server`](https://www.nuget.org/packages/HeimdallFramework.Server) | ASP.NET Core middleware, pages, content actions, MVC rendering, Bifrost SSE, static generation, and HTML helpers |
+| [`HeimdallFramework.Web`](https://www.nuget.org/packages/HeimdallFramework.Web) | Browser runtime and Razor Class Library static assets |
+| [`HeimdallFramework.Bootstrap`](https://www.nuget.org/packages/HeimdallFramework.Bootstrap) | Optional strongly typed Bootstrap class helpers; versioned independently from the core packages |
 
-Server runtime for ASP.NET Core:
-
-- service registration
-- middleware and endpoints
-- `MapHeimdallPage`
-- static site generation with scoped DI, clean output, manifests, path-base support, sitemap/robots helpers, 404 pages, physical `wwwroot` copying, RCL `_content` static web asset copying, and opt-in build/publish targets for CI/CD
-- content action discovery and invocation
-- payload binding
-- authorization and timeout integration
-- response directives
-- Bifrost SSE server runtime
-- MVC partial rendering support
-- strongly typed HTML and Heimdall attribute helpers
-
-See [Heimdall.Server/readme.md](Heimdall.Server/readme.md).
-
-### HeimdallFramework.Web
-
-Browser runtime distributed as Razor Class Library static web assets:
-
-- action invocation
-- payload resolution
-- DOM swaps
-- out-of-band `<invocation>` handling
-- abort and redirect directives
-- JavaScript void invocation directives
-- SSE client runtime
-- MutationObserver auto-boot
-
-See [Heimdall.Web/readme.md](Heimdall.Web/readme.md).
-
-### HeimdallFramework.Bootstrap
-
-Strongly typed Bootstrap class helpers for server-rendered Heimdall UI.
-
-See [Heimdall.Bootstrap/readme.md](Heimdall.Bootstrap/readme.md).
-
----
+Detailed package documentation is available in [Heimdall.Server/readme.md](Heimdall.Server/readme.md) and [Heimdall.Web/readme.md](Heimdall.Web/readme.md).
 
 ## Install
 
@@ -72,12 +55,11 @@ Optional Bootstrap helpers:
 dotnet add package HeimdallFramework.Bootstrap
 ```
 
----
-
 ## Minimal Setup
 
 ```csharp
 using Heimdall.Server;
+using Heimdall.Server.Rendering;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -90,10 +72,8 @@ builder.Services.AddHeimdall(options =>
 var app = builder.Build();
 
 app.UseAntiforgery();
-
 app.MapStaticAssets();
 app.UseStaticFiles();
-
 app.UseHeimdall();
 
 app.MapHeimdallPage("/", () =>
@@ -104,29 +84,119 @@ app.MapHeimdallPage("/", () =>
 app.Run();
 ```
 
-Reference the browser runtime from your layout:
+Reference the browser runtime from the page or layout:
 
 ```html
 <script src="/_content/HeimdallFramework.Web/heimdall-bundle.min.js"></script>
 ```
 
----
+## First Interaction
 
-## Templates And Docs
+Declare an action on an element:
 
-- Minimal fluent template: [Heimdall-Template-App](https://github.com/bradleyables22/Heimdall-Template-App)
-- Static site generation template: Heimdall-Template-Ssg in this local workspace while v3 is under development
-- MVC template: [Heimdall-Mvc-Template](https://github.com/bradleyables22/Heimdall-Mvc-Template)
-- Documentation site: [heimdall-framework.org](https://heimdall-framework.org)
+```html
+<button
+  heimdall-content-click="notes.refresh"
+  heimdall-content-target="#notes"
+  heimdall-content-swap="inner">
+  Refresh
+</button>
 
----
+<section id="notes"></section>
+```
 
-## Status
+Return the replacement HTML from ASP.NET Core:
 
-Heimdall is actively evolving. v2 is the current released package line, and v3 work is focused on static site generation, JavaScript command invocation, returned-template command flows, SSE improvements, and general robustness.
+```csharp
+using Heimdall.Server;
+using Heimdall.Server.Rendering;
+using Microsoft.AspNetCore.Html;
 
----
+[ContentInvocation("notes.refresh")]
+public static IHtmlContent Refresh()
+{
+    return Html.Tag("p", "Rendered on the server.");
+}
+```
+
+Content actions also support instance activation through dependency injection, constructor dependencies, `HttpContext`, `ClaimsPrincipal`, `CancellationToken`, service parameters, typed payloads, authorization metadata, and request-timeout metadata.
+
+## Security Model
+
+- Content actions and Bifrost subscribe tokens integrate with ASP.NET Core antiforgery.
+- Content actions honor ASP.NET Core authorization metadata.
+- Bifrost topics can be protected with an authorization policy and an application-specific topic callback.
+- Script elements are stripped from fragment responses before DOM insertion.
+- JavaScript response directives can call only explicit dotted paths rooted at `window`, `globalThis`, or `document`; Heimdall does not evaluate JavaScript source returned by the server.
+- Detailed server errors are opt-in and should be enabled only for development.
+
+See the [security documentation](https://heimdall-framework.org/security) for deployment guidance.
+
+## Project Templates
+
+Start with the template that matches the rendering model you want.
+
+### Fluent HTML web app
+
+```bash
+dotnet new install HeimdallFramework.Templates.WebApp
+dotnet new heimdall-webapp -n MyHeimdallApp
+```
+
+### ASP.NET Core MVC app
+
+```bash
+dotnet new install HeimdallFramework.Templates.MvcApp
+dotnet new heimdall-mvc -n MyHeimdallMvcApp
+```
+
+### Static site generation app
+
+```bash
+dotnet new install HeimdallFramework.Templates.SsgApp
+dotnet new heimdall-ssg -n MyHeimdallSite
+```
+
+Template source is available in [Heimdall-Template-App](https://github.com/bradleyables22/Heimdall-Template-App), [Heimdall-Mvc-Template](https://github.com/bradleyables22/Heimdall-Mvc-Template), and [Heimdall-Template-Ssg](https://github.com/bradleyables22/Heimdall-Template-Ssg).
+
+## Documentation
+
+The full guide is at [heimdall-framework.org](https://heimdall-framework.org), including pages, actions, MVC integration, forms, swaps, state, payloads, Bifrost SSE, JavaScript interop, static generation, configuration, and deployment security.
+
+## Verification
+
+The repository includes server integration tests, browser-runtime tests against both readable and minified bundles, package-shape checks, and full-stack Playwright tests against a real ASP.NET Core host.
+
+Run the server suite:
+
+```bash
+dotnet test Heimdall.slnx
+```
+
+Verify the browser runtime and NuGet package shape:
+
+```bash
+cd Heimdall.Web
+npm ci
+npm run verify:all
+```
+
+Run the full-stack browser suite:
+
+```bash
+cd Heimdall.E2E
+npm ci
+npm test
+```
+
+## Versioning And Status
+
+`HeimdallFramework.Server` and `HeimdallFramework.Web` are released together. `HeimdallFramework.Bootstrap` follows its own package version because it tracks a separate helper surface.
+
+Heimdall is maintained and available for real application use. The framework is still young, so upgrade deliberately between major versions. Breaking changes to the browser/server contract will use a new wire-protocol version rather than silently changing the existing `/v1/` contract.
+
+Issues, questions, and implementation feedback are welcome in the [GitHub repository](https://github.com/bradleyables22/Heimdall).
 
 ## License
 
-MIT
+Heimdall is licensed under the [MIT License](LICENSE).
