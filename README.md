@@ -12,8 +12,6 @@ browser event -> ASP.NET action -> HTML response -> targeted DOM update
 
 The server remains the source of truth. Pages render as normal documents, interactions invoke server-side content actions, and responses return HTML fragments that the browser swaps into the DOM.
 
-**Current release:** `3.0.5` | **Target framework:** .NET 10 | **License:** MIT
-
 The `/v1/` segment in endpoints such as `/__heimdall/v1/content/actions` identifies the browser/server wire protocol. It is independent of the NuGet package version.
 
 ## Why Heimdall
@@ -120,6 +118,18 @@ public static IHtmlContent Refresh()
 ```
 
 Content actions also support instance activation through dependency injection, constructor dependencies, `HttpContext`, `ClaimsPrincipal`, `CancellationToken`, service parameters, typed payloads, authorization metadata, and request-timeout metadata.
+
+For interactions such as live search, opt into dependency-free request coordination so stale responses cannot overwrite newer results:
+
+```html
+<input
+  heimdall-content-input="notes.search"
+  heimdall-content-target="#notes"
+  heimdall-debounce="250"
+  heimdall-sync="replace">
+```
+
+The default remains `parallel`, so existing applications require no migration. Cancellable request and swap lifecycle events provide an integration surface without a plugin or runtime dependency.
 
 ## Security Model
 

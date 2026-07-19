@@ -1,4 +1,3 @@
-using System.Text.Encodings.Web;
 using Heimdall.Server.Rendering;
 using Microsoft.AspNetCore.Html;
 
@@ -7,15 +6,95 @@ namespace Heimdall.Server.Tests;
 public sealed class RenderingHelperTests
 {
     [Fact]
+    public void ToHtmlString_RendersContentWithDefaultEncoding()
+    {
+        var content = Html.Div(
+            Html.Id("preview"),
+            "<script>alert('unsafe')</script>");
+
+        var html = content.ToHtmlString();
+
+        Assert.Equal(
+            "<div id=\"preview\">&lt;script&gt;alert(&#x27;unsafe&#x27;)&lt;/script&gt;</div>",
+            html);
+    }
+
+    [Fact]
+    public void ToHtmlString_RejectsNullContent()
+    {
+        IHtmlContent? content = null;
+
+        Assert.Throws<ArgumentNullException>(() => content!.ToHtmlString());
+    }
+
+    [Fact]
     public void StaticHelpers_RenderIgnoreAndScopeAttributes()
     {
         var html = Render(Html.Div(
             HeimdallHtml.Ignore(HeimdallHtml.Trigger.Click, HeimdallHtml.Trigger.Submit),
             HeimdallHtml.Scope(HeimdallHtml.EventScope.Self),
+            HeimdallHtml.Sync(HeimdallHtml.RequestSync.QueueLatest),
+            HeimdallHtml.SyncGroup("checkout"),
             "Save"));
 
         Assert.Contains("heimdall-ignore=\"click submit\"", html);
         Assert.Contains("heimdall-scope=\"self\"", html);
+        Assert.Contains("heimdall-sync=\"queue-latest\"", html);
+        Assert.Contains("heimdall-sync-group=\"checkout\"", html);
+    }
+
+    [Theory]
+    [InlineData(HeimdallHtml.RequestSync.Parallel, "parallel")]
+    [InlineData(HeimdallHtml.RequestSync.Replace, "replace")]
+    [InlineData(HeimdallHtml.RequestSync.Drop, "drop")]
+    [InlineData(HeimdallHtml.RequestSync.QueueLatest, "queue-latest")]
+    public void StaticHelpers_RenderRequestSynchronizationStrategies(
+        HeimdallHtml.RequestSync strategy,
+        string expected)
+    {
+        var html = Render(Html.Button(HeimdallHtml.Sync(strategy), "Run"));
+
+        Assert.Contains($"heimdall-sync=\"{expected}\"", html);
+    }
+
+    [Theory]
+    [InlineData(Html.CommandType.toggle_popover, "toggle-popover")]
+    [InlineData(Html.CommandType.show_popover, "show-popover")]
+    [InlineData(Html.CommandType.hide_popover, "hide-popover")]
+    [InlineData(Html.CommandType.close, "close")]
+    [InlineData(Html.CommandType.request_close, "request-close")]
+    [InlineData(Html.CommandType.show_modal, "show-modal")]
+    public void HtmlHelpers_RenderNativeCommandAttributes(
+        Html.CommandType command,
+        string expected)
+    {
+        var html = Render(Html.Button(
+            Html.CommandFor("confirmation-dialog"),
+            Html.Command(command),
+            "Run"));
+
+        Assert.Contains("commandfor=\"confirmation-dialog\"", html);
+        Assert.Contains($"command=\"{expected}\"", html);
+    }
+
+    [Fact]
+    public void HtmlHelpers_RenderRawCustomCommandsAcrossStaticAndFluentApis()
+    {
+        var staticHtml = Render(Html.Button(
+            FluentHtml.CommandFor("record-preview"),
+            FluentHtml.Command("--archive-record"),
+            "Archive"));
+        var fluentHtml = Render(FluentHtml.Button(button =>
+        {
+            button.CommandFor("confirmation-dialog")
+                .Command(Html.CommandType.request_close)
+                .Text("Cancel");
+        }));
+
+        Assert.Contains("commandfor=\"record-preview\"", staticHtml);
+        Assert.Contains("command=\"--archive-record\"", staticHtml);
+        Assert.Contains("commandfor=\"confirmation-dialog\"", fluentHtml);
+        Assert.Contains("command=\"request-close\"", fluentHtml);
     }
 
     [Fact]
@@ -96,6 +175,9 @@ public sealed class RenderingHelperTests
         Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid(" "));
         Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid("App.toast"));
         Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid("window.App['toast']"));
+        Assert.Throws<ArgumentException>(() => HeimdallHtml.SyncGroup(" "));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HeimdallHtml.Sync((HeimdallHtml.RequestSync)999));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Command((Html.CommandType)999));
     }
 
     [Fact]
@@ -112,6 +194,7 @@ public sealed class RenderingHelperTests
                 .PreventDefault()
                 .IgnoreAll()
                 .ScopeSelf()
+                .SyncReplace("save")
                 .PayloadFromClosestState("row")
                 .DebounceMs(-20)
                 .Sse("alerts", "#feed");
@@ -128,6 +211,8 @@ public sealed class RenderingHelperTests
         Assert.Contains("heimdall-content-click=\"tests.save\"", button);
         Assert.Contains("heimdall-ignore=\"*\"", button);
         Assert.Contains("heimdall-scope=\"self\"", button);
+        Assert.Contains("heimdall-sync=\"replace\"", button);
+        Assert.Contains("heimdall-sync-group=\"save\"", button);
         Assert.Contains("heimdall-payload-from=\"closest-state:row\"", button);
         Assert.Contains("heimdall-debounce=\"0\"", button);
         Assert.Contains("heimdall-sse=\"alerts\"", button);
@@ -141,9 +226,5 @@ public sealed class RenderingHelperTests
     }
 
     private static string Render(IHtmlContent content)
-    {
-        using var writer = new StringWriter();
-        content.WriteTo(writer, HtmlEncoder.Default);
-        return writer.ToString();
-    }
+        => content.ToHtmlString();
 }

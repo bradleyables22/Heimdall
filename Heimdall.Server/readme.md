@@ -2,8 +2,6 @@
 
 HeimdallFramework.Server provides the ASP.NET Core server runtime for Heimdall: page endpoints, content action execution, antiforgery integration, Bifrost server-sent events, MVC partial rendering support, and static site generation.
 
-**Current release:** `3.0.5` | **Target framework:** .NET 10 | **License:** MIT
-
 Heimdall is an HTML-first framework for server-driven UI. The server renders documents and HTML fragments, and the browser applies targeted DOM updates through the Heimdall client runtime.
 
 Most applications use:
@@ -252,6 +250,63 @@ Generating zero pages is valid. The result will contain empty page and asset lis
 
 ---
 
+## Rendering HTML to a String
+
+Any `IHtmlContent` value can be rendered to a complete HTML string with `ToHtmlString()`. The default HTML encoder is used unless another encoder is supplied.
+
+```csharp
+using Heimdall.Server.Rendering;
+
+var document = FluentHtml.HtmlTag(html =>
+{
+    html.Head(head => head.Title(title => title.Text("Dashboard")))
+        .Body(body => body.Add(Dashboard.Render()));
+});
+
+string markup = document.ToHtmlString();
+```
+
+This is useful when HTML must be returned as data rather than written directly to an ASP.NET Core response, including static resources and embedded UI documents.
+
+---
+
+## Native HTML Commands
+
+Heimdall's HTML helpers expose the browser-native `command` and `commandfor` attributes. They work without the Heimdall client runtime and provide declarative controls for dialogs, popovers, and custom command events.
+
+```csharp
+FluentHtml.Fragment(fragment =>
+{
+    fragment.Button(button => button
+        .Type("button")
+        .CommandFor("confirmation-dialog")
+        .Command(Html.CommandType.show_modal)
+        .Text("Open confirmation"));
+
+    fragment.Dialog(dialog =>
+    {
+        dialog.Id("confirmation-dialog")
+            .P(message => message.Text("Continue?"))
+            .Button(button => button
+                .Type("button")
+                .CommandFor("confirmation-dialog")
+                .Command(Html.CommandType.close)
+                .Text("Cancel"));
+    });
+});
+```
+
+The typed values are `toggle_popover`, `show_popover`, `hide_popover`, `close`, `request_close`, and `show_modal`. Use the string overload for custom commands or future browser values:
+
+```csharp
+button.CommandFor("record-preview")
+    .Command("--archive-record");
+```
+
+The static API provides the same helpers through `Html.Command(...)`, `Html.CommandFor(...)`, `FluentHtml.Command(...)`, and `FluentHtml.CommandFor(...)`. `CommandFor` takes an element ID without a leading `#`.
+
+---
+
 ## Content Actions
 
 Content actions are server methods that return HTML fragments for DOM updates.
@@ -350,6 +405,33 @@ public static async Task<IHtmlContent> Search(SearchPayload payload, Cancellatio
 ```
 
 Use `[DisableRequestTimeout]` to opt out of a configured timeout.
+
+### Request synchronization
+
+Use request synchronization when a newer action should replace, drop behind, or wait for an active browser request. The default remains parallel, so existing applications keep their current behavior.
+
+```csharp
+FluentHtml.Input(input =>
+{
+    input.Heimdall()
+        .OnInput("search.query")
+        .Target("#results")
+        .DebounceMs(250)
+        .SyncReplace("search");
+});
+```
+
+Available strategies are `Parallel`, `Replace`, `Drop`, and `QueueLatest`. A named group coordinates requests from separate elements; without one, synchronization is scoped to the triggering element.
+
+The static rendering API exposes the same attributes:
+
+```csharp
+Html.Input(
+    HeimdallHtml.OnInput("search.query"),
+    HeimdallHtml.Target("#results"),
+    HeimdallHtml.Sync(HeimdallHtml.RequestSync.Replace),
+    HeimdallHtml.SyncGroup("search"));
+```
 
 ---
 

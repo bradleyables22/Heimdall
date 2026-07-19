@@ -2,8 +2,6 @@
 
 A strongly-typed, server-first Bootstrap helper library for building HTML with Heimdall and ASP.NET Core.
 
-**Current release:** `5.0.1` | **Target framework:** .NET 10 | **License:** MIT
-
 This library provides a typed vocabulary for Bootstrap’s class system, reducing raw class strings while preserving full control over markup and layout.
 
 The package targets the Bootstrap 5 class vocabulary. It does not include Bootstrap CSS or JavaScript; applications must supply those assets separately. Some helpers represent utilities introduced in later Bootstrap 5.x releases, so use a Bootstrap version that contains the classes your application selects.

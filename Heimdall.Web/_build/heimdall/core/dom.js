@@ -4,7 +4,7 @@ import {
     resolveTarget
 } from "./utils.js";
 
-export function createDomPipeline({ getConfig, boot, dbg, jsInvokeVoid }) {
+export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid }) {
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -29,17 +29,49 @@ export function createDomPipeline({ getConfig, boot, dbg, jsInvokeVoid }) {
         return Array.from(fragment.childNodes || []);
     }
 
-    function applySwap(targetEl, fragment, swap) {
-        const mode = (swap || "inner").toLowerCase();
+    function applySwap(targetEl, fragment, swap, lifecycleContext) {
+        lifecycleContext = lifecycleContext || {};
+        let mode = String(swap || "inner").toLowerCase();
 
         if (mode === "none")
-            return { didApply: false, appliedRoot: null };
+            return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: false };
         if (!targetEl)
-            return { didApply: false, appliedRoot: null };
+            return { didApply: false, appliedRoot: null, target: null, swap: mode, cancelled: false };
+
+        stripScripts(fragment);
+
+        const detail = {
+            origin: lifecycleContext.kind || "action",
+            kind: lifecycleContext.swapKind || "main",
+            target: targetEl,
+            fragment,
+            swap: mode,
+            sourceElement: lifecycleContext.sourceEl || null,
+            requestContext: lifecycleContext.requestContext || null
+        };
+
+        if (emitLifecycle && !emitLifecycle(
+            detail.sourceElement,
+            "heimdall:swap-before",
+            detail,
+            { cancelable: true }
+        )) {
+            return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: true };
+        }
+
+        targetEl = resolveTarget(detail.target, targetEl);
+        fragment = detail.fragment && detail.fragment.childNodes ? detail.fragment : fragment;
+        mode = String(detail.swap || mode).toLowerCase();
+
+        if (mode === "none" || !targetEl)
+            return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: false };
+
+        stripScripts(fragment);
 
         const nodes = fragmentToNodesArray(fragment);
         const firstElement = nodes.find(n => n && n.nodeType === 1) || null;
         const appliedRoot = firstElement || targetEl;
+        let result;
 
         switch (mode) {
             case "outer": {
@@ -47,21 +79,38 @@ export function createDomPipeline({ getConfig, boot, dbg, jsInvokeVoid }) {
                     // FIX: capture parentElement BEFORE remove() detaches the node.
                     const parent = targetEl.parentElement;
                     targetEl.remove();
-                    return { didApply: true, appliedRoot: parent || null };
+                    result = { didApply: true, appliedRoot: parent || null, target: targetEl, swap: mode, cancelled: false };
+                    break;
                 }
                 targetEl.replaceWith(...nodes);
-                return { didApply: true, appliedRoot };
+                result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+                break;
             }
             case "beforeend":
                 targetEl.append(...nodes);
-                return { didApply: true, appliedRoot };
+                result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+                break;
             case "afterbegin":
                 targetEl.prepend(...nodes);
-                return { didApply: true, appliedRoot };
+                result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+                break;
             default: // "inner"
                 targetEl.replaceChildren(...nodes);
-                return { didApply: true, appliedRoot };
+                result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+                break;
         }
+
+        if (emitLifecycle) {
+            emitLifecycle(detail.sourceElement, "heimdall:swap-after", {
+                ...detail,
+                target: targetEl,
+                swap: mode,
+                nodes,
+                appliedRoot: result.appliedRoot
+            });
+        }
+
+        return result;
     }
 
     function stripInvocationsFromFragment(fragment) {
@@ -313,12 +362,16 @@ export function createDomPipeline({ getConfig, boot, dbg, jsInvokeVoid }) {
 
                 stripScripts(payloadFrag);
 
-                const { didApply, appliedRoot } = applySwap(targetEl, payloadFrag, swap);
+                const swapResult = applySwap(targetEl, payloadFrag, swap, Object.assign({}, context || {}, {
+                    sourceEl,
+                    swapKind: "invocation"
+                }));
+                const { didApply, appliedRoot } = swapResult;
                 if (didApply) {
                     applied++;
                     if (!getConfig().observeDom) {
                         try {
-                            boot(appliedRoot || targetEl);
+                            boot(appliedRoot || swapResult.target || targetEl);
                         }
                         catch { /* ignore */ }
                     }

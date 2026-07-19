@@ -119,6 +119,29 @@ namespace Heimdall.Server.Rendering
 		}
 
 		/// <summary>
+		/// Represents the built-in values supported by the native HTML <c>command</c> attribute.
+		/// </summary>
+		/// <remarks>
+		/// Use the string overload of <see cref="Command(string)"/> for custom commands,
+		/// whose names begin with <c>--</c>, or for future platform values.
+		/// </remarks>
+		public enum CommandType
+		{
+			/// <summary>Shows or hides the targeted popover.</summary>
+			toggle_popover,
+			/// <summary>Shows the targeted popover.</summary>
+			show_popover,
+			/// <summary>Hides the targeted popover.</summary>
+			hide_popover,
+			/// <summary>Closes the targeted dialog.</summary>
+			close,
+			/// <summary>Requests that the targeted dialog close.</summary>
+			request_close,
+			/// <summary>Shows the targeted dialog as a modal.</summary>
+			show_modal
+		}
+
+		/// <summary>
 		/// Converts an <see cref="InputType"/> value to the corresponding HTML attribute string.
 		/// </summary>
 		/// <param name="type">The input type to convert.</param>
@@ -128,6 +151,20 @@ namespace Heimdall.Server.Rendering
 		/// </remarks>
 		private static string ToInputTypeString(InputType type)
 			=> type.ToString().Replace("_", "-");
+
+		/// <summary>
+		/// Converts a <see cref="CommandType"/> value to its native HTML keyword.
+		/// </summary>
+		private static string ToCommandTypeString(CommandType command) => command switch
+		{
+			CommandType.toggle_popover => "toggle-popover",
+			CommandType.show_popover => "show-popover",
+			CommandType.hide_popover => "hide-popover",
+			CommandType.close => "close",
+			CommandType.request_close => "request-close",
+			CommandType.show_modal => "show-modal",
+			_ => throw new ArgumentOutOfRangeException(nameof(command), command, null)
+		};
 
 		/// <summary>
 		/// Represents a lightweight HTML attribute value used during element construction.

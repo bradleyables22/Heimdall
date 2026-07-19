@@ -26,6 +26,18 @@ const tests = [
   ["exposes the public API", testPublicApi],
   ["invokes actions with CSRF and swaps HTML", testProgrammaticInvoke],
   ["emits action lifecycle events", testActionLifecycleEvents],
+  ["keeps parallel request behavior by default", testDefaultParallelRequests],
+  ["replaces active requests and rejects stale responses", testRequestSyncReplace],
+  ["drops incoming requests while a group is active", testRequestSyncDrop],
+  ["queues only the latest pending request", testRequestSyncQueueLatest],
+  ["scopes declarative synchronization to an element by default", testDeclarativeElementSync],
+  ["coordinates declarative triggers through sync groups", testDeclarativeSyncGroup],
+  ["emits mutable and cancellable request lifecycle events", testRequestLifecycleContract],
+  ["cancels requests from lifecycle events", testRequestLifecycleCancellation],
+  ["honors external abort signals", testExternalAbortSignal],
+  ["cancels timed out requests without applying responses", testRequestTimeout],
+  ["keeps busy state until replacement requests finish", testReplacementBusyState],
+  ["emits cancellable swap lifecycle events", testSwapLifecycleContract],
   ["sanitizes error HTML and calls error callbacks", testActionErrorSanitization],
   ["returns network failures without throwing", testNetworkFailure],
   ["rejects non-serializable payloads with error events", testNonSerializablePayload],
@@ -90,7 +102,9 @@ async function testPublicApi(page) {
     onReady: typeof window.Heimdall.onReady,
     clearCsrfToken: typeof window.Heimdall.clearCsrfToken,
     sseConnect: typeof window.Heimdall.sse.connect,
-    contentEndpoint: window.Heimdall.config.endpoints.contentActions
+    contentEndpoint: window.Heimdall.config.endpoints.contentActions,
+    requestSync: window.Heimdall.config.requestSync,
+    requestTimeoutMs: window.Heimdall.config.requestTimeoutMs
   }));
 
   assert.equal(api.apiVersion, 1);
@@ -100,6 +114,8 @@ async function testPublicApi(page) {
   assert.equal(api.clearCsrfToken, "function");
   assert.equal(api.sseConnect, "function");
   assert.equal(api.contentEndpoint, "/__heimdall/v1/content/actions");
+  assert.equal(api.requestSync, "parallel");
+  assert.equal(api.requestTimeoutMs, 0);
 }
 
 async function testProgrammaticInvoke(page) {
@@ -161,6 +177,629 @@ async function testActionLifecycleEvents(page) {
   assert.equal(events[1].name, "heimdall:after");
   assert.equal(events[1].status, 200);
   assert.equal(events[1].html, '<span id="event-updated">Events</span>');
+}
+
+async function testDefaultParallelRequests(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      { body: '<span id="parallel-first">First</span>', delayMs: 50 },
+      { body: '<span id="parallel-second">Second</span>', delayMs: 5 }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Old</div>';
+
+    const first = window.Heimdall.invoke("Parallel.First", {}, { target: "#target" });
+    const second = window.Heimdall.invoke("Parallel.Second", {}, { target: "#target" });
+    const results = await Promise.all([first, second]);
+
+    return {
+      results: results.map(result => ({ ok: result.ok, cancelled: !!result.cancelled })),
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.deepEqual(state.results, [
+    { ok: true, cancelled: false },
+    { ok: true, cancelled: false }
+  ]);
+  assert.equal(state.targetHtml, '<span id="parallel-first">First</span>');
+  assert.equal(actionFetches(await getFetches(page)).length, 2);
+}
+
+async function testRequestSyncReplace(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      {
+        body: '<invocation heimdall-content-target="#side"><template><b id="stale-side">Stale side</b></template></invocation><javascript function="window.App.stale"></javascript><span id="stale">Stale</span>',
+        delayMs: 60,
+        ignoreAbort: true
+      },
+      { body: '<span id="fresh">Fresh</span>', delayMs: 5 }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Old</div><div id="side">Keep side</div>';
+    window.App = {
+      stale() {
+        window.__staleJsRan = true;
+      }
+    };
+    const cancellations = [];
+    document.addEventListener("heimdall:request-cancel", event => {
+      cancellations.push({
+        actionId: event.detail.actionId,
+        reason: event.detail.result.cancelReason
+      });
+    });
+
+    let resolveStarted;
+    const started = new Promise(resolve => { resolveStarted = resolve; });
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Replace.Stale")
+        resolveStarted();
+    });
+
+    const stale = window.Heimdall.invoke("Replace.Stale", {}, {
+      target: "#target",
+      sync: "replace",
+      syncGroup: "search"
+    });
+    await started;
+
+    const fresh = window.Heimdall.invoke("Replace.Fresh", {}, {
+      target: "#target",
+      sync: "replace",
+      syncGroup: "search"
+    });
+
+    const [staleResult, freshResult] = await Promise.all([stale, fresh]);
+    return {
+      staleResult: {
+        ok: staleResult.ok,
+        cancelled: staleResult.cancelled,
+        cancelReason: staleResult.cancelReason
+      },
+      freshResult: { ok: freshResult.ok, cancelled: !!freshResult.cancelled },
+      cancellations,
+      targetHtml: document.querySelector("#target").innerHTML,
+      sideHtml: document.querySelector("#side").innerHTML,
+      staleJsRan: window.__staleJsRan === true
+    };
+  });
+
+  assert.deepEqual(state.staleResult, {
+    ok: false,
+    cancelled: true,
+    cancelReason: "replaced"
+  });
+  assert.deepEqual(state.freshResult, { ok: true, cancelled: false });
+  assert.deepEqual(state.cancellations, [{ actionId: "Replace.Stale", reason: "replaced" }]);
+  assert.equal(state.targetHtml, '<span id="fresh">Fresh</span>');
+  assert.equal(state.sideHtml, "Keep side");
+  assert.equal(state.staleJsRan, false);
+
+  const actions = actionFetches(await getFetches(page));
+  assert.equal(actions.length, 2);
+  assert.equal(actions[0].aborted, true);
+}
+
+async function testRequestSyncDrop(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="drop-first">First</span>', delayMs: 35 }]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Old</div>';
+
+    let resolveStarted;
+    const started = new Promise(resolve => { resolveStarted = resolve; });
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Drop.First")
+        resolveStarted();
+    });
+
+    const first = window.Heimdall.invoke("Drop.First", {}, {
+      target: "#target",
+      sync: "drop",
+      syncGroup: "save"
+    });
+    await started;
+
+    const dropped = window.Heimdall.invoke("Drop.Second", {}, {
+      target: "#target",
+      sync: "drop",
+      syncGroup: "save"
+    });
+
+    const [firstResult, droppedResult] = await Promise.all([first, dropped]);
+    return {
+      firstOk: firstResult.ok,
+      dropped: {
+        cancelled: droppedResult.cancelled,
+        cancelReason: droppedResult.cancelReason
+      },
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.equal(state.firstOk, true);
+  assert.deepEqual(state.dropped, { cancelled: true, cancelReason: "dropped" });
+  assert.equal(state.targetHtml, '<span id="drop-first">First</span>');
+  assert.equal(actionFetches(await getFetches(page)).length, 1);
+}
+
+async function testRequestSyncQueueLatest(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      { body: '<span id="queue-first">First</span>', delayMs: 35 },
+      { body: '<span id="queue-third">Third</span>', delayMs: 5 }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Old</div>';
+
+    let resolveStarted;
+    const started = new Promise(resolve => { resolveStarted = resolve; });
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Queue.First")
+        resolveStarted();
+    });
+
+    const options = { target: "#target", sync: "queue-latest", syncGroup: "queue" };
+    const first = window.Heimdall.invoke("Queue.First", { order: 1 }, options);
+    await started;
+    const second = window.Heimdall.invoke("Queue.Second", { order: 2 }, options);
+    const third = window.Heimdall.invoke("Queue.Third", { order: 3 }, options);
+
+    const [firstResult, secondResult, thirdResult] = await Promise.all([first, second, third]);
+    return {
+      firstOk: firstResult.ok,
+      second: {
+        cancelled: secondResult.cancelled,
+        cancelReason: secondResult.cancelReason
+      },
+      thirdOk: thirdResult.ok,
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.equal(state.firstOk, true);
+  assert.deepEqual(state.second, { cancelled: true, cancelReason: "queue-replaced" });
+  assert.equal(state.thirdOk, true);
+  assert.equal(state.targetHtml, '<span id="queue-third">Third</span>');
+
+  const actions = actionFetches(await getFetches(page));
+  assert.equal(actions.length, 2);
+  assert.deepEqual(actions.map(action => action.jsonBody.order), [1, 3]);
+}
+
+async function testDeclarativeSyncGroup(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      { body: '<span id="declarative-stale">Stale</span>', delayMs: 60 },
+      { body: '<span id="declarative-fresh">Fresh</span>', delayMs: 5 }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = `
+      <button id="first"
+              heimdall-content-click="Declarative.First"
+              heimdall-content-target="#target"
+              heimdall-content-disable="false"
+              heimdall-sync="replace"
+              heimdall-sync-group="shared">First</button>
+      <button id="second"
+              heimdall-content-click="Declarative.Second"
+              heimdall-content-target="#target"
+              heimdall-content-disable="false"
+              heimdall-sync="replace"
+              heimdall-sync-group="shared">Second</button>
+      <div id="target">Old</div>
+    `;
+
+    let resolveFirstStarted;
+    const firstStarted = new Promise(resolve => { resolveFirstStarted = resolve; });
+    const completions = [];
+    let resolveCompleted;
+    const completed = new Promise(resolve => { resolveCompleted = resolve; });
+
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Declarative.First")
+        resolveFirstStarted();
+    });
+    document.addEventListener("heimdall:request-finally", event => {
+      if (event.detail.actionId.startsWith("Declarative.")) {
+        completions.push(event.detail.actionId);
+        if (completions.length === 2)
+          resolveCompleted();
+      }
+    });
+
+    document.querySelector("#first").click();
+    await firstStarted;
+    document.querySelector("#second").click();
+    await completed;
+
+    return {
+      completions,
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.equal(state.completions.length, 2);
+  assert.equal(state.targetHtml, '<span id="declarative-fresh">Fresh</span>');
+  assert.equal(actionFetches(await getFetches(page)).length, 2);
+}
+
+async function testDeclarativeElementSync(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      { body: '<span id="element-stale">Stale</span>', delayMs: 60 },
+      { body: '<span id="element-fresh">Fresh</span>', delayMs: 5 }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = `
+      <button id="refresh"
+              heimdall-content-click="Element.Refresh"
+              heimdall-content-target="#target"
+              heimdall-content-disable="false"
+              heimdall-sync="replace">Refresh</button>
+      <div id="target">Old</div>
+    `;
+
+    let beforeCount = 0;
+    let finallyCount = 0;
+    let resolveFirstStarted;
+    let resolveCompleted;
+    const firstStarted = new Promise(resolve => { resolveFirstStarted = resolve; });
+    const completed = new Promise(resolve => { resolveCompleted = resolve; });
+
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Element.Refresh" && ++beforeCount === 1)
+        resolveFirstStarted();
+    });
+    document.addEventListener("heimdall:request-finally", event => {
+      if (event.detail.actionId === "Element.Refresh" && ++finallyCount === 2)
+        resolveCompleted();
+    });
+
+    const button = document.querySelector("#refresh");
+    button.click();
+    await firstStarted;
+    button.click();
+    await completed;
+
+    return {
+      beforeCount,
+      finallyCount,
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.equal(state.beforeCount, 2);
+  assert.equal(state.finallyCount, 2);
+  assert.equal(state.targetHtml, '<span id="element-fresh">Fresh</span>');
+  assert.equal(actionFetches(await getFetches(page)).length, 2);
+}
+
+async function testRequestLifecycleContract(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="lifecycle-result">Configured</span>' }]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="primary">Primary</div><div id="secondary">Secondary</div>';
+    const order = [];
+    const snapshots = {};
+
+    document.addEventListener("heimdall:request-config", event => {
+      order.push("request-config");
+      event.detail.payload = { configured: true };
+      event.detail.headers["X-Lifecycle"] = "configured";
+      event.detail.target = "#primary";
+    });
+    document.addEventListener("heimdall:request-before", event => {
+      order.push("request-before");
+      snapshots.attempt = event.detail.attempt;
+      snapshots.header = event.detail.request.headers["X-Lifecycle"];
+    });
+    document.addEventListener("heimdall:before", () => order.push("before"));
+    document.addEventListener("heimdall:swap-before", event => {
+      order.push(`swap-before:${event.detail.origin}:${event.detail.kind}`);
+      event.detail.target = "#secondary";
+    });
+    document.addEventListener("heimdall:swap-after", event => {
+      order.push(`swap-after:${event.detail.origin}:${event.detail.kind}`);
+      snapshots.appliedRootId = event.detail.appliedRoot && event.detail.appliedRoot.id;
+    });
+    document.addEventListener("heimdall:after", () => order.push("after"));
+    document.addEventListener("heimdall:request-after", event => {
+      order.push("request-after");
+      snapshots.resultOk = event.detail.result.ok;
+    });
+    document.addEventListener("heimdall:request-finally", event => {
+      order.push("request-finally");
+      snapshots.finished = event.detail.finishedAt != null;
+    });
+
+    const result = await window.Heimdall.invoke("Lifecycle.Configure", { configured: false }, {
+      target: "#primary"
+    });
+
+    return {
+      result: { ok: result.ok },
+      order,
+      snapshots,
+      primaryHtml: document.querySelector("#primary").innerHTML,
+      secondaryHtml: document.querySelector("#secondary").innerHTML
+    };
+  });
+
+  assert.deepEqual(state.order, [
+    "request-config",
+    "request-before",
+    "before",
+    "swap-before:action:main",
+    "swap-after:action:main",
+    "after",
+    "request-after",
+    "request-finally"
+  ]);
+  assert.deepEqual(state.snapshots, {
+    attempt: 1,
+    header: "configured",
+    appliedRootId: "lifecycle-result",
+    resultOk: true,
+    finished: true
+  });
+  assert.equal(state.primaryHtml, "Primary");
+  assert.equal(state.secondaryHtml, '<span id="lifecycle-result">Configured</span>');
+
+  const action = actionFetches(await getFetches(page))[0];
+  assert.deepEqual(action.jsonBody, { configured: true });
+  assert.equal(action.headers["x-lifecycle"], "configured");
+}
+
+async function testRequestLifecycleCancellation(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="should-not-run">No</span>' }]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Keep</div>';
+    const order = [];
+
+    document.addEventListener("heimdall:request-config", () => order.push("config"));
+    document.addEventListener("heimdall:request-before", event => {
+      order.push("before");
+      event.preventDefault();
+    });
+    document.addEventListener("heimdall:request-cancel", event => {
+      order.push(`cancel:${event.detail.result.cancelReason}`);
+    });
+    document.addEventListener("heimdall:request-finally", () => order.push("finally"));
+
+    const result = await window.Heimdall.invoke("Lifecycle.Cancel", {}, { target: "#target" });
+    return {
+      result: {
+        cancelled: result.cancelled,
+        cancelReason: result.cancelReason
+      },
+      order,
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.deepEqual(state.result, { cancelled: true, cancelReason: "event-cancelled" });
+  assert.deepEqual(state.order, ["config", "before", "cancel:event-cancelled", "finally"]);
+  assert.equal(state.targetHtml, "Keep");
+
+  const fetches = await getFetches(page);
+  assert.equal(csrfFetches(fetches).length, 1);
+  assert.equal(actionFetches(fetches).length, 0);
+}
+
+async function testRequestTimeout(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="late-timeout">Late</span>', delayMs: 200 }]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Keep</div>';
+    window.Heimdall.config.requestTimeoutMs = 20;
+    const events = [];
+    document.addEventListener("heimdall:request-timeout", () => events.push("timeout"));
+    document.addEventListener("heimdall:request-cancel", event => events.push(`cancel:${event.detail.result.cancelReason}`));
+    document.addEventListener("heimdall:request-finally", () => events.push("finally"));
+
+    const started = performance.now();
+    const result = await window.Heimdall.invoke("Timeout.Run", {}, { target: "#target" });
+
+    return {
+      result: {
+        cancelled: result.cancelled,
+        cancelReason: result.cancelReason
+      },
+      events,
+      elapsed: performance.now() - started,
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.deepEqual(state.result, { cancelled: true, cancelReason: "timeout" });
+  assert.deepEqual(state.events, ["timeout", "cancel:timeout", "finally"]);
+  assert.ok(state.elapsed < 150);
+  assert.equal(state.targetHtml, "Keep");
+
+  const action = actionFetches(await getFetches(page))[0];
+  assert.equal(action.aborted, true);
+}
+
+async function testExternalAbortSignal(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="late-abort">Late</span>', delayMs: 200 }]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Keep</div>';
+    const controller = new AbortController();
+    const cancellations = [];
+    document.addEventListener("heimdall:request-cancel", event => {
+      cancellations.push(event.detail.result.cancelReason);
+    });
+
+    let resolveStarted;
+    const started = new Promise(resolve => { resolveStarted = resolve; });
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Abort.External")
+        resolveStarted();
+    });
+
+    const invocation = window.Heimdall.invoke("Abort.External", {}, {
+      target: "#target",
+      signal: controller.signal
+    });
+    await started;
+    controller.abort();
+    const result = await invocation;
+
+    return {
+      result: {
+        cancelled: result.cancelled,
+        cancelReason: result.cancelReason
+      },
+      cancellations,
+      targetHtml: document.querySelector("#target").innerHTML
+    };
+  });
+
+  assert.deepEqual(state.result, { cancelled: true, cancelReason: "external-signal" });
+  assert.deepEqual(state.cancellations, ["external-signal"]);
+  assert.equal(state.targetHtml, "Keep");
+  assert.equal(actionFetches(await getFetches(page))[0].aborted, true);
+}
+
+async function testReplacementBusyState(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      { body: '<span>Old</span>', delayMs: 200 },
+      { body: '<span>New</span>', delayMs: 50 }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<button id="source">Save</button><div id="target">Old</div>';
+    const source = document.querySelector("#source");
+
+    let resolveStarted;
+    const started = new Promise(resolve => { resolveStarted = resolve; });
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Busy.First")
+        resolveStarted();
+    });
+
+    const common = {
+      target: "#target",
+      sourceEl: source,
+      disableElement: source,
+      sync: "replace",
+      syncGroup: "busy"
+    };
+
+    const first = window.Heimdall.invoke("Busy.First", {}, common);
+    await started;
+    const second = window.Heimdall.invoke("Busy.Second", {}, common);
+
+    const firstResult = await first;
+    const duringSecond = {
+      disabled: source.hasAttribute("disabled"),
+      busy: source.getAttribute("aria-busy")
+    };
+    const secondResult = await second;
+
+    return {
+      firstCancelled: firstResult.cancelled,
+      secondOk: secondResult.ok,
+      duringSecond,
+      after: {
+        disabled: source.hasAttribute("disabled"),
+        busy: source.getAttribute("aria-busy")
+      }
+    };
+  });
+
+  assert.equal(state.firstCancelled, true);
+  assert.equal(state.secondOk, true);
+  assert.deepEqual(state.duringSecond, { disabled: true, busy: "true" });
+  assert.deepEqual(state.after, { disabled: false, busy: null });
+}
+
+async function testSwapLifecycleContract(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      {
+        body: '<invocation heimdall-content-target="#side"><template><b id="side-new">Side</b></template></invocation><span id="main-new">Main</span>'
+      },
+      { body: '<span id="blocked">Blocked</span>' }
+    ]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Old</div><div id="side">Old side</div>';
+    const events = [];
+
+    document.addEventListener("heimdall:swap-before", event => {
+      const actionId = event.detail.requestContext && event.detail.requestContext.actionId;
+      events.push(`before:${event.detail.origin}:${event.detail.kind}:${actionId}`);
+
+      if (actionId === "Swap.Events" && event.detail.kind === "main") {
+        const script = document.createElement("script");
+        script.textContent = "window.__swapScriptRan = true";
+        event.detail.fragment.append(script);
+      }
+
+      if (actionId === "Swap.Cancel")
+        event.preventDefault();
+    });
+    document.addEventListener("heimdall:swap-after", event => {
+      const actionId = event.detail.requestContext && event.detail.requestContext.actionId;
+      events.push(`after:${event.detail.origin}:${event.detail.kind}:${actionId}`);
+    });
+
+    const applied = await window.Heimdall.invoke("Swap.Events", {}, { target: "#target" });
+    const cancelled = await window.Heimdall.invoke("Swap.Cancel", {}, { target: "#target" });
+
+    return {
+      appliedOk: applied.ok,
+      cancelledOk: cancelled.ok,
+      events,
+      targetHtml: document.querySelector("#target").innerHTML,
+      sideHtml: document.querySelector("#side").innerHTML,
+      scriptRan: window.__swapScriptRan === true,
+      scripts: document.querySelectorAll("#target script, #side script").length
+    };
+  });
+
+  assert.equal(state.appliedOk, true);
+  assert.equal(state.cancelledOk, true);
+  assert.deepEqual(state.events, [
+    "before:action:invocation:Swap.Events",
+    "after:action:invocation:Swap.Events",
+    "before:action:main:Swap.Events",
+    "after:action:main:Swap.Events",
+    "before:action:main:Swap.Cancel"
+  ]);
+  assert.equal(state.targetHtml, '<span id="main-new">Main</span>');
+  assert.equal(state.sideHtml, '<b id="side-new">Side</b>');
+  assert.equal(state.scriptRan, false);
+  assert.equal(state.scripts, 0);
 }
 
 async function testActionErrorSanitization(page) {
@@ -1236,12 +1875,33 @@ async function testCsrfRetry(page) {
     ]
   });
 
-  const result = await page.evaluate(() => {
+  const state = await page.evaluate(async () => {
     document.body.innerHTML = '<div id="target">Old</div>';
-    return window.Heimdall.invoke("Retry.Save", {}, { target: "#target" });
+    const attempts = [];
+    let afterCount = 0;
+    let finallyCount = 0;
+
+    document.addEventListener("heimdall:request-before", event => {
+      if (event.detail.actionId === "Retry.Save")
+        attempts.push(event.detail.attempt);
+    });
+    document.addEventListener("heimdall:request-after", event => {
+      if (event.detail.actionId === "Retry.Save")
+        afterCount++;
+    });
+    document.addEventListener("heimdall:request-finally", event => {
+      if (event.detail.actionId === "Retry.Save")
+        finallyCount++;
+    });
+
+    const result = await window.Heimdall.invoke("Retry.Save", {}, { target: "#target" });
+    return { result, attempts, afterCount, finallyCount };
   });
 
-  assert.equal(result.ok, true);
+  assert.equal(state.result.ok, true);
+  assert.deepEqual(state.attempts, [1, 2]);
+  assert.equal(state.afterCount, 1);
+  assert.equal(state.finallyCount, 1);
   assert.equal(await page.locator("#target").innerHTML(), '<span id="retry-ok">Retried</span>');
 
   const fetches = await getFetches(page);
@@ -1547,6 +2207,7 @@ async function testSseMessageSwap(page) {
     };
 
     const seen = [];
+    const swaps = [];
     document.addEventListener("heimdall:sse-message", ev => {
       seen.push({
         topic: ev.detail.topic,
@@ -1554,6 +2215,12 @@ async function testSseMessageSwap(page) {
         bytes: ev.detail.bytes,
         targetHtml: document.querySelector("#target").innerHTML
       });
+    });
+    document.addEventListener("heimdall:swap-before", event => {
+      swaps.push(`before:${event.detail.origin}:${event.detail.kind}`);
+    });
+    document.addEventListener("heimdall:swap-after", event => {
+      swaps.push(`after:${event.detail.origin}:${event.detail.kind}`);
     });
 
     window.Heimdall.sse.connect("topic:message", {
@@ -1589,7 +2256,8 @@ async function testSseMessageSwap(page) {
     return {
       targetHtml: document.querySelector("#target").innerHTML,
       eventSourceUrl: es.url,
-      seen
+      seen,
+      swaps
     };
   });
 
@@ -1602,6 +2270,7 @@ async function testSseMessageSwap(page) {
   assert.equal(state.seen[0].id, "evt-1");
   assert.equal(state.seen[0].bytes, '<span id="sse-done">SSE</span>'.length);
   assert.equal(state.seen[0].targetHtml, '<span id="sse-done">SSE</span>');
+  assert.deepEqual(state.swaps, ["before:sse:main", "after:sse:main"]);
 }
 
 async function testSseCustomEventAndDisconnect(page) {

@@ -110,6 +110,8 @@ export function createHeimdallRuntime({
             hoverDelayMs: 150,
             scrollThresholdPx: 120,
             scrollMinIntervalMs: 250,
+            requestSync: "parallel",
+            requestTimeoutMs: 0,
 
             // NOTE: visibleRootMargin and visibleThreshold are read once when
             // the IntersectionObserver is first created. Set these values before

@@ -39,6 +39,10 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_Hover = "e2e.hover";
 		public const string Action_Marker = "e2e.marker";
 		public const string Action_SlowDisable = "e2e.slow-disable";
+		public const string Action_Sync = "e2e.sync";
+		public const string Action_Lifecycle = "e2e.lifecycle";
+		public const string Action_LifecycleRequestCancel = "e2e.lifecycle.request-cancel";
+		public const string Action_LifecycleSwapCancel = "e2e.lifecycle.swap-cancel";
 		public const string Action_Error = "e2e.error";
 		public const string Action_AuthRequired = "e2e.auth.required";
 
@@ -107,6 +111,12 @@ window.HeimdallE2E = {
 			public string Message { get; set; } = string.Empty;
 		}
 
+		public sealed class SyncPayload
+		{
+			public string Label { get; set; } = string.Empty;
+			public int DelayMs { get; set; }
+		}
+
 		public static IHtmlContent Render()
 			=> FluentHtml.Div(root =>
 			{
@@ -132,6 +142,9 @@ window.HeimdallE2E = {
 					RenderSelfPayloadSection(),
 					RenderDelegatedEventsSection(),
 					RenderBehaviorSection(),
+					RenderNativeCommandSection(),
+					RenderRequestSyncSection(),
+					RenderLifecycleSection(),
 					RenderJsSection(),
 					RenderFormSection(),
 					RenderSseSection(),
@@ -301,6 +314,47 @@ window.HeimdallE2E = {
 			await Task.Delay(700);
 			return Status("e2e-disable-result-value", "Disable completed");
 		}
+
+		[ContentInvocation(Action_Sync)]
+		[RequestTimeout(3000)]
+		public static async Task<IHtmlContent> Sync([ContentPayload] SyncPayload payload)
+		{
+			var delayMs = Math.Clamp(payload?.DelayMs ?? 0, 0, 1500);
+			await Task.Delay(delayMs);
+			return Status("e2e-sync-result-value", $"Sync: {Normalize(payload?.Label)}");
+		}
+
+		[ContentInvocation(Action_Lifecycle)]
+		[RequestTimeout(3000)]
+		public static IHtmlContent Lifecycle(
+			HttpContext context,
+			[ContentPayload] MessagePayload payload)
+		{
+			var message = Normalize(payload?.Message);
+			var header = Normalize(context.Request.Headers["X-Heimdall-E2E"].FirstOrDefault());
+
+			return FluentHtml.Fragment(fragment =>
+			{
+				fragment.Heimdall().Invocation(
+					targetSelector: "#e2e-lifecycle-side",
+					swap: HeimdallHtml.Swap.Inner,
+					payload: Status("e2e-lifecycle-side-result", $"Lifecycle side: {message}"),
+					wrapInTemplate: false);
+				fragment.Add(Status(
+					"e2e-lifecycle-main-result",
+					$"Lifecycle: {message} | header: {header}"));
+			});
+		}
+
+		[ContentInvocation(Action_LifecycleRequestCancel)]
+		[RequestTimeout(3000)]
+		public static IHtmlContent LifecycleRequestCancel()
+			=> Status("e2e-lifecycle-request-cancel-result", "Request cancellation failed");
+
+		[ContentInvocation(Action_LifecycleSwapCancel)]
+		[RequestTimeout(3000)]
+		public static IHtmlContent LifecycleSwapCancel()
+			=> Status("e2e-lifecycle-swap-cancel-result", "Swap cancellation failed");
 
 		[ContentInvocation(Action_Js)]
 		[RequestTimeout(3000)]
@@ -796,6 +850,117 @@ window.HeimdallE2E = {
 				body.Div(target => target.Id("e2e-error-target").Text("Error target original"));
 			});
 
+		private static IHtmlContent RenderRequestSyncSection()
+			=> Section("e2e-sync-section", "Request Synchronization", body =>
+			{
+				body.Div(target => target.Id("e2e-sync-parallel-target").Text("Parallel target original"))
+					.Add(
+						SyncActionButton(
+							id: "e2e-sync-parallel-slow",
+							label: "Parallel slow",
+							targetSelector: "#e2e-sync-parallel-target",
+							payload: new SyncPayload { Label = "parallel-slow", DelayMs = 250 }),
+						SyncActionButton(
+							id: "e2e-sync-parallel-fast",
+							label: "Parallel fast",
+							targetSelector: "#e2e-sync-parallel-target",
+							payload: new SyncPayload { Label = "parallel-fast", DelayMs = 20 }))
+					.Div(target => target.Id("e2e-sync-replace-target").Text("Replace target original"))
+					.Add(
+						SyncActionButton(
+							id: "e2e-sync-replace-slow",
+							label: "Replace slow",
+							targetSelector: "#e2e-sync-replace-target",
+							payload: new SyncPayload { Label = "replace-slow", DelayMs = 250 },
+							strategy: HeimdallHtml.RequestSync.Replace,
+							group: "e2e-sync-replace"),
+						SyncActionButton(
+							id: "e2e-sync-replace-fast",
+							label: "Replace fast",
+							targetSelector: "#e2e-sync-replace-target",
+							payload: new SyncPayload { Label = "replace-fast", DelayMs = 20 },
+							strategy: HeimdallHtml.RequestSync.Replace,
+							group: "e2e-sync-replace"))
+					.Div(target => target.Id("e2e-sync-drop-target").Text("Drop target original"))
+					.Add(
+						SyncActionButton(
+							id: "e2e-sync-drop-slow",
+							label: "Drop slow",
+							targetSelector: "#e2e-sync-drop-target",
+							payload: new SyncPayload { Label = "drop-slow", DelayMs = 180 },
+							strategy: HeimdallHtml.RequestSync.Drop,
+							group: "e2e-sync-drop"),
+						SyncActionButton(
+							id: "e2e-sync-drop-fast",
+							label: "Drop fast",
+							targetSelector: "#e2e-sync-drop-target",
+							payload: new SyncPayload { Label = "drop-fast", DelayMs = 20 },
+							strategy: HeimdallHtml.RequestSync.Drop,
+							group: "e2e-sync-drop"))
+					.Div(target => target.Id("e2e-sync-queue-target").Text("Queue target original"))
+					.Add(
+						SyncActionButton(
+							id: "e2e-sync-queue-first",
+							label: "Queue first",
+							targetSelector: "#e2e-sync-queue-target",
+							payload: new SyncPayload { Label = "queue-first", DelayMs = 180 },
+							strategy: HeimdallHtml.RequestSync.QueueLatest,
+							group: "e2e-sync-queue"),
+						SyncActionButton(
+							id: "e2e-sync-queue-second",
+							label: "Queue second",
+							targetSelector: "#e2e-sync-queue-target",
+							payload: new SyncPayload { Label = "queue-second", DelayMs = 20 },
+							strategy: HeimdallHtml.RequestSync.QueueLatest,
+							group: "e2e-sync-queue"),
+						SyncActionButton(
+							id: "e2e-sync-queue-third",
+							label: "Queue third",
+							targetSelector: "#e2e-sync-queue-target",
+							payload: new SyncPayload { Label = "queue-third", DelayMs = 20 },
+							strategy: HeimdallHtml.RequestSync.QueueLatest,
+							group: "e2e-sync-queue"));
+			});
+
+		private static IHtmlContent RenderNativeCommandSection()
+			=> Section("e2e-native-command-section", "Native HTML Commands", body =>
+			{
+				body.Button(button =>
+				{
+					button.Id("e2e-native-command-open")
+						.Type("button")
+						.Class(Bs.Btn.OutlinePrimary)
+						.CommandFor("e2e-native-command-dialog")
+						.Command(Html.CommandType.show_modal)
+						.Text("Open native dialog");
+				})
+				.Dialog(dialog =>
+				{
+					dialog.Id("e2e-native-command-dialog")
+						.P(message => message.Id("e2e-native-command-message").Text("Native dialog opened"))
+						.Button(button =>
+						{
+							button.Id("e2e-native-command-close")
+								.Type("button")
+								.CommandFor("e2e-native-command-dialog")
+								.Command(Html.CommandType.close)
+								.Text("Close native dialog");
+						});
+				});
+			});
+
+		private static IHtmlContent RenderLifecycleSection()
+			=> Section("e2e-lifecycle-section", "Request And Swap Lifecycle", body =>
+			{
+				body.Div(target => target.Id("e2e-lifecycle-primary").Text("Lifecycle primary original"))
+					.Div(target => target.Id("e2e-lifecycle-secondary").Text("Lifecycle secondary original"))
+					.Div(target => target.Id("e2e-lifecycle-side").Text("Lifecycle side original"))
+					.Div(target => target.Id("e2e-lifecycle-request-cancel-target").Text("Request cancel target original"))
+					.Div(target => target.Id("e2e-lifecycle-swap-cancel-target").Text("Swap cancel target original"))
+					.Div(target => target.Id("e2e-timeout-target").Text("Timeout target original"))
+					.Div(target => target.Id("e2e-external-abort-target").Text("External abort target original"));
+			});
+
 		private static IHtmlContent RenderAuthSection()
 			=> Section("e2e-auth-section", "Auth Redirect", body =>
 			{
@@ -867,6 +1032,44 @@ window.HeimdallE2E = {
 					.PayloadEmptyObject()
 					.Target(targetSelector)
 					.Swap(swap);
+			});
+
+		private static IHtmlContent SyncActionButton(
+			string id,
+			string label,
+			string targetSelector,
+			SyncPayload payload,
+			HeimdallHtml.RequestSync? strategy = null,
+			string? group = null)
+			=> FluentHtml.Button(button =>
+			{
+				button.Id(id)
+					.Type("button")
+					.Class(Bs.Btn.OutlinePrimary, Bs.Spacing.Mt(2), Bs.Spacing.Me(2))
+					.Text(label);
+
+				var action = button.Heimdall()
+					.Click(Action_Sync)
+					.Payload(payload)
+					.Target(targetSelector)
+					.SwapInner()
+					.Disable(false);
+
+				switch (strategy)
+				{
+					case HeimdallHtml.RequestSync.Replace:
+						action.SyncReplace(group);
+						break;
+					case HeimdallHtml.RequestSync.Drop:
+						action.SyncDrop(group);
+						break;
+					case HeimdallHtml.RequestSync.QueueLatest:
+						action.SyncQueueLatest(group);
+						break;
+					case HeimdallHtml.RequestSync.Parallel:
+						action.SyncParallel(group);
+						break;
+				}
 			});
 
 		private static IHtmlContent Section(string id, string title, Action<FluentHtml.ElementBuilder> build)

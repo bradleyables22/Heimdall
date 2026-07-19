@@ -135,99 +135,259 @@
     ensureCsrfToken,
     clearCsrfToken,
     emit,
+    emitLifecycle,
     dbg,
     payloadFromElement,
     boot,
     dom,
+    coordinator,
     actionHeader,
     csrfHeader
   }) {
-    async function invoke(actionId, payload, options) {
-      return _invokeWithRetry(actionId, payload, options, true);
+    const busyStates = /* @__PURE__ */ new WeakMap();
+    let nextRequestId = 0;
+    function acquireBusyState(el) {
+      if (!el)
+        return;
+      let state = busyStates.get(el);
+      if (!state) {
+        state = {
+          count: 0,
+          hadDisabled: false,
+          hadAriaBusy: false,
+          ariaBusy: null
+        };
+        busyStates.set(el, state);
+      }
+      if (state.count === 0) {
+        state.hadDisabled = el.hasAttribute("disabled");
+        state.hadAriaBusy = el.hasAttribute("aria-busy");
+        state.ariaBusy = el.getAttribute("aria-busy");
+      }
+      state.count++;
+      el.setAttribute("disabled", "disabled");
+      el.setAttribute("aria-busy", "true");
     }
-    async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
-      options = options || {};
+    function releaseBusyState(el) {
+      if (!el)
+        return;
+      const state = busyStates.get(el);
+      if (!state)
+        return;
+      state.count = Math.max(0, state.count - 1);
+      if (state.count > 0)
+        return;
+      if (!state.hadDisabled)
+        el.removeAttribute("disabled");
+      if (state.hadAriaBusy)
+        el.setAttribute("aria-busy", state.ariaBusy == null ? "" : state.ariaBusy);
+      else
+        el.removeAttribute("aria-busy");
+      busyStates.delete(el);
+    }
+    function createRequestContext(actionId, payload, options) {
       const config = getConfig();
-      const endpointBase = options.endpoint || config.endpoints.contentActions;
-      const targetEl = resolveTarget(options.target, options.fallbackTarget || null);
-      const swap = options.swap || "inner";
-      const url = new URL(endpointBase, global.location?.origin || void 0);
-      url.searchParams.set("action", actionId);
+      const sourceElement = options.sourceEl || null;
+      const configuredSync = options.sync != null ? options.sync : sourceElement ? getAttr(sourceElement, "heimdall-sync") : null;
+      const configuredGroup = options.syncGroup != null ? options.syncGroup : sourceElement ? getAttr(sourceElement, "heimdall-sync-group") : null;
+      return {
+        requestId: ++nextRequestId,
+        attempt: 0,
+        actionId,
+        trigger: options.triggerName || null,
+        sourceElement,
+        payload,
+        target: options.target,
+        fallbackTarget: options.fallbackTarget || null,
+        swap: options.swap || "inner",
+        endpoint: options.endpoint || config.endpoints.contentActions,
+        headers: Object.assign({}, options.headers || {}),
+        sync: configuredSync || config.requestSync || "parallel",
+        syncGroup: configuredGroup && String(configuredGroup).trim() ? String(configuredGroup).trim() : null,
+        timeoutMs: options.timeoutMs != null ? Number(options.timeoutMs) : Number(config.requestTimeoutMs || 0),
+        externalSignal: options.signal || null,
+        disableElement: options.disableElement || null,
+        controller: null,
+        signal: null,
+        request: null,
+        response: null,
+        rawHtml: null,
+        result: null,
+        cancelled: false,
+        cancelReason: null,
+        timedOut: false,
+        startedAt: performance.now(),
+        startedExecutionAt: null,
+        finishedAt: null
+      };
+    }
+    function emitCancellation(context, result) {
+      const detail = context;
+      detail.result = result;
+      if (result.cancelReason === "timeout")
+        emitLifecycle(context.sourceElement, "heimdall:request-timeout", detail);
+      emitLifecycle(context.sourceElement, "heimdall:request-cancel", detail);
+    }
+    async function invoke(actionId, payload, options) {
+      options = options || {};
+      const context = createRequestContext(actionId, payload, options);
+      emitLifecycle(context.sourceElement, "heimdall:request-config", context);
+      context.target = resolveTarget(context.target, context.fallbackTarget);
+      context.sync = coordinator.normalizeStrategy(context.sync, getConfig().requestSync || "parallel");
+      try {
+        const result = await coordinator.run(context, async () => {
+          acquireBusyState(context.disableElement);
+          try {
+            return await executeRequestAttempt(context, options, true);
+          } finally {
+            releaseBusyState(context.disableElement);
+          }
+        });
+        context.result = result;
+        if (result && result.cancelled) {
+          emitCancellation(context, result);
+        } else if (context.response) {
+          emitLifecycle(context.sourceElement, "heimdall:request-after", context);
+        }
+        return result;
+      } finally {
+        context.finishedAt = performance.now();
+        emitLifecycle(context.sourceElement, "heimdall:request-finally", context);
+      }
+    }
+    async function executeRequestAttempt(context, options, shouldRetry) {
+      context.attempt++;
+      const url = new URL(context.endpoint, global.location?.origin || void 0);
+      url.searchParams.set("action", context.actionId);
       const token = await ensureCsrfToken();
+      if (!coordinator.isCurrent(context))
+        return coordinator.getCancellationResult(context);
       const headers = {
         "Content-Type": "application/json",
-        [actionHeader]: actionId,
+        [actionHeader]: context.actionId,
         [csrfHeader]: token
       };
-      if (options.headers) {
-        for (const k in options.headers) headers[k] = options.headers[k];
-      }
+      for (const key in context.headers)
+        headers[key] = context.headers[key];
       let body = "{}";
       try {
-        body = payload == null ? "{}" : JSON.stringify(payload);
+        body = context.payload == null ? "{}" : JSON.stringify(context.payload);
       } catch (e) {
-        const err = new Error(`Heimdall payload is not JSON-serializable for action '${actionId}'.`);
+        const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
         err.cause = e;
-        emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: 0, error: err });
+        emit("heimdall:error", {
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          status: 0,
+          error: err
+        });
         throw err;
       }
-      const started = performance.now();
-      emit("heimdall:before", { actionId, payload, target: targetEl, swap, endpoint: url.toString() });
-      dbg("invoke ->", actionId, { endpoint: url.toString(), swap, target: targetEl });
-      let res;
+      context.request = {
+        url: url.toString(),
+        headers,
+        body,
+        credentials: "same-origin",
+        signal: context.signal
+      };
+      const shouldContinue = emitLifecycle(
+        context.sourceElement,
+        "heimdall:request-before",
+        context,
+        { cancelable: true }
+      );
+      if (!shouldContinue) {
+        coordinator.cancel(context, "event-cancelled");
+        return coordinator.getCancellationResult(context);
+      }
+      if (!coordinator.isCurrent(context))
+        return coordinator.getCancellationResult(context);
+      const attemptStarted = performance.now();
+      emit("heimdall:before", {
+        actionId: context.actionId,
+        payload: context.payload,
+        target: context.target,
+        swap: context.swap,
+        endpoint: context.request.url
+      });
+      dbg("invoke ->", context.actionId, {
+        endpoint: context.request.url,
+        swap: context.swap,
+        target: context.target,
+        requestId: context.requestId,
+        attempt: context.attempt
+      });
+      let response;
       try {
-        res = await global.fetch(url.toString(), {
+        response = await global.fetch(context.request.url, {
           method: "POST",
-          headers,
-          body,
-          credentials: "same-origin"
+          headers: context.request.headers,
+          body: context.request.body,
+          credentials: context.request.credentials,
+          signal: context.request.signal || void 0
         });
-      } catch (networkErr) {
+      } catch (networkError) {
+        if (context.cancelled || networkError && networkError.name === "AbortError" && context.signal && context.signal.aborted)
+          return coordinator.getCancellationResult(context);
         const result2 = {
           ok: false,
           status: 0,
-          error: networkErr.message,
+          error: networkError.message,
           response: null,
           html: null,
-          ms: performance.now() - started
+          ms: performance.now() - attemptStarted,
+          requestId: context.requestId
         };
-        emit("heimdall:error", { actionId, payload, target: targetEl, swap, error: networkErr });
+        emit("heimdall:error", {
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          error: networkError
+        });
         return result2;
       }
-      const rawHtml = await safeText(res);
-      const ms = performance.now() - started;
-      if (res.status === 400 && shouldRetry) {
+      const rawHtml = await safeText(response);
+      const ms = performance.now() - attemptStarted;
+      context.response = response;
+      context.rawHtml = rawHtml;
+      if (!coordinator.isCurrent(context))
+        return coordinator.getCancellationResult(context);
+      if (response.status === 400 && shouldRetry) {
         const lower = rawHtml.toLowerCase();
         if (lower.includes("csrf") || lower.includes("antiforgery")) {
           dbg("csrf validation suspected; retrying once with fresh token");
           clearCsrfToken();
-          return _invokeWithRetry(actionId, payload, options, false);
+          return executeRequestAttempt(context, options, false);
         }
       }
-      const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+      const authRedirectUrl = getAuthRedirectUrlFromResponse(response);
       if (authRedirectUrl) {
         const redirectUrl2 = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
         emit("heimdall:redirect", {
-          actionId,
-          payload,
-          target: targetEl,
-          swap,
-          endpoint: url.toString(),
-          status: res.status,
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          endpoint: context.request.url,
+          status: response.status,
           url: redirectUrl2
         });
-        dbg("redirecting", { actionId, url: redirectUrl2 });
+        dbg("redirecting", { actionId: context.actionId, url: redirectUrl2 });
         global.location.href = redirectUrl2;
         return {
-          ok: res.ok,
-          status: res.status,
+          ok: response.ok,
+          status: response.status,
           html: null,
           error: null,
-          response: res,
+          response,
           ms,
           abortSwap: true,
           abortReason: "redirect",
-          redirectUrl: redirectUrl2
+          redirectUrl: redirectUrl2,
+          requestId: context.requestId
         };
       }
       let html = rawHtml;
@@ -235,15 +395,17 @@
       let abortReason = null;
       let redirectUrl = null;
       let jsAfter = [];
-      if (res.ok) {
-        const oob = dom.processOob(html, options && options.sourceEl ? options.sourceEl : null, {
+      if (response.ok) {
+        const oob = dom.processOob(html, context.sourceElement, {
           kind: "action",
-          actionId,
-          payload,
-          target: targetEl,
-          swap,
-          endpoint: url.toString(),
-          status: res.status
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          endpoint: context.request.url,
+          status: response.status,
+          sourceEl: context.sourceElement,
+          requestContext: context
         });
         html = oob.html;
         abortSwap = !!oob.abortSwap;
@@ -253,81 +415,119 @@
       } else {
         html = dom.sanitizeHtmlStringNoApply(html);
       }
-      if (res.ok && redirectUrl) {
+      if (response.ok && redirectUrl) {
         emit("heimdall:redirect", {
-          actionId,
-          payload,
-          target: targetEl,
-          swap,
-          endpoint: url.toString(),
-          status: res.status,
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          endpoint: context.request.url,
+          status: response.status,
           url: redirectUrl
         });
-        dbg("redirecting", { actionId, url: redirectUrl });
+        dbg("redirecting", { actionId: context.actionId, url: redirectUrl });
         global.location.href = redirectUrl;
         return {
           ok: true,
-          status: res.status,
+          status: response.status,
           html: null,
           error: null,
-          response: res,
+          response,
           ms,
           abortSwap: true,
           abortReason: "redirect",
-          redirectUrl
+          redirectUrl,
+          requestId: context.requestId
         };
       }
-      if (res.ok && abortSwap) {
-        emit("heimdall:abort", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, reason: abortReason });
-        dbg("swap aborted", { actionId, reason: abortReason, target: targetEl });
+      if (response.ok && abortSwap) {
+        emit("heimdall:abort", {
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          endpoint: context.request.url,
+          status: response.status,
+          reason: abortReason
+        });
+        dbg("swap aborted", { actionId: context.actionId, reason: abortReason, target: context.target });
       }
-      if (res.ok && targetEl && !abortSwap) {
-        const mainTpl = dom.parseHtmlToTemplate(html);
-        dom.stripInvocationsFromFragment(mainTpl.content);
-        dom.stripAbortsFromFragment(mainTpl.content);
-        dom.stripRedirectsFromFragment(mainTpl.content);
-        dom.stripJsInvokeVoidFromFragment(mainTpl.content);
-        const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swap);
+      if (response.ok && context.target && !abortSwap) {
+        const mainTemplate = dom.parseHtmlToTemplate(html);
+        dom.stripInvocationsFromFragment(mainTemplate.content);
+        dom.stripAbortsFromFragment(mainTemplate.content);
+        dom.stripRedirectsFromFragment(mainTemplate.content);
+        dom.stripJsInvokeVoidFromFragment(mainTemplate.content);
+        const swapResult = dom.applySwap(
+          context.target,
+          mainTemplate.content,
+          context.swap,
+          {
+            kind: "action",
+            swapKind: "main",
+            sourceEl: context.sourceElement,
+            requestContext: context
+          }
+        );
+        const { didApply, appliedRoot } = swapResult;
         if (didApply && !getConfig().observeDom) {
           try {
-            boot(appliedRoot || targetEl);
+            boot(appliedRoot || swapResult.target || context.target);
           } catch {
           }
         }
       }
-      if (res.ok) {
+      if (response.ok) {
         dom.invokeJsInvokeVoidDirectives(jsAfter, {
           phase: "after",
           kind: "action",
-          actionId,
-          payload,
-          target: targetEl,
-          swap,
-          endpoint: url.toString(),
-          status: res.status
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          endpoint: context.request.url,
+          status: response.status
         });
       }
       const result = {
-        ok: res.ok,
-        status: res.status,
-        html: res.ok ? html : null,
-        error: res.ok ? null : html,
-        response: res,
+        ok: response.ok,
+        status: response.status,
+        html: response.ok ? html : null,
+        error: response.ok ? null : html,
+        response,
         ms,
         abortSwap,
         abortReason,
-        redirectUrl
+        redirectUrl,
+        requestId: context.requestId
       };
-      if (!res.ok) {
-        emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: res.status, body: html });
+      if (!response.ok) {
+        emit("heimdall:error", {
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          status: response.status,
+          body: html
+        });
       } else {
-        emit("heimdall:after", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, ms, html, redirectUrl });
+        emit("heimdall:after", {
+          actionId: context.actionId,
+          payload: context.payload,
+          target: context.target,
+          swap: context.swap,
+          endpoint: context.request.url,
+          status: response.status,
+          ms,
+          html,
+          redirectUrl
+        });
       }
-      if (typeof options.onSuccess === "function" && res.ok)
+      if (typeof options.onSuccess === "function" && response.ok)
         options.onSuccess(result);
-      if (typeof options.onError === "function" && !res.ok)
+      if (typeof options.onError === "function" && !response.ok)
         options.onError(result);
-      dbg("invoke <-", actionId, result);
+      dbg("invoke <-", context.actionId, result);
       return result;
     }
     const DEFAULT_DISABLE_BY_TRIGGER = {
@@ -346,6 +546,8 @@
     function getCommonOptions(el, triggerName) {
       const target = getAttr(el, "heimdall-content-target") || el;
       const swap = getAttr(el, "heimdall-content-swap") || "inner";
+      const sync = getAttr(el, "heimdall-sync");
+      const syncGroup = getAttr(el, "heimdall-sync-group");
       let payload = payloadFromElement(el);
       if (payload == null && triggerName === "submit") {
         if (el && el.tagName === "FORM") {
@@ -356,33 +558,30 @@
             payload = formDataToObject(new FormData(form));
         }
       }
-      return { target, swap, payload };
+      return { target, swap, payload, sync, syncGroup };
     }
     async function runActionFromElement(el, actionId, triggerName, extraOptions) {
       if (!el || !actionId)
         return;
       if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
         return;
-      const { target, swap, payload } = getCommonOptions(el, triggerName);
+      const { target, swap, payload, sync, syncGroup } = getCommonOptions(el, triggerName);
       const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
       const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
-      let wasDisabled = false;
-      if (shouldDisable) {
-        wasDisabled = el.hasAttribute("disabled");
-        el.setAttribute("disabled", "disabled");
-        el.setAttribute("aria-busy", "true");
-      }
-      const opts = Object.assign({ target, swap, fallbackTarget: el, sourceEl: el }, extraOptions || {});
+      const opts = Object.assign({
+        target,
+        swap,
+        sync,
+        syncGroup,
+        fallbackTarget: el,
+        sourceEl: el,
+        triggerName,
+        disableElement: shouldDisable ? el : null
+      }, extraOptions || {});
       try {
         await invoke(actionId, payload, opts);
       } catch (err) {
         console.error(err);
-      } finally {
-        if (shouldDisable) {
-          el.removeAttribute("aria-busy");
-          if (!wasDisabled)
-            el.removeAttribute("disabled");
-        }
       }
     }
     return {
@@ -602,6 +801,22 @@
       } catch {
       }
     }
+    function emitLifecycle(source, name, detail, options) {
+      options = options || {};
+      try {
+        const sourceIsConnected = source && source.isConnected !== false && typeof source.dispatchEvent === "function";
+        const target = sourceIsConnected ? source : document;
+        const event = new CustomEvent(name, {
+          detail,
+          bubbles: target !== document,
+          composed: target !== document,
+          cancelable: !!options.cancelable
+        });
+        return target.dispatchEvent(event);
+      } catch {
+        return true;
+      }
+    }
     function dbg(...args) {
       const config = getConfig();
       if (config && config.debug) {
@@ -610,12 +825,13 @@
     }
     return {
       emit,
+      emitLifecycle,
       dbg
     };
   }
 
   // core/dom.js
-  function createDomPipeline({ getConfig, boot, dbg, jsInvokeVoid }) {
+  function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid }) {
     function stripScripts(rootNode) {
       if (!rootNode || !rootNode.querySelectorAll)
         return;
@@ -637,35 +853,76 @@
     function fragmentToNodesArray(fragment) {
       return Array.from(fragment.childNodes || []);
     }
-    function applySwap(targetEl, fragment, swap) {
-      const mode = (swap || "inner").toLowerCase();
+    function applySwap(targetEl, fragment, swap, lifecycleContext) {
+      lifecycleContext = lifecycleContext || {};
+      let mode = String(swap || "inner").toLowerCase();
       if (mode === "none")
-        return { didApply: false, appliedRoot: null };
+        return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: false };
       if (!targetEl)
-        return { didApply: false, appliedRoot: null };
+        return { didApply: false, appliedRoot: null, target: null, swap: mode, cancelled: false };
+      stripScripts(fragment);
+      const detail = {
+        origin: lifecycleContext.kind || "action",
+        kind: lifecycleContext.swapKind || "main",
+        target: targetEl,
+        fragment,
+        swap: mode,
+        sourceElement: lifecycleContext.sourceEl || null,
+        requestContext: lifecycleContext.requestContext || null
+      };
+      if (emitLifecycle && !emitLifecycle(
+        detail.sourceElement,
+        "heimdall:swap-before",
+        detail,
+        { cancelable: true }
+      )) {
+        return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: true };
+      }
+      targetEl = resolveTarget(detail.target, targetEl);
+      fragment = detail.fragment && detail.fragment.childNodes ? detail.fragment : fragment;
+      mode = String(detail.swap || mode).toLowerCase();
+      if (mode === "none" || !targetEl)
+        return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: false };
+      stripScripts(fragment);
       const nodes = fragmentToNodesArray(fragment);
       const firstElement = nodes.find((n) => n && n.nodeType === 1) || null;
       const appliedRoot = firstElement || targetEl;
+      let result;
       switch (mode) {
         case "outer": {
           if (nodes.length === 0) {
             const parent = targetEl.parentElement;
             targetEl.remove();
-            return { didApply: true, appliedRoot: parent || null };
+            result = { didApply: true, appliedRoot: parent || null, target: targetEl, swap: mode, cancelled: false };
+            break;
           }
           targetEl.replaceWith(...nodes);
-          return { didApply: true, appliedRoot };
+          result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+          break;
         }
         case "beforeend":
           targetEl.append(...nodes);
-          return { didApply: true, appliedRoot };
+          result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+          break;
         case "afterbegin":
           targetEl.prepend(...nodes);
-          return { didApply: true, appliedRoot };
+          result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+          break;
         default:
           targetEl.replaceChildren(...nodes);
-          return { didApply: true, appliedRoot };
+          result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
+          break;
       }
+      if (emitLifecycle) {
+        emitLifecycle(detail.sourceElement, "heimdall:swap-after", {
+          ...detail,
+          target: targetEl,
+          swap: mode,
+          nodes,
+          appliedRoot: result.appliedRoot
+        });
+      }
+      return result;
     }
     function stripInvocationsFromFragment(fragment) {
       if (!fragment || !fragment.querySelectorAll)
@@ -870,12 +1127,16 @@
             payloadFrag = parseHtmlToTemplate(invEl.innerHTML || "").content;
           }
           stripScripts(payloadFrag);
-          const { didApply, appliedRoot } = applySwap(targetEl, payloadFrag, swap);
+          const swapResult = applySwap(targetEl, payloadFrag, swap, Object.assign({}, context || {}, {
+            sourceEl,
+            swapKind: "invocation"
+          }));
+          const { didApply, appliedRoot } = swapResult;
           if (didApply) {
             applied++;
             if (!getConfig().observeDom) {
               try {
-                boot(appliedRoot || targetEl);
+                boot(appliedRoot || swapResult.target || targetEl);
               } catch {
               }
             }
@@ -1321,6 +1582,276 @@
     };
   }
 
+  // core/request-coordinator.js
+  var VALID_SYNC_STRATEGIES = /* @__PURE__ */ new Set([
+    "parallel",
+    "replace",
+    "drop",
+    "queue-latest"
+  ]);
+  function createRequestCoordinator({ global, dbg }) {
+    const elementStates = /* @__PURE__ */ new WeakMap();
+    const groupStates = /* @__PURE__ */ new Map();
+    const recordsByContext = /* @__PURE__ */ new WeakMap();
+    function normalizeStrategy(value, fallback) {
+      const normalized = String(value || "").trim().toLowerCase();
+      if (VALID_SYNC_STRATEGIES.has(normalized))
+        return normalized;
+      const normalizedFallback = String(fallback || "parallel").trim().toLowerCase();
+      if (VALID_SYNC_STRATEGIES.has(normalizedFallback))
+        return normalizedFallback;
+      return "parallel";
+    }
+    function cancellationResult(context, reason) {
+      return {
+        ok: false,
+        status: 0,
+        error: null,
+        response: null,
+        html: null,
+        ms: Math.max(0, performance.now() - context.startedAt),
+        cancelled: true,
+        cancelReason: reason || "cancelled",
+        requestId: context.requestId
+      };
+    }
+    function getState(record) {
+      if (record.group) {
+        let state = groupStates.get(record.group);
+        if (!state) {
+          state = { active: null, queued: null, generation: 0, group: record.group };
+          groupStates.set(record.group, state);
+        }
+        return state;
+      }
+      if (record.context.sourceElement) {
+        let state = elementStates.get(record.context.sourceElement);
+        if (!state) {
+          state = { active: null, queued: null, generation: 0, group: null };
+          elementStates.set(record.context.sourceElement, state);
+        }
+        return state;
+      }
+      return null;
+    }
+    function cleanupState(state) {
+      if (!state || state.active || state.queued)
+        return;
+      if (state.group)
+        groupStates.delete(state.group);
+    }
+    function abortController(record) {
+      if (!record.controller)
+        return;
+      try {
+        record.controller.abort(record.cancelReason);
+      } catch {
+        try {
+          record.controller.abort();
+        } catch {
+        }
+      }
+    }
+    function settleQueuedCancellation(record, reason) {
+      if (!record || record.settled)
+        return;
+      record.cancelled = true;
+      record.cancelReason = reason || "cancelled";
+      record.context.cancelled = true;
+      record.context.cancelReason = record.cancelReason;
+      cleanupRecord(record);
+      record.settled = true;
+      record.resolve(cancellationResult(record.context, record.cancelReason));
+    }
+    function cancelRecord(record, reason) {
+      if (!record || record.settled || record.cancelled)
+        return false;
+      record.cancelled = true;
+      record.cancelReason = reason || "cancelled";
+      record.context.cancelled = true;
+      record.context.cancelReason = record.cancelReason;
+      if (record.started) {
+        abortController(record);
+      } else {
+        if (record.state && record.state.queued === record)
+          record.state.queued = null;
+        settleQueuedCancellation(record, record.cancelReason);
+        cleanupState(record.state);
+      }
+      return true;
+    }
+    function linkExternalSignal(record) {
+      const signal = record.context.externalSignal;
+      if (!signal || typeof signal.addEventListener !== "function")
+        return;
+      if (signal.aborted) {
+        cancelRecord(record, "external-signal");
+        return;
+      }
+      const handler = () => cancelRecord(record, "external-signal");
+      signal.addEventListener("abort", handler, { once: true });
+      record.removeExternalAbort = () => {
+        try {
+          signal.removeEventListener("abort", handler);
+        } catch {
+        }
+      };
+    }
+    function startTimeout(record) {
+      const timeoutMs = Number(record.context.timeoutMs || 0);
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+        return;
+      record.timeoutId = global.setTimeout(() => {
+        record.timedOut = true;
+        record.context.timedOut = true;
+        cancelRecord(record, "timeout");
+      }, timeoutMs);
+    }
+    function cleanupRecord(record) {
+      if (record.timeoutId != null) {
+        global.clearTimeout(record.timeoutId);
+        record.timeoutId = null;
+      }
+      if (record.removeExternalAbort) {
+        record.removeExternalAbort();
+        record.removeExternalAbort = null;
+      }
+    }
+    async function startRecord(record) {
+      if (record.settled)
+        return;
+      const state = record.state;
+      if (state) {
+        state.active = record;
+        record.generation = ++state.generation;
+      }
+      record.started = true;
+      record.context.startedExecutionAt = performance.now();
+      startTimeout(record);
+      let result;
+      try {
+        if (record.cancelled) {
+          result = cancellationResult(record.context, record.cancelReason);
+        } else {
+          result = await record.execute();
+        }
+      } catch (error) {
+        cleanupRecord(record);
+        record.settled = true;
+        record.reject(error);
+        if (state && state.active === record) {
+          state.active = null;
+          const queued = state.queued;
+          state.queued = null;
+          if (queued)
+            startRecord(queued);
+          else
+            cleanupState(state);
+        }
+        return;
+      }
+      cleanupRecord(record);
+      record.settled = true;
+      record.resolve(result);
+      if (state && state.active === record) {
+        state.active = null;
+        const queued = state.queued;
+        state.queued = null;
+        if (queued)
+          startRecord(queued);
+        else
+          cleanupState(state);
+      }
+    }
+    function run(context, execute) {
+      return new Promise((resolve, reject) => {
+        const Controller = global.AbortController || globalThis.AbortController;
+        const controller = typeof Controller === "function" ? new Controller() : null;
+        const record = {
+          context,
+          execute,
+          resolve,
+          reject,
+          controller,
+          state: null,
+          group: context.syncGroup ? String(context.syncGroup).trim() : null,
+          generation: 0,
+          started: false,
+          settled: false,
+          cancelled: false,
+          cancelReason: null,
+          timedOut: false,
+          timeoutId: null,
+          removeExternalAbort: null
+        };
+        context.controller = controller;
+        context.signal = controller ? controller.signal : null;
+        recordsByContext.set(context, record);
+        linkExternalSignal(record);
+        if (record.cancelled) {
+          settleQueuedCancellation(record, record.cancelReason);
+          return;
+        }
+        const strategy = normalizeStrategy(context.sync, "parallel");
+        context.sync = strategy;
+        if (strategy === "parallel") {
+          startRecord(record);
+          return;
+        }
+        const state = getState(record);
+        record.state = state;
+        if (!state || !state.active) {
+          startRecord(record);
+          return;
+        }
+        switch (strategy) {
+          case "replace":
+            cancelRecord(state.active, "replaced");
+            if (state.queued)
+              cancelRecord(state.queued, "queue-replaced");
+            state.queued = null;
+            startRecord(record);
+            break;
+          case "drop":
+            settleQueuedCancellation(record, "dropped");
+            break;
+          case "queue-latest":
+            if (state.queued)
+              cancelRecord(state.queued, "queue-replaced");
+            state.queued = record;
+            break;
+          default:
+            dbg("unknown request synchronization strategy; using parallel", { strategy });
+            startRecord(record);
+            break;
+        }
+      });
+    }
+    function cancel(context, reason) {
+      return cancelRecord(recordsByContext.get(context), reason);
+    }
+    function isCurrent(context) {
+      const record = recordsByContext.get(context);
+      if (!record || record.cancelled)
+        return false;
+      if (!record.state)
+        return true;
+      return record.state.active === record && record.state.generation === record.generation;
+    }
+    function getCancellationResult(context) {
+      const record = recordsByContext.get(context);
+      const reason = record && record.cancelReason ? record.cancelReason : context.cancelReason || "cancelled";
+      return cancellationResult(context, reason);
+    }
+    return {
+      cancel,
+      getCancellationResult,
+      isCurrent,
+      normalizeStrategy,
+      run
+    };
+  }
+
   // core/security-tokens.js
   function createSecurityTokens({
     global,
@@ -1564,6 +2095,8 @@
         hoverDelayMs: 150,
         scrollThresholdPx: 120,
         scrollMinIntervalMs: 250,
+        requestSync: "parallel",
+        requestTimeoutMs: 0,
         // NOTE: visibleRootMargin and visibleThreshold are read once when
         // the IntersectionObserver is first created. Set these values before
         // any heimdall-content-visible element is booted (i.e. before DOMContentLoaded).
@@ -2134,10 +2667,16 @@ ${topic}`;
         dom.stripAbortsFromFragment(mainTpl.content);
         dom.stripRedirectsFromFragment(mainTpl.content);
         dom.stripJsInvokeVoidFromFragment(mainTpl.content);
-        const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swapMode);
+        const swapResult = dom.applySwap(targetEl, mainTpl.content, swapMode, {
+          kind: "sse",
+          swapKind: "main",
+          sourceEl: state.el,
+          requestContext: null
+        });
+        const { didApply, appliedRoot } = swapResult;
         if (didApply && !getConfig().observeDom) {
           try {
-            boot(appliedRoot || targetEl);
+            boot(appliedRoot || swapResult.target || targetEl);
           } catch {
           }
         }
@@ -2374,7 +2913,11 @@ ${topic}`;
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
     const { payloadFromElement } = createPayloadResolver(global);
-    const { emit, dbg } = createDiagnostics(getRuntimeConfig);
+    const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
+    const coordinator = createRequestCoordinator({
+      global,
+      dbg
+    });
     const jsInvokeVoid = createJsInvokeVoidRuntime({
       global,
       emit,
@@ -2385,6 +2928,7 @@ ${topic}`;
       getConfig: getRuntimeConfig,
       boot: (root) => boot(root),
       dbg,
+      emitLifecycle,
       jsInvokeVoid
     });
     const {
@@ -2410,10 +2954,12 @@ ${topic}`;
       ensureCsrfToken,
       clearCsrfToken,
       emit,
+      emitLifecycle,
       dbg,
       payloadFromElement,
       boot: (root) => boot(root),
       dom,
+      coordinator,
       actionHeader: ACTION_HEADER,
       csrfHeader: CSRF_HEADER
     });

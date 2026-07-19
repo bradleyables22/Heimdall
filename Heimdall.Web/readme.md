@@ -1,7 +1,5 @@
 # HeimdallFramework.Web
 
-**Current release:** `3.0.5` | **Target framework:** .NET 10 | **License:** MIT
-
 > **HeimdallFramework.Web** distributes the **Heimdall JavaScript runtime** as Razor Class Library (RCL) static web assets.
 >
 > This package contains **only the client runtime**.
@@ -143,6 +141,45 @@ Swap modes:
 
 ---
 
+## Request Synchronization
+
+Heimdall can coordinate overlapping action requests without adding a client dependency.
+
+```html
+<input
+  heimdall-content-input="Search.Query"
+  heimdall-content-target="#results"
+  heimdall-debounce="250"
+  heimdall-sync="replace"
+  heimdall-sync-group="search">
+```
+
+Supported strategies:
+
+* `parallel` runs requests independently and is the default
+* `replace` cancels the active request and runs the newest request
+* `drop` ignores the new request while another request is active
+* `queue-latest` keeps only the latest pending request
+
+Without `heimdall-sync-group`, synchronization is scoped to the triggering element. Give multiple elements the same group when their requests must coordinate.
+
+Programmatic invocations use the same coordinator:
+
+```js
+const controller = new AbortController();
+
+const result = await Heimdall.invoke("Search.Query", { query: "heimdall" }, {
+  target: "#results",
+  sync: "replace",
+  syncGroup: "search",
+  signal: controller.signal
+});
+```
+
+Expected cancellation resolves normally with `cancelled: true` and a `cancelReason`; it is not reported as a Heimdall error.
+
+---
+
 ## Payload Resolution
 
 ### Static JSON
@@ -264,6 +301,8 @@ Global config:
 Heimdall.config.debug = true;
 Heimdall.config.observeDom = true;
 Heimdall.config.oobEnabled = true;
+Heimdall.config.requestSync = "parallel";
+Heimdall.config.requestTimeoutMs = 0;
 ```
 
 Endpoint overrides:
@@ -271,6 +310,39 @@ Endpoint overrides:
 ```js
 Heimdall.config.endpoints.contentActions = "/custom";
 ```
+
+`parallel` and a timeout of `0` preserve the existing request behavior. Set a positive timeout globally or pass `timeoutMs` to an individual `Heimdall.invoke` call to opt in.
+
+---
+
+## Lifecycle Events
+
+Heimdall exposes a dependency-free integration surface through DOM events:
+
+* `heimdall:request-config` allows payload, headers, target, swap, and synchronization configuration
+* `heimdall:request-before` fires before each fetch attempt and is cancellable
+* `heimdall:request-after` fires after a received response is processed
+* `heimdall:request-finally` always fires
+* `heimdall:request-cancel` reports expected cancellation
+* `heimdall:request-timeout` reports timeout cancellation
+* `heimdall:swap-before` fires before action, invocation, and SSE swaps and is cancellable
+* `heimdall:swap-after` fires after an applied swap
+
+Events raised for declarative actions originate from the triggering element and bubble to `document`. Cancel a request or swap with `event.preventDefault()`:
+
+```js
+document.addEventListener("heimdall:request-config", event => {
+  event.detail.headers["X-Correlation-ID"] = crypto.randomUUID();
+});
+
+document.addEventListener("heimdall:swap-before", event => {
+  if (event.detail.kind === "main" && shouldKeepCurrentContent()) {
+    event.preventDefault();
+  }
+});
+```
+
+The existing `heimdall:before`, `heimdall:after`, `heimdall:error`, `heimdall:abort`, and `heimdall:redirect` events remain supported. `heimdall:abort` continues to represent the server `<abort>` directive; client request cancellation uses `heimdall:request-cancel`.
 
 ---
 

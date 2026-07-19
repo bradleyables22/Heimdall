@@ -47,6 +47,23 @@ namespace Heimdall.Server.Rendering
 			=> Html.Attr(Attrs.Scope, EventScopeToString(scope));
 
 		/// <summary>
+		/// Sets the request synchronization strategy for the element.
+		/// </summary>
+		public static Html.HtmlAttr Sync(RequestSync strategy)
+			=> Html.Attr(Attrs.Sync, RequestSyncToString(strategy));
+
+		/// <summary>
+		/// Assigns the element's action requests to a named synchronization group.
+		/// </summary>
+		public static Html.HtmlAttr SyncGroup(string group)
+		{
+			if (string.IsNullOrWhiteSpace(group))
+				throw new ArgumentException("A synchronization group is required.", nameof(group));
+
+			return Html.Attr(Attrs.SyncGroup, group.Trim());
+		}
+
+		/// <summary>
 		/// Adds a debounce delay to a trigger.
 		/// </summary>
 		public static Html.HtmlAttr DebounceMs(int ms)
@@ -87,6 +104,15 @@ namespace Heimdall.Server.Rendering
 			EventScope.Self => "self",
 			EventScope.Closest => "closest",
 			_ => "closest"
+		};
+
+		private static string RequestSyncToString(RequestSync strategy) => strategy switch
+		{
+			RequestSync.Parallel => "parallel",
+			RequestSync.Replace => "replace",
+			RequestSync.Drop => "drop",
+			RequestSync.QueueLatest => "queue-latest",
+			_ => throw new ArgumentOutOfRangeException(nameof(strategy))
 		};
 
 		private static string TriggerListToString(IReadOnlyCollection<Trigger>? triggers)

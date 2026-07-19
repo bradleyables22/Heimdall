@@ -246,6 +246,21 @@ namespace Heimdall.Server.Rendering
 			public FragmentBuilder Action(string value) { _parts.Add(Html.Action(value)); return this; }
 
 			/// <summary>
+			/// Adds a native HTML <c>command</c> attribute from a raw value.
+			/// </summary>
+			public FragmentBuilder Command(string value) { _parts.Add(Html.Command(value)); return this; }
+
+			/// <summary>
+			/// Adds a native HTML <c>command</c> attribute from a known built-in command.
+			/// </summary>
+			public FragmentBuilder Command(Html.CommandType command) { _parts.Add(Html.Command(command)); return this; }
+
+			/// <summary>
+			/// Adds a native HTML <c>commandfor</c> attribute that references an element by ID.
+			/// </summary>
+			public FragmentBuilder CommandFor(string elementId) { _parts.Add(Html.CommandFor(elementId)); return this; }
+
+			/// <summary>
 			/// Adds a <c>method</c> attribute.
 			/// </summary>
 			public FragmentBuilder Method(string value) { _parts.Add(Html.Method(value)); return this; }

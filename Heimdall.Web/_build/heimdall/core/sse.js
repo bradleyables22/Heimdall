@@ -684,11 +684,17 @@ export function createSseRuntime({
             dom.stripRedirectsFromFragment(mainTpl.content);
             dom.stripJsInvokeVoidFromFragment(mainTpl.content);
 
-            const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swapMode);
+            const swapResult = dom.applySwap(targetEl, mainTpl.content, swapMode, {
+                kind: "sse",
+                swapKind: "main",
+                sourceEl: state.el,
+                requestContext: null
+            });
+            const { didApply, appliedRoot } = swapResult;
 
             if (didApply && !getConfig().observeDom) {
                 try {
-                    boot(appliedRoot || targetEl);
+                    boot(appliedRoot || swapResult.target || targetEl);
                 }
                 catch { /* ignore */ }
             }

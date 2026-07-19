@@ -214,6 +214,27 @@ namespace Heimdall.Server.Rendering
 		public static Html.HtmlAttr Action(string value) => Html.Action(value);
 
 		/// <summary>
+		/// Creates a native HTML <c>command</c> attribute from a raw value.
+		/// </summary>
+		/// <param name="value">The built-in, custom, or future command value.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr Command(string value) => Html.Command(value);
+
+		/// <summary>
+		/// Creates a native HTML <c>command</c> attribute from a known built-in command.
+		/// </summary>
+		/// <param name="command">The built-in command to render.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr Command(Html.CommandType command) => Html.Command(command);
+
+		/// <summary>
+		/// Creates a native HTML <c>commandfor</c> attribute that references an element by ID.
+		/// </summary>
+		/// <param name="elementId">The target element identifier without a leading hash.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr CommandFor(string elementId) => Html.CommandFor(elementId);
+
+		/// <summary>
 		/// Creates a <c>method</c> attribute.
 		/// </summary>
 		/// <param name="value">The HTTP method value.</param>

@@ -5,6 +5,7 @@ import { createDomPipeline } from "./core/dom.js";
 import { createEventDelegates } from "./core/event-delegates.js";
 import { createJsInvokeVoidRuntime } from "./core/js-invoke-void.js";
 import { createPayloadResolver } from "./core/payloads.js";
+import { createRequestCoordinator } from "./core/request-coordinator.js";
 import { createSecurityTokens } from "./core/security-tokens.js";
 import { createHeimdallRuntime } from "./core/startup.js";
 import { createSseRuntime } from "./core/sse.js";
@@ -74,6 +75,8 @@ import {
     //   - heimdall-visible-once="true|false"
     //   - heimdall-scroll-threshold="px"
     //   - heimdall-poll="ms"
+    //   - heimdall-sync="parallel|replace|drop|queue-latest"
+    //   - heimdall-sync-group="name"
     //
     // ---------------------------------------------------------------------------
     // Trigger Resolution Options
@@ -244,6 +247,8 @@ import {
     //   - heimdall-visible-once="true|false"
     //   - heimdall-scroll-threshold="px"
     //   - heimdall-poll="ms"
+    //   - heimdall-sync="parallel|replace|drop|queue-latest"
+    //   - heimdall-sync-group="name"
     //
     // ---------------------------------------------------------------------------
     // Response Directives (<invocation>, <abort>, <redirect>)
@@ -309,7 +314,11 @@ import {
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
     const { payloadFromElement } = createPayloadResolver(global);
-    const { emit, dbg } = createDiagnostics(getRuntimeConfig);
+    const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
+    const coordinator = createRequestCoordinator({
+        global,
+        dbg
+    });
     const jsInvokeVoid = createJsInvokeVoidRuntime({
         global,
         emit,
@@ -320,6 +329,7 @@ import {
         getConfig: getRuntimeConfig,
         boot: root => boot(root),
         dbg,
+        emitLifecycle,
         jsInvokeVoid
     });
     const {
@@ -345,10 +355,12 @@ import {
         ensureCsrfToken,
         clearCsrfToken,
         emit,
+        emitLifecycle,
         dbg,
         payloadFromElement,
         boot: root => boot(root),
         dom,
+        coordinator,
         actionHeader: ACTION_HEADER,
         csrfHeader: CSRF_HEADER
     });

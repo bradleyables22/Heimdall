@@ -95,6 +95,29 @@ namespace Heimdall.Server.Rendering
 		}
 
 		/// <summary>
+		/// Defines how a Heimdall action request coordinates with another request in the same synchronization scope.
+		/// </summary>
+		public enum RequestSync
+		{
+			/// <summary>
+			/// Runs requests independently. This preserves Heimdall's default request behavior.
+			/// </summary>
+			Parallel,
+			/// <summary>
+			/// Cancels the active request and starts the newest request.
+			/// </summary>
+			Replace,
+			/// <summary>
+			/// Ignores a new request while another request is active.
+			/// </summary>
+			Drop,
+			/// <summary>
+			/// Keeps only the latest pending request and runs it after the active request completes.
+			/// </summary>
+			QueueLatest
+		}
+
+		/// <summary>
 		/// Defines DOM swap behaviors supported by Heimdall.
 		/// </summary>
 		public enum Swap

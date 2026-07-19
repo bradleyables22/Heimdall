@@ -16,117 +16,309 @@ export function createActionInvoker({
     ensureCsrfToken,
     clearCsrfToken,
     emit,
+    emitLifecycle,
     dbg,
     payloadFromElement,
     boot,
     dom,
+    coordinator,
     actionHeader,
     csrfHeader
 }) {
-    async function invoke(actionId, payload, options) {
-        return _invokeWithRetry(actionId, payload, options, true);
+    const busyStates = new WeakMap();
+    let nextRequestId = 0;
+
+    function acquireBusyState(el) {
+        if (!el)
+            return;
+
+        let state = busyStates.get(el);
+        if (!state) {
+            state = {
+                count: 0,
+                hadDisabled: false,
+                hadAriaBusy: false,
+                ariaBusy: null
+            };
+            busyStates.set(el, state);
+        }
+
+        if (state.count === 0) {
+            state.hadDisabled = el.hasAttribute("disabled");
+            state.hadAriaBusy = el.hasAttribute("aria-busy");
+            state.ariaBusy = el.getAttribute("aria-busy");
+        }
+
+        state.count++;
+        el.setAttribute("disabled", "disabled");
+        el.setAttribute("aria-busy", "true");
     }
 
-    async function _invokeWithRetry(actionId, payload, options, shouldRetry) {
-        options = options || {};
+    function releaseBusyState(el) {
+        if (!el)
+            return;
 
+        const state = busyStates.get(el);
+        if (!state)
+            return;
+
+        state.count = Math.max(0, state.count - 1);
+        if (state.count > 0)
+            return;
+
+        if (!state.hadDisabled)
+            el.removeAttribute("disabled");
+
+        if (state.hadAriaBusy)
+            el.setAttribute("aria-busy", state.ariaBusy == null ? "" : state.ariaBusy);
+        else
+            el.removeAttribute("aria-busy");
+
+        busyStates.delete(el);
+    }
+
+    function createRequestContext(actionId, payload, options) {
         const config = getConfig();
-        const endpointBase = options.endpoint || config.endpoints.contentActions;
-        const targetEl = resolveTarget(options.target, options.fallbackTarget || null);
-        const swap = options.swap || "inner";
+        const sourceElement = options.sourceEl || null;
+        const configuredSync = options.sync != null
+            ? options.sync
+            : (sourceElement ? getAttr(sourceElement, "heimdall-sync") : null);
+        const configuredGroup = options.syncGroup != null
+            ? options.syncGroup
+            : (sourceElement ? getAttr(sourceElement, "heimdall-sync-group") : null);
 
-        const url = new URL(endpointBase, global.location?.origin || undefined);
-        url.searchParams.set("action", actionId);
+        return {
+            requestId: ++nextRequestId,
+            attempt: 0,
+            actionId,
+            trigger: options.triggerName || null,
+            sourceElement,
+            payload,
+            target: options.target,
+            fallbackTarget: options.fallbackTarget || null,
+            swap: options.swap || "inner",
+            endpoint: options.endpoint || config.endpoints.contentActions,
+            headers: Object.assign({}, options.headers || {}),
+            sync: configuredSync || config.requestSync || "parallel",
+            syncGroup: configuredGroup && String(configuredGroup).trim()
+                ? String(configuredGroup).trim()
+                : null,
+            timeoutMs: options.timeoutMs != null
+                ? Number(options.timeoutMs)
+                : Number(config.requestTimeoutMs || 0),
+            externalSignal: options.signal || null,
+            disableElement: options.disableElement || null,
+            controller: null,
+            signal: null,
+            request: null,
+            response: null,
+            rawHtml: null,
+            result: null,
+            cancelled: false,
+            cancelReason: null,
+            timedOut: false,
+            startedAt: performance.now(),
+            startedExecutionAt: null,
+            finishedAt: null
+        };
+    }
+
+    function emitCancellation(context, result) {
+        const detail = context;
+        detail.result = result;
+
+        if (result.cancelReason === "timeout")
+            emitLifecycle(context.sourceElement, "heimdall:request-timeout", detail);
+
+        emitLifecycle(context.sourceElement, "heimdall:request-cancel", detail);
+    }
+
+    async function invoke(actionId, payload, options) {
+        options = options || {};
+        const context = createRequestContext(actionId, payload, options);
+
+        emitLifecycle(context.sourceElement, "heimdall:request-config", context);
+        context.target = resolveTarget(context.target, context.fallbackTarget);
+        context.sync = coordinator.normalizeStrategy(context.sync, getConfig().requestSync || "parallel");
+
+        try {
+            const result = await coordinator.run(context, async () => {
+                acquireBusyState(context.disableElement);
+                try {
+                    return await executeRequestAttempt(context, options, true);
+                } finally {
+                    releaseBusyState(context.disableElement);
+                }
+            });
+
+            context.result = result;
+
+            if (result && result.cancelled) {
+                emitCancellation(context, result);
+            } else if (context.response) {
+                emitLifecycle(context.sourceElement, "heimdall:request-after", context);
+            }
+
+            return result;
+        } finally {
+            context.finishedAt = performance.now();
+            emitLifecycle(context.sourceElement, "heimdall:request-finally", context);
+        }
+    }
+
+    async function executeRequestAttempt(context, options, shouldRetry) {
+        context.attempt++;
+
+        const url = new URL(context.endpoint, global.location?.origin || undefined);
+        url.searchParams.set("action", context.actionId);
 
         const token = await ensureCsrfToken();
+        if (!coordinator.isCurrent(context))
+            return coordinator.getCancellationResult(context);
 
         const headers = {
             "Content-Type": "application/json",
-            [actionHeader]: actionId,
+            [actionHeader]: context.actionId,
             [csrfHeader]: token
         };
 
-        if (options.headers) {
-            for (const k in options.headers) headers[k] = options.headers[k];
-        }
+        for (const key in context.headers)
+            headers[key] = context.headers[key];
 
         let body = "{}";
         try {
-            body = payload == null ? "{}" : JSON.stringify(payload);
+            body = context.payload == null ? "{}" : JSON.stringify(context.payload);
         } catch (e) {
-            const err = new Error(`Heimdall payload is not JSON-serializable for action '${actionId}'.`);
+            const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
             err.cause = e;
-            emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: 0, error: err });
+            emit("heimdall:error", {
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                status: 0,
+                error: err
+            });
             throw err;
         }
 
-        const started = performance.now();
-        emit("heimdall:before", { actionId, payload, target: targetEl, swap, endpoint: url.toString() });
+        context.request = {
+            url: url.toString(),
+            headers,
+            body,
+            credentials: "same-origin",
+            signal: context.signal
+        };
 
-        dbg("invoke ->", actionId, { endpoint: url.toString(), swap, target: targetEl });
+        const shouldContinue = emitLifecycle(
+            context.sourceElement,
+            "heimdall:request-before",
+            context,
+            { cancelable: true }
+        );
 
-        let res;
+        if (!shouldContinue) {
+            coordinator.cancel(context, "event-cancelled");
+            return coordinator.getCancellationResult(context);
+        }
+
+        if (!coordinator.isCurrent(context))
+            return coordinator.getCancellationResult(context);
+
+        const attemptStarted = performance.now();
+        emit("heimdall:before", {
+            actionId: context.actionId,
+            payload: context.payload,
+            target: context.target,
+            swap: context.swap,
+            endpoint: context.request.url
+        });
+
+        dbg("invoke ->", context.actionId, {
+            endpoint: context.request.url,
+            swap: context.swap,
+            target: context.target,
+            requestId: context.requestId,
+            attempt: context.attempt
+        });
+
+        let response;
         try {
-            res = await global.fetch(url.toString(), {
+            response = await global.fetch(context.request.url, {
                 method: "POST",
-                headers,
-                body,
-                credentials: "same-origin"
+                headers: context.request.headers,
+                body: context.request.body,
+                credentials: context.request.credentials,
+                signal: context.request.signal || undefined
             });
-        } catch (networkErr) {
+        } catch (networkError) {
+            if (context.cancelled || (networkError && networkError.name === "AbortError" && context.signal && context.signal.aborted))
+                return coordinator.getCancellationResult(context);
+
             const result = {
                 ok: false,
                 status: 0,
-                error: networkErr.message,
+                error: networkError.message,
                 response: null,
                 html: null,
-                ms: performance.now() - started
+                ms: performance.now() - attemptStarted,
+                requestId: context.requestId
             };
-            emit("heimdall:error", { actionId, payload, target: targetEl, swap, error: networkErr });
+            emit("heimdall:error", {
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                error: networkError
+            });
             return result;
         }
 
-        // FIX: buffer the response body once so we can both inspect it for CSRF
-        // errors AND use it in the error path, without double-consuming the stream.
-        const rawHtml = await safeText(res);
-        const ms = performance.now() - started;
+        const rawHtml = await safeText(response);
+        const ms = performance.now() - attemptStarted;
+        context.response = response;
+        context.rawHtml = rawHtml;
 
-        if (res.status === 400 && shouldRetry) {
+        if (!coordinator.isCurrent(context))
+            return coordinator.getCancellationResult(context);
+
+        if (response.status === 400 && shouldRetry) {
             const lower = rawHtml.toLowerCase();
             if (lower.includes("csrf") || lower.includes("antiforgery")) {
                 dbg("csrf validation suspected; retrying once with fresh token");
                 clearCsrfToken();
-                return _invokeWithRetry(actionId, payload, options, false);
+                return executeRequestAttempt(context, options, false);
             }
         }
 
-        const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+        const authRedirectUrl = getAuthRedirectUrlFromResponse(response);
         if (authRedirectUrl) {
             const redirectUrl = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
 
             emit("heimdall:redirect", {
-                actionId,
-                payload,
-                target: targetEl,
-                swap,
-                endpoint: url.toString(),
-                status: res.status,
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                endpoint: context.request.url,
+                status: response.status,
                 url: redirectUrl
             });
 
-            dbg("redirecting", { actionId, url: redirectUrl });
+            dbg("redirecting", { actionId: context.actionId, url: redirectUrl });
             global.location.href = redirectUrl;
 
             return {
-                ok: res.ok,
-                status: res.status,
+                ok: response.ok,
+                status: response.status,
                 html: null,
                 error: null,
-                response: res,
+                response,
                 ms,
                 abortSwap: true,
                 abortReason: "redirect",
-                redirectUrl
+                redirectUrl,
+                requestId: context.requestId
             };
         }
 
@@ -136,15 +328,17 @@ export function createActionInvoker({
         let redirectUrl = null;
         let jsAfter = [];
 
-        if (res.ok) {
-            const oob = dom.processOob(html, options && options.sourceEl ? options.sourceEl : null, {
+        if (response.ok) {
+            const oob = dom.processOob(html, context.sourceElement, {
                 kind: "action",
-                actionId,
-                payload,
-                target: targetEl,
-                swap,
-                endpoint: url.toString(),
-                status: res.status
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                endpoint: context.request.url,
+                status: response.status,
+                sourceEl: context.sourceElement,
+                requestContext: context
             });
             html = oob.html;
             abortSwap = !!oob.abortSwap;
@@ -155,92 +349,131 @@ export function createActionInvoker({
             html = dom.sanitizeHtmlStringNoApply(html);
         }
 
-        if (res.ok && redirectUrl) {
+        if (response.ok && redirectUrl) {
             emit("heimdall:redirect", {
-                actionId,
-                payload,
-                target: targetEl,
-                swap,
-                endpoint: url.toString(),
-                status: res.status,
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                endpoint: context.request.url,
+                status: response.status,
                 url: redirectUrl
             });
 
-            dbg("redirecting", { actionId, url: redirectUrl });
+            dbg("redirecting", { actionId: context.actionId, url: redirectUrl });
             global.location.href = redirectUrl;
 
             return {
                 ok: true,
-                status: res.status,
+                status: response.status,
                 html: null,
                 error: null,
-                response: res,
+                response,
                 ms,
                 abortSwap: true,
                 abortReason: "redirect",
-                redirectUrl
+                redirectUrl,
+                requestId: context.requestId
             };
         }
 
-        if (res.ok && abortSwap) {
-            emit("heimdall:abort", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, reason: abortReason });
-            dbg("swap aborted", { actionId, reason: abortReason, target: targetEl });
+        if (response.ok && abortSwap) {
+            emit("heimdall:abort", {
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                endpoint: context.request.url,
+                status: response.status,
+                reason: abortReason
+            });
+            dbg("swap aborted", { actionId: context.actionId, reason: abortReason, target: context.target });
         }
 
-        if (res.ok && targetEl && !abortSwap) {
-            const mainTpl = dom.parseHtmlToTemplate(html);
-            dom.stripInvocationsFromFragment(mainTpl.content);
-            dom.stripAbortsFromFragment(mainTpl.content);
-            dom.stripRedirectsFromFragment(mainTpl.content);
-            dom.stripJsInvokeVoidFromFragment(mainTpl.content);
+        if (response.ok && context.target && !abortSwap) {
+            const mainTemplate = dom.parseHtmlToTemplate(html);
+            dom.stripInvocationsFromFragment(mainTemplate.content);
+            dom.stripAbortsFromFragment(mainTemplate.content);
+            dom.stripRedirectsFromFragment(mainTemplate.content);
+            dom.stripJsInvokeVoidFromFragment(mainTemplate.content);
 
-            const { didApply, appliedRoot } = dom.applySwap(targetEl, mainTpl.content, swap);
+            const swapResult = dom.applySwap(
+                context.target,
+                mainTemplate.content,
+                context.swap,
+                {
+                    kind: "action",
+                    swapKind: "main",
+                    sourceEl: context.sourceElement,
+                    requestContext: context
+                }
+            );
+            const { didApply, appliedRoot } = swapResult;
 
             if (didApply && !getConfig().observeDom) {
                 try {
-                    boot(appliedRoot || targetEl);
+                    boot(appliedRoot || swapResult.target || context.target);
+                } catch {
+                    // ignore
                 }
-                catch { /* ignore */ }
             }
         }
 
-        if (res.ok) {
+        if (response.ok) {
             dom.invokeJsInvokeVoidDirectives(jsAfter, {
                 phase: "after",
                 kind: "action",
-                actionId,
-                payload,
-                target: targetEl,
-                swap,
-                endpoint: url.toString(),
-                status: res.status
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                endpoint: context.request.url,
+                status: response.status
             });
         }
 
         const result = {
-            ok: res.ok,
-            status: res.status,
-            html: res.ok ? html : null,
-            error: res.ok ? null : html,
-            response: res,
+            ok: response.ok,
+            status: response.status,
+            html: response.ok ? html : null,
+            error: response.ok ? null : html,
+            response,
             ms,
             abortSwap,
             abortReason,
-            redirectUrl
+            redirectUrl,
+            requestId: context.requestId
         };
 
-        if (!res.ok) {
-            emit("heimdall:error", { actionId, payload, target: targetEl, swap, status: res.status, body: html });
+        if (!response.ok) {
+            emit("heimdall:error", {
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                status: response.status,
+                body: html
+            });
         } else {
-            emit("heimdall:after", { actionId, payload, target: targetEl, swap, endpoint: url.toString(), status: res.status, ms, html, redirectUrl });
+            emit("heimdall:after", {
+                actionId: context.actionId,
+                payload: context.payload,
+                target: context.target,
+                swap: context.swap,
+                endpoint: context.request.url,
+                status: response.status,
+                ms,
+                html,
+                redirectUrl
+            });
         }
 
-        if (typeof options.onSuccess === "function" && res.ok)
+        if (typeof options.onSuccess === "function" && response.ok)
             options.onSuccess(result);
-        if (typeof options.onError === "function" && !res.ok)
+        if (typeof options.onError === "function" && !response.ok)
             options.onError(result);
 
-        dbg("invoke <-", actionId, result);
+        dbg("invoke <-", context.actionId, result);
         return result;
     }
 
@@ -261,6 +494,8 @@ export function createActionInvoker({
     function getCommonOptions(el, triggerName) {
         const target = getAttr(el, "heimdall-content-target") || el;
         const swap = getAttr(el, "heimdall-content-swap") || "inner";
+        const sync = getAttr(el, "heimdall-sync");
+        const syncGroup = getAttr(el, "heimdall-sync-group");
 
         let payload = payloadFromElement(el);
         if ((payload == null) && triggerName === "submit") {
@@ -273,7 +508,7 @@ export function createActionInvoker({
             }
         }
 
-        return { target, swap, payload };
+        return { target, swap, payload, sync, syncGroup };
     }
 
     async function runActionFromElement(el, actionId, triggerName, extraOptions) {
@@ -282,31 +517,26 @@ export function createActionInvoker({
         if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
             return;
 
-        const { target, swap, payload } = getCommonOptions(el, triggerName);
+        const { target, swap, payload, sync, syncGroup } = getCommonOptions(el, triggerName);
 
         const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
         const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
+        const opts = Object.assign({
+            target,
+            swap,
+            sync,
+            syncGroup,
+            fallbackTarget: el,
+            sourceEl: el,
+            triggerName,
+            disableElement: shouldDisable ? el : null
+        }, extraOptions || {});
 
-        let wasDisabled = false;
-        if (shouldDisable) {
-            wasDisabled = el.hasAttribute("disabled");
-            el.setAttribute("disabled", "disabled");
-            el.setAttribute("aria-busy", "true");
-        }
-
-        const opts = Object.assign({ target, swap, fallbackTarget: el, sourceEl: el }, extraOptions || {});
         try {
             await invoke(actionId, payload, opts);
-        }
-        catch (err) {
+        } catch (err) {
             // eslint-disable-next-line no-console
             console.error(err);
-        } finally {
-            if (shouldDisable) {
-                el.removeAttribute("aria-busy");
-                if (!wasDisabled)
-                    el.removeAttribute("disabled");
-            }
         }
     }
 

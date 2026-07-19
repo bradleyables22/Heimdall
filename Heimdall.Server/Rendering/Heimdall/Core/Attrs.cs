@@ -80,6 +80,14 @@ namespace Heimdall.Server.Rendering
 			/// </summary>
 			public const string Scope = "heimdall-scope";
 			/// <summary>
+			/// Sync controls how an action request coordinates with an active request in the same synchronization scope.
+			/// </summary>
+			public const string Sync = "heimdall-sync";
+			/// <summary>
+			/// SyncGroup assigns action requests from separate elements to the same named synchronization scope.
+			/// </summary>
+			public const string SyncGroup = "heimdall-sync-group";
+			/// <summary>
 			/// Payload is used to specify the payload data for the content update. It allows you to define additional data that should be sent along with the content update request, which can be useful for providing context or parameters for the server-side processing of the update. This is particularly useful for scenarios where you want to pass specific information to the server when triggering a content update. While Load can be used for any event, Payload is specifically designed for defining additional data to be sent with content updates, making it more effective for scenarios that require passing custom data during content updates.
 			/// </summary>
 			public const string Payload = "heimdall-payload";

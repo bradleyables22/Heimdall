@@ -202,6 +202,24 @@ namespace Heimdall.Server.Rendering
 		public static HtmlAttr Action(string value) => Attr("action", value);
 
 		/// <summary>
+		/// Creates a native HTML <c>command</c> attribute from a raw value.
+		/// </summary>
+		/// <remarks>
+		/// Raw values support custom commands beginning with <c>--</c> and future platform values.
+		/// </remarks>
+		public static HtmlAttr Command(string value) => Attr("command", value);
+
+		/// <summary>
+		/// Creates a native HTML <c>command</c> attribute from a known built-in command.
+		/// </summary>
+		public static HtmlAttr Command(CommandType command) => Attr("command", ToCommandTypeString(command));
+
+		/// <summary>
+		/// Creates a native HTML <c>commandfor</c> attribute that references an element by ID.
+		/// </summary>
+		public static HtmlAttr CommandFor(string elementId) => Attr("commandfor", elementId);
+
+		/// <summary>
 		/// Creates a <c>method</c> attribute.
 		/// </summary>
 		public static HtmlAttr Method(string value) => Attr("method", value);

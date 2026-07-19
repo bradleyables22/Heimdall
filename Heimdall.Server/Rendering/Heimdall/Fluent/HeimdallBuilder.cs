@@ -246,6 +246,53 @@ namespace Heimdall.Server.Rendering
 			public HeimdallBuilder ScopeSelf() => Scope(HeimdallHtml.EventScope.Self);
 
 			/// <summary>
+			/// Sets the request synchronization strategy for this element.
+			/// </summary>
+			/// <param name="strategy">The synchronization strategy to apply.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder Sync(HeimdallHtml.RequestSync strategy)
+			{
+				_b.Add(HeimdallHtml.Sync(strategy));
+				return this;
+			}
+
+			/// <summary>
+			/// Sets the request synchronization strategy and named synchronization group for this element.
+			/// </summary>
+			/// <param name="strategy">The synchronization strategy to apply.</param>
+			/// <param name="group">The named synchronization group.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder Sync(HeimdallHtml.RequestSync strategy, string group)
+			{
+				_b.Add(HeimdallHtml.Sync(strategy), HeimdallHtml.SyncGroup(group));
+				return this;
+			}
+
+			/// <summary>
+			/// Runs requests independently, optionally within a named synchronization group.
+			/// </summary>
+			public HeimdallBuilder SyncParallel(string? group = null)
+				=> group is null ? Sync(HeimdallHtml.RequestSync.Parallel) : Sync(HeimdallHtml.RequestSync.Parallel, group);
+
+			/// <summary>
+			/// Cancels the active request before starting the newest request.
+			/// </summary>
+			public HeimdallBuilder SyncReplace(string? group = null)
+				=> group is null ? Sync(HeimdallHtml.RequestSync.Replace) : Sync(HeimdallHtml.RequestSync.Replace, group);
+
+			/// <summary>
+			/// Ignores a new request while another request is active.
+			/// </summary>
+			public HeimdallBuilder SyncDrop(string? group = null)
+				=> group is null ? Sync(HeimdallHtml.RequestSync.Drop) : Sync(HeimdallHtml.RequestSync.Drop, group);
+
+			/// <summary>
+			/// Keeps only the latest pending request while another request is active.
+			/// </summary>
+			public HeimdallBuilder SyncQueueLatest(string? group = null)
+				=> group is null ? Sync(HeimdallHtml.RequestSync.QueueLatest) : Sync(HeimdallHtml.RequestSync.QueueLatest, group);
+
+			/// <summary>
 			/// Sets the swap mode to inner.
 			/// </summary>
 			/// <returns>The current builder instance.</returns>

@@ -6,11 +6,7 @@ namespace Heimdall.Server.Helpers
     internal static class HeimdallHelpers
     {
 		internal static string RenderHtml(this IHtmlContent content, HtmlEncoder? encoder = null)
-		{
-			using var sw = new StringWriter();
-			content.WriteTo(sw, encoder ?? HtmlEncoder.Default);
-			return sw.ToString();
-		}
+			=> Rendering.HtmlContentExtensions.ToHtmlString(content, encoder);
 		internal static string NormalizeWebRootPath(string path)
         {
             var p = path.Replace('\\', '/').TrimStart('/');

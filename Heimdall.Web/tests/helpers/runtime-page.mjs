@@ -36,6 +36,35 @@ export async function installFakeServer(page, options = {}) {
 
     window.__heimdallFetches = [];
 
+    function waitForResponseDelay(delayMs, signal, ignoreAbort) {
+      const ms = Number(delayMs || 0);
+      if (ms <= 0)
+        return Promise.resolve();
+
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => {
+          settled = true;
+          resolve();
+        }, ms);
+
+        if (!ignoreAbort && signal && typeof signal.addEventListener === "function") {
+          const abort = () => {
+            if (settled)
+              return;
+            settled = true;
+            clearTimeout(timer);
+            reject(new DOMException("The operation was aborted.", "AbortError"));
+          };
+
+          if (signal.aborted)
+            abort();
+          else
+            signal.addEventListener("abort", abort, { once: true });
+        }
+      });
+    }
+
     window.fetch = async (input, init = {}) => {
       const url = typeof input === "string" ? input : input.url;
       const requestHeaders = Object.fromEntries(new Headers(init.headers || {}).entries());
@@ -50,13 +79,21 @@ export async function installFakeServer(page, options = {}) {
         }
       }
 
-      window.__heimdallFetches.push({
+      const fetchRecord = {
         url,
         method: init.method || "GET",
         headers: requestHeaders,
         bodyText,
-        jsonBody
-      });
+        jsonBody,
+        aborted: false
+      };
+      window.__heimdallFetches.push(fetchRecord);
+
+      if (init.signal && typeof init.signal.addEventListener === "function") {
+        init.signal.addEventListener("abort", () => {
+          fetchRecord.aborted = true;
+        }, { once: true });
+      }
 
       if (url.includes("/__heimdall/v1/csrf")) {
         const token = csrfTokens.length > 1 ? csrfTokens.shift() : csrfTokens[0];
@@ -124,7 +161,7 @@ export async function installFakeServer(page, options = {}) {
         : { status: 200, body: "" };
 
       if (response.delayMs && Number(response.delayMs) > 0) {
-        await new Promise(resolve => setTimeout(resolve, Number(response.delayMs)));
+        await waitForResponseDelay(response.delayMs, init.signal, response.ignoreAbort);
       }
 
       const responseHeaders = {
