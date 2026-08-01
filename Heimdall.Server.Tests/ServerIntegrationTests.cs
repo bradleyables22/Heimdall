@@ -586,6 +586,19 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task ContentAction_ActionIdLookup_IsCaseInsensitive()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "TESTS.PREFIX.STATIC.REFRESH");
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("prefixed static", html);
+    }
+
+    [Fact]
     public async Task ContentAction_InvocationPrefix_NormalizesPrefixAndInvocationSegments()
     {
         await using var app = await CreateAppAsync();

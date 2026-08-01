@@ -11,7 +11,7 @@ namespace Heimdall.Server
 {
     internal sealed class ContentRegistry
     {
-        private readonly Dictionary<string, ContentActionDescriptor> _contentActions = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, ContentActionDescriptor> _contentActions = new(StringComparer.OrdinalIgnoreCase);
 
         internal void AddFromAssembly(Assembly assembly, IServiceProvider services)
         {
