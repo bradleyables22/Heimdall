@@ -93,10 +93,8 @@ namespace Heimdall.Server
 
 				// Subscribe to topic
 				var (id, reader, unsubscribe) = bifrost.Subscribe(topic);
-				abort.Register(unsubscribe);
-
-				// Optional initial event (helps with debugging / client readiness)
-				await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
+				using var abortRegistration = abort.Register(unsubscribe);
+				using var connectionTelemetry = HeimdallTelemetry.OpenBifrostConnection();
 
 				var heartbeatInterval = options.Value.BifrostHeartbeatInterval;
 				if (heartbeatInterval <= TimeSpan.Zero)
@@ -104,6 +102,9 @@ namespace Heimdall.Server
 
 				try
 				{
+					// Optional initial event (helps with debugging / client readiness)
+					await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
+
 					while (!abort.IsCancellationRequested)
 					{
 						// Wait for messages, but wake on idle so proxies don't close quiet streams.
@@ -125,7 +126,10 @@ namespace Heimdall.Server
 						{
 							// Drop expired messages
 							if (msg.ExpiresUtc <= DateTimeOffset.UtcNow)
+							{
+								HeimdallTelemetry.RecordBifrostExpired(msg.EventName);
 								continue;
+							}
 
 							await WriteEventAsync(
 								ctx,
@@ -140,6 +144,12 @@ namespace Heimdall.Server
 				catch (OperationCanceledException)
 				{
 					// Expected on disconnect
+					connectionTelemetry.Complete("cancelled");
+				}
+				catch (Exception ex)
+				{
+					connectionTelemetry.RecordException(ex);
+					throw;
 				}
 				finally
 				{

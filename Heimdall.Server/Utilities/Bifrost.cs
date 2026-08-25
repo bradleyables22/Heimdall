@@ -73,6 +73,7 @@ namespace Heimdall.Server
                 throw new ArgumentException("Topic is required.", nameof(topic));
 
             eventName = NormalizeEventName(eventName);
+            using var activity = HeimdallTelemetry.StartBifrostPublish(eventName);
 
             if (content is null)
                 throw new ArgumentNullException(nameof(content));
@@ -92,10 +93,19 @@ namespace Heimdall.Server
                 ExpiresUtc: now.Add(ttl)
             );
 
+            HeimdallTelemetry.RecordBifrostPublished(eventName);
+
             if (!_subsByTopic.TryGetValue(topic, out var bucket) || bucket.IsEmpty)
+            {
+                HeimdallTelemetry.RecordBifrostDropped(eventName, "no_subscribers");
+                activity?.SetTag(HeimdallDiagnostics.OutcomeTagName, "no_subscribers");
+                activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Ok);
                 return ValueTask.CompletedTask;
+            }
 
             bucket.Publish(msg);
+            activity?.SetTag(HeimdallDiagnostics.OutcomeTagName, "published");
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Ok);
 
             return ValueTask.CompletedTask;
         }

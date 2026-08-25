@@ -23,6 +23,7 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_Redirect = "e2e.redirect";
 		public const string Action_Js = "e2e.js";
 		public const string Action_Form = "e2e.form";
+		public const string Action_Upload = "e2e.upload";
 		public const string Action_Sse = "e2e.sse";
 		public const string Action_SseOob = "e2e.sse.oob";
 		public const string Action_SseJs = "e2e.sse.js";
@@ -106,6 +107,11 @@ window.HeimdallE2E = {
 			public string Name { get; set; } = string.Empty;
 		}
 
+		public sealed class UploadRequest
+		{
+			public string Caption { get; set; } = string.Empty;
+		}
+
 		public sealed class MessagePayload
 		{
 			public string Message { get; set; } = string.Empty;
@@ -147,6 +153,7 @@ window.HeimdallE2E = {
 					RenderLifecycleSection(),
 					RenderJsSection(),
 					RenderFormSection(),
+					RenderUploadSection(),
 					RenderSseSection(),
 					RenderAuthSection(),
 					RenderErrorSection(),
@@ -374,6 +381,21 @@ window.HeimdallE2E = {
 			return string.IsNullOrWhiteSpace(name)
 				? Status("e2e-form-error", "Name is required.")
 				: Status("e2e-form-success", $"Hello, {name}.");
+		}
+
+		[ContentInvocation(Action_Upload)]
+		[RequestTimeout(3000)]
+		public static async Task<IHtmlContent> Upload(
+			[ContentPayload] UploadRequest request,
+			IFormFile attachment,
+			CancellationToken cancellationToken)
+		{
+			using var reader = new StreamReader(attachment.OpenReadStream());
+			var contents = await reader.ReadToEndAsync(cancellationToken);
+
+			return Status(
+				"e2e-upload-success",
+				$"Uploaded: {Normalize(request?.Caption)}|{attachment.FileName}|{attachment.Length}|{contents}");
 		}
 
 		[ContentInvocation(Action_Sse)]
@@ -808,6 +830,36 @@ window.HeimdallE2E = {
 					});
 				})
 				.Div(target => target.Id("e2e-form-result").Text("Form target original"));
+			});
+
+		private static IHtmlContent RenderUploadSection()
+			=> Section("e2e-upload-section", "File Upload", body =>
+			{
+				body.Form(form =>
+				{
+					form.Id("e2e-upload-form")
+						.MultipartFormData();
+					form.Heimdall()
+						.Submit(Action_Upload)
+						.PayloadFromClosestForm()
+						.Target("#e2e-upload-result")
+						.SwapInner()
+						.PreventDefault(true);
+
+					form.Input(Html.InputType.text, input => input
+						.Id("e2e-upload-caption")
+						.Name(nameof(UploadRequest.Caption)))
+					.Input(Html.InputType.file, input => input
+						.Id("e2e-upload-file")
+						.Name("attachment")
+						.Accept("text/plain")
+						.Required())
+					.Button(button => button
+						.Id("e2e-upload-submit")
+						.Type("submit")
+						.Text("Upload file"));
+				})
+				.Div(target => target.Id("e2e-upload-result").Text("Upload target original"));
 			});
 
 		private static IHtmlContent RenderSseSection()

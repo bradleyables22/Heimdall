@@ -48,6 +48,10 @@ const tests = [
   ["debounces delegated input triggers", testInputDebounce],
   ["cancels delayed hover triggers on mouseout", testHoverDelayCancel],
   ["serializes submit payloads from forms", testSubmitPayload],
+  ["submits file inputs as multipart form data", testFileUploadPayload],
+  ["keeps unselected file inputs on the multipart path", testEmptyFileUploadPayload],
+  ["accepts programmatic FormData payloads", testProgrammaticFormDataPayload],
+  ["preserves files from explicit form payload sources", testFilePayloadSources],
   ["resolves explicit payload sources", testExplicitPayloadSources],
   ["resolves closest state payloads", testClosestStatePayload],
   ["applies all swap modes", testSwapModes],
@@ -1190,6 +1194,161 @@ async function testSubmitPayload(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.deepEqual(actions[0].jsonBody, { title: "Hello", tag: ["a", "b"] });
+}
+
+async function testFileUploadPayload(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="uploaded">Uploaded</span>' }]
+  });
+
+  await page.evaluate(() => {
+    document.body.innerHTML = `
+      <form id="upload-form" heimdall-content-submit="Files.Upload" heimdall-content-target="#target">
+        <input name="title" value="Profile photo">
+        <input id="avatar" type="file" name="avatar">
+        <button type="submit">Upload</button>
+      </form>
+      <div id="target">Old</div>
+    `;
+  });
+  await page.locator("#avatar").setInputFiles({
+    name: "avatar.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("avatar bytes")
+  });
+
+  await page.locator("#upload-form").evaluate(form => form.requestSubmit());
+  await page.waitForSelector("#uploaded");
+
+  const actions = actionFetches(await getFetches(page));
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].headers["content-type"], undefined);
+  assert.equal(actions[0].bodyText, null);
+  assert.equal(actions[0].jsonBody, null);
+  assert.deepEqual(actions[0].formBody, [
+    { name: "title", value: "Profile photo" },
+    {
+      name: "avatar",
+      value: { fileName: "avatar.txt", size: 12, type: "text/plain" }
+    }
+  ]);
+}
+
+async function testProgrammaticFormDataPayload(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="programmatic-uploaded">Uploaded</span>' }]
+  });
+
+  await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="target">Old</div>';
+    const data = new FormData();
+    data.append("title", "Programmatic upload");
+    data.append("attachment", new File(
+      [new TextEncoder().encode("file bytes")],
+      "notes.txt",
+      { type: "text/plain" }
+    ));
+
+    await window.Heimdall.invoke("Files.Programmatic", data, {
+      target: "#target"
+    });
+  });
+  await page.waitForSelector("#programmatic-uploaded");
+
+  const actions = actionFetches(await getFetches(page));
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].headers["content-type"], undefined);
+  assert.deepEqual(actions[0].formBody, [
+    { name: "title", value: "Programmatic upload" },
+    {
+      name: "attachment",
+      value: { fileName: "notes.txt", size: 10, type: "text/plain" }
+    }
+  ]);
+}
+
+async function testEmptyFileUploadPayload(page) {
+  await installFakeServer(page, {
+    actionResponses: [{ body: '<span id="optional-uploaded">Saved</span>' }]
+  });
+
+  await page.evaluate(() => {
+    document.body.innerHTML = `
+      <form id="optional-upload" heimdall-content-submit="Files.Optional" heimdall-content-target="#target">
+        <input name="title" value="No replacement">
+        <input type="file" name="attachment">
+        <button type="submit">Save</button>
+      </form>
+      <div id="target">Old</div>
+    `;
+  });
+
+  await page.locator("#optional-upload").evaluate(form => form.requestSubmit());
+  await page.waitForSelector("#optional-uploaded");
+
+  const actions = actionFetches(await getFetches(page));
+  assert.equal(actions.length, 1);
+  assert.equal(actions[0].headers["content-type"], undefined);
+  assert.equal(actions[0].formBody[0].name, "title");
+  assert.equal(actions[0].formBody[0].value, "No replacement");
+  assert.equal(actions[0].formBody[1].name, "attachment");
+  assert.equal(actions[0].formBody[1].value.fileName, "");
+  assert.equal(actions[0].formBody[1].value.size, 0);
+}
+
+async function testFilePayloadSources(page) {
+  await installFakeServer(page, {
+    actionResponses: [
+      { body: '<span id="selector-uploaded">Selector</span>' },
+      { body: '<span id="closest-uploaded">Closest</span>' }
+    ]
+  });
+
+  await page.evaluate(() => {
+    document.body.innerHTML = `
+      <form id="upload-source">
+        <input name="title" value="Source upload">
+        <input id="source-file" type="file" name="attachment">
+        <button id="selector-upload"
+                type="button"
+                heimdall-content-click="Files.Selector"
+                heimdall-payload-from="#upload-source"
+                heimdall-content-target="#target">Selector</button>
+        <button id="closest-upload"
+                type="button"
+                heimdall-content-click="Files.Closest"
+                heimdall-payload-from="closest-form"
+                heimdall-content-target="#target">Closest</button>
+      </form>
+      <div id="target">Old</div>
+    `;
+  });
+  await page.locator("#source-file").setInputFiles({
+    name: "source.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("source bytes")
+  });
+
+  await page.click("#selector-upload");
+  await page.waitForSelector("#selector-uploaded");
+  await page.click("#closest-upload");
+  await page.waitForSelector("#closest-uploaded");
+
+  const actions = actionFetches(await getFetches(page));
+  assert.deepEqual(
+    actions.map(action => action.headers["x-heimdall-content-action"]),
+    ["Files.Selector", "Files.Closest"]
+  );
+  for (const action of actions) {
+    assert.equal(action.headers["content-type"], undefined);
+    assert.deepEqual(action.formBody, [
+      { name: "title", value: "Source upload" },
+      {
+        name: "attachment",
+        value: { fileName: "source.txt", size: 12, type: "text/plain" }
+      }
+    ]);
+  }
 }
 
 async function testExplicitPayloadSources(page) {

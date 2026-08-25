@@ -1,5 +1,5 @@
 import {
-    formDataToObject,
+    formDataToPayload,
     getAttr,
     getByPath,
     safeJsonParse
@@ -75,7 +75,7 @@ export function createPayloadResolver(global) {
             const form = el.closest("form");
             if (!form)
                 return null;
-            return formDataToObject(new FormData(form));
+            return formDataToPayload(new FormData(form));
         }
 
         if (from === "self") {
@@ -86,7 +86,7 @@ export function createPayloadResolver(global) {
 
         const form = document.querySelector(fromRaw);
         if (form && form.tagName === "FORM") {
-            return formDataToObject(new FormData(form));
+            return formDataToPayload(new FormData(form));
         }
 
         return null;

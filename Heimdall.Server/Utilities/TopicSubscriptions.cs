@@ -17,14 +17,18 @@ namespace Heimdall.Server
                 SingleReader = true,
                 SingleWriter = false,
                 FullMode = BoundedChannelFullMode.DropOldest
-            });
+            }, dropped => HeimdallTelemetry.RecordBifrostDropped(dropped.EventName, "buffer_overflow"));
 
             _subs[id] = channel;
+            HeimdallTelemetry.SubscriberOpened();
 
             void Unsubscribe()
             {
                 if (_subs.TryRemove(id, out var ch))
+                {
                     ch.Writer.TryComplete();
+                    HeimdallTelemetry.SubscriberClosed();
+                }
 
                 if (_subs.IsEmpty)
                     onEmpty();
@@ -37,7 +41,14 @@ namespace Heimdall.Server
         {
             foreach (var kv in _subs)
             {
-                kv.Value.Writer.TryWrite(message);
+                if (kv.Value.Writer.TryWrite(message))
+                {
+                    HeimdallTelemetry.RecordBifrostDelivered(message.EventName);
+                }
+                else
+                {
+                    HeimdallTelemetry.RecordBifrostDropped(message.EventName, "subscriber_unavailable");
+                }
             }
         }
 

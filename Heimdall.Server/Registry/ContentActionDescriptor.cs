@@ -1,6 +1,7 @@
 ﻿using Heimdall.Server.Registry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.Extensions.DependencyInjection;
 using System.Linq.Expressions;
@@ -30,6 +31,10 @@ namespace Heimdall.Server
 
         public bool AllowAnonymous { get; }
 
+        public IRequestSizeLimitMetadata? RequestSizeLimit { get; }
+
+        public IFormOptionsMetadata? FormOptions { get; }
+
         public bool RequiresAuthorization => AuthorizeData.Count > 0 && !AllowAnonymous;
 
         public bool HasPayload => PayloadParameter is not null;
@@ -46,7 +51,9 @@ namespace Heimdall.Server
             RequestTimeoutAttribute? requestTimeout,
             bool disableRequestTimeout,
             IReadOnlyList<IAuthorizeData> authorizeData,
-            bool allowAnonymous)
+            bool allowAnonymous,
+            IRequestSizeLimitMetadata? requestSizeLimit,
+            IFormOptionsMetadata? formOptions)
         {
             ActionId = actionId;
             Method = method;
@@ -56,7 +63,10 @@ namespace Heimdall.Server
             DisableRequestTimeout = disableRequestTimeout;
             AuthorizeData = authorizeData;
             AllowAnonymous = allowAnonymous;
-            PayloadParameter = parameters.FirstOrDefault(x => x.Kind == ContentActionParameterKind.Payload);
+            RequestSizeLimit = requestSizeLimit;
+            FormOptions = formOptions;
+            PayloadParameter = parameters.FirstOrDefault(x =>
+                x.Kind is ContentActionParameterKind.Payload or ContentActionParameterKind.FormPayload);
             _invoker = CompileInvoker(method);
             if (!method.IsStatic)
             {

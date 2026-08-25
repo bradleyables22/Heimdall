@@ -1,5 +1,5 @@
 import {
-    formDataToObject,
+    formDataToPayload,
     getAttr,
     resolveTarget,
     safeText,
@@ -176,30 +176,37 @@ export function createActionInvoker({
         if (!coordinator.isCurrent(context))
             return coordinator.getCancellationResult(context);
 
+        const isFormData = typeof global.FormData === "function" &&
+            context.payload instanceof global.FormData;
         const headers = {
-            "Content-Type": "application/json",
             [actionHeader]: context.actionId,
             [csrfHeader]: token
         };
 
+        if (!isFormData)
+            headers["Content-Type"] = "application/json";
+
         for (const key in context.headers)
             headers[key] = context.headers[key];
 
-        let body = "{}";
-        try {
-            body = context.payload == null ? "{}" : JSON.stringify(context.payload);
-        } catch (e) {
-            const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
-            err.cause = e;
-            emit("heimdall:error", {
-                actionId: context.actionId,
-                payload: context.payload,
-                target: context.target,
-                swap: context.swap,
-                status: 0,
-                error: err
-            });
-            throw err;
+        let body = context.payload;
+        if (!isFormData) {
+            body = "{}";
+            try {
+                body = context.payload == null ? "{}" : JSON.stringify(context.payload);
+            } catch (e) {
+                const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
+                err.cause = e;
+                emit("heimdall:error", {
+                    actionId: context.actionId,
+                    payload: context.payload,
+                    target: context.target,
+                    swap: context.swap,
+                    status: 0,
+                    error: err
+                });
+                throw err;
+            }
         }
 
         context.request = {
@@ -500,11 +507,11 @@ export function createActionInvoker({
         let payload = payloadFromElement(el);
         if ((payload == null) && triggerName === "submit") {
             if (el && el.tagName === "FORM") {
-                payload = formDataToObject(new FormData(el));
+                payload = formDataToPayload(new FormData(el));
             } else {
                 const form = el.closest && el.closest("form");
                 if (form)
-                    payload = formDataToObject(new FormData(form));
+                    payload = formDataToPayload(new FormData(form));
             }
         }
 

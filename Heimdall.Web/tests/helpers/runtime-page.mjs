@@ -68,7 +68,16 @@ export async function installFakeServer(page, options = {}) {
     window.fetch = async (input, init = {}) => {
       const url = typeof input === "string" ? input : input.url;
       const requestHeaders = Object.fromEntries(new Headers(init.headers || {}).entries());
-      const bodyText = init.body == null ? null : String(init.body);
+      const isFormData = init.body instanceof FormData;
+      const bodyText = init.body == null || isFormData ? null : String(init.body);
+      const formBody = isFormData
+        ? Array.from(init.body.entries(), ([name, value]) => ({
+            name,
+            value: value instanceof File
+              ? { fileName: value.name, size: value.size, type: value.type }
+              : value
+          }))
+        : null;
 
       let jsonBody = null;
       if (bodyText) {
@@ -85,6 +94,7 @@ export async function installFakeServer(page, options = {}) {
         headers: requestHeaders,
         bodyText,
         jsonBody,
+        formBody,
         aborted: false
       };
       window.__heimdallFetches.push(fetchRecord);

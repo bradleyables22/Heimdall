@@ -5,6 +5,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
@@ -12,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -56,15 +59,47 @@ namespace Heimdall.Server
                 [FromServices] ContentRegistry registry,
                 [FromServices] IOptions<HeimdallServiceSettings> options) =>
             {
+                using var telemetry = HeimdallTelemetry.StartContentAction(ctx);
                 var settings = options.Value;
+
+                var hasActionHeader = ctx.Request.Headers.TryGetValue(ActionHeader, out var actionValues) &&
+                    !string.IsNullOrWhiteSpace(actionValues);
+                var actionId = hasActionHeader ? actionValues.ToString() : string.Empty;
+                ContentActionDescriptor? action = null;
+
+                if (hasActionHeader && registry.TryGet(actionId, out var resolvedAction))
+                {
+                    action = resolvedAction;
+                    telemetry.SetActionId(action.ActionId);
+
+                    var requestLimitResult = ApplyRequestLimits(ctx, action, settings);
+                    if (requestLimitResult is not null)
+                    {
+                        telemetry.Complete(StatusCodes.Status413PayloadTooLarge);
+                        return requestLimitResult;
+                    }
+                }
 
                 var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
                 try
                 {
                     await antiforgery.ValidateRequestAsync(ctx);
                 }
+                catch (Exception ex) when (IsRequestTooLargeException(ex))
+                {
+                    telemetry.RecordException(ex, StatusCodes.Status413PayloadTooLarge);
+                    logger?.LogWarning(
+                        ex,
+                        "Heimdall content action request body exceeded an ASP.NET Core request or form limit for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
+                    return CreateRequestTooLargeResult(settings, ex);
+                }
                 catch (AntiforgeryValidationException ex)
                 {
+                    telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
                     logger?.LogWarning(
                         ex,
                         "Heimdall content action request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
@@ -83,32 +118,72 @@ namespace Heimdall.Server
                     return Results.BadRequest("Invalid Heimdall antiforgery token.");
                 }
 
-                if (!ctx.Request.Headers.TryGetValue(ActionHeader, out var values) ||
-                    string.IsNullOrWhiteSpace(values))
+                if (!hasActionHeader)
                 {
+                    telemetry.SetActionId("missing");
+                    telemetry.Complete(StatusCodes.Status400BadRequest);
                     return Results.BadRequest($"Missing {ActionHeader} header.");
                 }
 
-                var actionId = values.ToString();
-
-                if (!registry.TryGet(actionId, out var action))
+                if (action is null)
+                {
+                    telemetry.SetActionId("unknown");
+                    telemetry.Complete(StatusCodes.Status404NotFound);
                     return Results.NotFound($"Unknown action '{actionId}'.");
+                }
 
-                var authorizationResult = await AuthorizeActionAsync(ctx, action);
+                telemetry.SetActionId(action.ActionId);
+
+                IResult? authorizationResult;
+                try
+                {
+                    authorizationResult = await AuthorizeActionAsync(ctx, action);
+                }
+                catch (Exception ex)
+                {
+                    telemetry.RecordException(ex, StatusCodes.Status500InternalServerError);
+                    throw;
+                }
+
                 if (authorizationResult is not null)
+                {
+                    var authorizationStatusCode = ctx.Response.StatusCode;
+                    telemetry.Complete(
+                        authorizationStatusCode,
+                        outcome: authorizationStatusCode is >= 300 and < 400 ? "redirect" : null);
                     return authorizationResult;
+                }
 
-                var timeoutScope = CreateRequestTimeoutScope(ctx, action);
+                ContentActionTimeoutScope timeoutScope;
+                try
+                {
+                    timeoutScope = CreateRequestTimeoutScope(ctx, action);
+                }
+                catch (Exception ex)
+                {
+                    telemetry.RecordException(ex, StatusCodes.Status500InternalServerError);
+                    throw;
+                }
 
                 try
                 {
-                    var args = await BindArgumentsAsync(ctx, action);
+                    var args = await BindArgumentsAsync(ctx, action, telemetry);
                     var raw = await action.InvokeAsync(ctx.RequestServices, args);
 
                     if (raw is null)
+                    {
+                        telemetry.Complete(StatusCodes.Status204NoContent, responseBodySize: 0);
                         return Results.NoContent();
+                    }
 
-                    return Results.Content(raw.RenderHtml(), "text/html; charset=utf-8");
+                    var html = raw.RenderHtml();
+                    long? responseBodySize = telemetry.ShouldMeasureResponseBodySize
+                        ? Encoding.UTF8.GetByteCount(html)
+                        : null;
+                    telemetry.Complete(
+                        StatusCodes.Status200OK,
+                        responseBodySize);
+                    return Results.Content(html, "text/html; charset=utf-8");
                 }
                 catch (OperationCanceledException) when (timeoutScope.TimedOut)
                 {
@@ -121,10 +196,41 @@ namespace Heimdall.Server
                         statusCode,
                         ctx.TraceIdentifier);
 
-                    return await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
+                    var result = await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
+                    telemetry.RecordCancellation("timeout", statusCode);
+                    return result;
+                }
+                catch (ContentActionBindingException ex)
+                {
+                    telemetry.RecordException(ex, ex.StatusCode);
+                    logger?.LogWarning(
+                        ex,
+                        "Invalid request body for Heimdall action {ActionId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        actionId,
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
+                    var title = ex.StatusCode == StatusCodes.Status413PayloadTooLarge
+                        ? "Heimdall action request body is too large"
+                        : "Invalid Heimdall action request body";
+
+                    if (settings.EnableDetailedErrors)
+                    {
+                        return Results.Problem(
+                            detail: ex.ToString(),
+                            title: title,
+                            statusCode: ex.StatusCode);
+                    }
+
+                    return Results.Problem(
+                        title: title,
+                        detail: ex.Message,
+                        statusCode: ex.StatusCode);
                 }
                 catch (JsonException ex)
                 {
+                    telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
                     logger?.LogWarning(
                         ex,
                         "Invalid JSON body for Heimdall action {ActionId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
@@ -146,6 +252,22 @@ namespace Heimdall.Server
                 catch (Exception ex)
                 {
                     var loggedException = UnwrapInvocationException(ex);
+                    if (loggedException is OperationCanceledException)
+                    {
+                        var cancellationReason = ctx.RequestAborted.IsCancellationRequested
+                            ? "request_aborted"
+                            : "operation_cancelled";
+                        telemetry.RecordCancellation(
+                            cancellationReason,
+                            StatusCodes.Status500InternalServerError);
+                    }
+                    else
+                    {
+                        telemetry.RecordException(
+                            loggedException,
+                            StatusCodes.Status500InternalServerError);
+                    }
+
                     logger?.LogError(
                         loggedException,
                         "Heimdall action {ActionId} invocation failed for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
@@ -180,14 +302,99 @@ namespace Heimdall.Server
                 ? inner
                 : ex;
 
-        private static async Task<object?[]> BindArgumentsAsync(HttpContext ctx, ContentActionDescriptor action)
+        private static IResult? ApplyRequestLimits(
+            HttpContext context,
+            ContentActionDescriptor action,
+            HeimdallServiceSettings settings)
+        {
+            var requestSizeLimit = action.RequestSizeLimit;
+            if (requestSizeLimit is not null)
+            {
+                var maxRequestBodySize = requestSizeLimit.MaxRequestBodySize;
+                if (maxRequestBodySize is long maximum &&
+                    context.Request.ContentLength is long contentLength &&
+                    contentLength > maximum)
+                {
+                    return CreateRequestTooLargeResult(settings);
+                }
+
+                var feature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
+                if (feature is { IsReadOnly: false })
+                    feature.MaxRequestBodySize = maxRequestBodySize;
+            }
+
+            if (action.FormOptions is not null && context.Request.HasFormContentType)
+            {
+                var formOptions = ResolveFormOptions(context, action.FormOptions);
+                context.Features.Set<IFormFeature>(new FormFeature(context.Request, formOptions));
+            }
+
+            return null;
+        }
+
+        private static FormOptions ResolveFormOptions(
+            HttpContext context,
+            IFormOptionsMetadata metadata)
+        {
+            var defaults = context.RequestServices.GetService<IOptions<FormOptions>>()?.Value
+                ?? new FormOptions();
+
+            return new FormOptions
+            {
+                BufferBody = metadata.BufferBody ?? defaults.BufferBody,
+                MemoryBufferThreshold = metadata.MemoryBufferThreshold ?? defaults.MemoryBufferThreshold,
+                BufferBodyLengthLimit = metadata.BufferBodyLengthLimit ?? defaults.BufferBodyLengthLimit,
+                ValueCountLimit = metadata.ValueCountLimit ?? defaults.ValueCountLimit,
+                KeyLengthLimit = metadata.KeyLengthLimit ?? defaults.KeyLengthLimit,
+                ValueLengthLimit = metadata.ValueLengthLimit ?? defaults.ValueLengthLimit,
+                MultipartBoundaryLengthLimit = metadata.MultipartBoundaryLengthLimit ?? defaults.MultipartBoundaryLengthLimit,
+                MultipartHeadersCountLimit = metadata.MultipartHeadersCountLimit ?? defaults.MultipartHeadersCountLimit,
+                MultipartHeadersLengthLimit = metadata.MultipartHeadersLengthLimit ?? defaults.MultipartHeadersLengthLimit,
+                MultipartBodyLengthLimit = metadata.MultipartBodyLengthLimit ?? defaults.MultipartBodyLengthLimit
+            };
+        }
+
+        private static bool IsRequestTooLargeException(Exception exception)
+        {
+            for (Exception? current = exception; current is not null; current = current.InnerException)
+            {
+                if (current is BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge })
+                    return true;
+
+                if (current is InvalidDataException &&
+                    current.Message.Contains("limit", StringComparison.OrdinalIgnoreCase) &&
+                    current.Message.Contains("exceed", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static IResult CreateRequestTooLargeResult(
+            HeimdallServiceSettings settings,
+            Exception? exception = null)
+            => Results.Problem(
+                detail: settings.EnableDetailedErrors && exception is not null
+                    ? exception.ToString()
+                    : "The request body exceeded the configured ASP.NET Core request or form limits.",
+                title: "Heimdall action request body is too large",
+                statusCode: StatusCodes.Status413PayloadTooLarge);
+
+        private static async Task<object?[]> BindArgumentsAsync(
+            HttpContext ctx,
+            ContentActionDescriptor action,
+            HeimdallTelemetry.ContentActionTelemetryScope telemetry)
         {
             if (action.Parameters.Count == 0)
                 return Array.Empty<object?>();
 
             var args = new object?[action.Parameters.Count];
             JsonElement? bodyJson = null;
+            IFormCollection? requestForm = null;
             bool bodyRead = false;
+            bool formRead = false;
 
             foreach (var parameter in action.Parameters)
             {
@@ -198,6 +405,8 @@ namespace Heimdall.Server
                     ContentActionParameterKind.ClaimsPrincipal => ctx.User,
                     ContentActionParameterKind.Service => ResolveRequiredService(ctx, action, parameter),
                     ContentActionParameterKind.Payload => await BindPayloadParameterAsync(ctx, parameter),
+                    ContentActionParameterKind.FormPayload => await BindFormPayloadParameterAsync(ctx, parameter),
+                    ContentActionParameterKind.FormFile => await BindFormFileParameterAsync(ctx, parameter),
                     _ => throw new InvalidOperationException(
                         $"Unsupported parameter kind '{parameter.Kind}' in action '{action.ActionId}'.")
                 };
@@ -209,6 +418,12 @@ namespace Heimdall.Server
                 HttpContext httpContext,
                 ContentActionParameterDescriptor parameter)
             {
+                if (httpContext.Request.HasFormContentType)
+                {
+                    var form = await ReadFormAsync(httpContext);
+                    return BindFormPayloadValue(form, parameter.Parameter, parameter.BindingName);
+                }
+
                 if (!bodyRead)
                 {
                     bodyRead = true;
@@ -220,9 +435,70 @@ namespace Heimdall.Server
                         httpContext.Request.Body,
                         JsonOptions,
                         httpContext.RequestAborted);
+                    if (telemetry.ShouldMeasureRequestBodySize)
+                    {
+                        telemetry.SetRequestBodySize(
+                            Encoding.UTF8.GetByteCount(bodyJson.Value.GetRawText()));
+                    }
                 }
 
                 return BindPayloadValue(bodyJson!.Value, parameter.Parameter);
+            }
+
+            async Task<object?> BindFormPayloadParameterAsync(
+                HttpContext httpContext,
+                ContentActionParameterDescriptor parameter)
+            {
+                if (!httpContext.Request.HasFormContentType)
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status415UnsupportedMediaType,
+                        $"Form parameter '{parameter.Parameter.Name}' requires a form content type.");
+                }
+
+                var form = await ReadFormAsync(httpContext);
+                return BindFormPayloadValue(form, parameter.Parameter, parameter.BindingName);
+            }
+
+            async Task<object?> BindFormFileParameterAsync(
+                HttpContext httpContext,
+                ContentActionParameterDescriptor parameter)
+            {
+                if (!httpContext.Request.HasFormContentType)
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status415UnsupportedMediaType,
+                        $"File parameter '{parameter.Parameter.Name}' requires a multipart/form-data request.");
+                }
+
+                var form = await ReadFormAsync(httpContext);
+                return BindFormFileValue(form.Files, parameter.Parameter, parameter.BindingName);
+            }
+
+            async Task<IFormCollection> ReadFormAsync(HttpContext httpContext)
+            {
+                if (!formRead)
+                {
+                    formRead = true;
+                    try
+                    {
+                        requestForm = await httpContext.Request.ReadFormAsync(httpContext.RequestAborted);
+                    }
+                    catch (InvalidDataException ex)
+                    {
+                        var statusCode = IsRequestTooLargeException(ex)
+                            ? StatusCodes.Status413PayloadTooLarge
+                            : StatusCodes.Status400BadRequest;
+                        throw new ContentActionBindingException(
+                            statusCode,
+                            statusCode == StatusCodes.Status413PayloadTooLarge
+                                ? "The multipart form body exceeded the configured ASP.NET Core form limits."
+                                : "The multipart form body is invalid.",
+                            ex);
+                    }
+                }
+
+                return requestForm!;
             }
         }
 
@@ -361,6 +637,111 @@ namespace Heimdall.Server
             return GetMissingValue(parameter, targetType);
         }
 
+        private static object? BindFormPayloadValue(
+            IFormCollection form,
+            ParameterInfo parameter,
+            string bindingName)
+        {
+            if (TryBindEmbeddedJsonFormValue(form, parameter, bindingName, out var embeddedValue))
+                return embeddedValue;
+
+            var prefix = $"{bindingName}.";
+            var bracketPrefix = $"{bindingName}[";
+            var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var field in form)
+            {
+                var key = field.Key;
+                if (key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    key = key[prefix.Length..];
+                }
+                else if (key.StartsWith(bracketPrefix, StringComparison.OrdinalIgnoreCase) &&
+                    key.EndsWith(']'))
+                {
+                    key = key[bracketPrefix.Length..^1];
+                }
+
+                values[key] = field.Value.Count switch
+                {
+                    0 => string.Empty,
+                    1 => field.Value[0],
+                    _ => field.Value.ToArray()
+                };
+            }
+
+            var formJson = JsonSerializer.SerializeToElement(values, JsonOptions);
+            return BindPayloadValue(formJson, parameter);
+        }
+
+        private static bool TryBindEmbeddedJsonFormValue(
+            IFormCollection form,
+            ParameterInfo parameter,
+            string bindingName,
+            out object? value)
+        {
+            value = null;
+            if (!form.TryGetValue(bindingName, out var fieldValues) || fieldValues.Count != 1)
+                return false;
+
+            var raw = fieldValues[0];
+            if (string.IsNullOrWhiteSpace(raw))
+                return false;
+
+            try
+            {
+                using var document = JsonDocument.Parse(raw);
+                value = DeserializeRequired(document.RootElement, parameter.ParameterType, parameter);
+                return true;
+            }
+            catch (JsonException)
+            {
+                return false;
+            }
+        }
+
+        private static object? BindFormFileValue(
+            IFormFileCollection files,
+            ParameterInfo parameter,
+            string bindingName)
+        {
+            var matches = files
+                .Where(file =>
+                    string.Equals(file.Name, bindingName, StringComparison.OrdinalIgnoreCase) &&
+                    (file.Length > 0 || !string.IsNullOrEmpty(file.FileName)))
+                .ToArray();
+            var targetType = parameter.ParameterType;
+
+            if (targetType == typeof(IFormFile))
+            {
+                if (matches.Length > 0)
+                    return matches[0];
+
+                if (parameter.HasDefaultValue)
+                    return parameter.DefaultValue;
+
+                if (AllowsNull(parameter))
+                    return null;
+
+                throw new ContentActionBindingException(
+                    StatusCodes.Status400BadRequest,
+                    $"Missing required uploaded file for parameter '{parameter.Name}'.");
+            }
+
+            if (targetType == typeof(IFormFileCollection))
+            {
+                var collection = new FormFileCollection();
+                foreach (var file in matches)
+                    collection.Add(file);
+                return collection;
+            }
+
+            if (targetType.IsArray)
+                return matches;
+
+            return matches.ToList();
+        }
+
         private static object? DeserializeRequired(
             JsonElement json,
             Type targetType,
@@ -399,6 +780,16 @@ namespace Heimdall.Server
                 return true;
 
             return Nullable.GetUnderlyingType(type) is not null;
+        }
+
+        private static bool AllowsNull(ParameterInfo parameter)
+        {
+            if (parameter.ParameterType.IsValueType)
+                return AllowsNull(parameter.ParameterType);
+
+            return new NullabilityInfoContext()
+                .Create(parameter)
+                .ReadState != NullabilityState.NotNull;
         }
 
         private static bool IsSimplePayloadType(Type type)
@@ -521,6 +912,17 @@ namespace Heimdall.Server
                 $"Failed to resolve DI service '{parameter.ParameterType.FullName}' " +
                 $"for Heimdall action '{action.Method.DeclaringType?.FullName}.{action.Method.Name}' " +
                 $"parameter '{parameter.Parameter.Name}'.");
+        }
+
+        private sealed class ContentActionBindingException : Exception
+        {
+            public ContentActionBindingException(int statusCode, string message, Exception? innerException = null)
+                : base(message, innerException)
+            {
+                StatusCode = statusCode;
+            }
+
+            public int StatusCode { get; }
         }
     }
 }

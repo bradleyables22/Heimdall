@@ -79,6 +79,15 @@ export function formDataToObject(fd) {
     return obj;
 }
 
+export function formDataToPayload(fd) {
+    for (const value of fd.values()) {
+        if (typeof Blob !== "undefined" && value instanceof Blob)
+            return fd;
+    }
+
+    return formDataToObject(fd);
+}
+
 export function getByPath(root, path) {
     if (!path)
         return undefined;

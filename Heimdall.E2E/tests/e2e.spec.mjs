@@ -19,6 +19,7 @@ const tests = [
   ["boots dynamically swapped content and applies swap modes", testDynamicBootAndSwapModes],
   ["applies swaps, OOB, abort, and redirect directives", testResponseDirectives],
   ["binds state, forms, payload refs, and programmatic invokes", testPayloadsAndState],
+  ["uploads files through the hosted action pipeline", testHostedFileUpload],
   ["handles delegated input, change, keydown, blur, and hover events", testDelegatedEvents],
   ["honors scope, ignore, prevent-default, and disable modifiers", testEventBehaviorModifiers],
   ["renders and executes native HTML command helpers", testNativeHtmlCommands],
@@ -534,6 +535,29 @@ async function testPayloadsAndState(page, baseUrl) {
   await page.locator("#e2e-name").fill("Ada");
   await page.locator("#e2e-form-submit").click();
   await waitForText(page.locator("#e2e-form-result"), "Hello, Ada.");
+}
+
+async function testHostedFileUpload(page, baseUrl) {
+  await openHarness(page, baseUrl, "/e2e");
+
+  assert.equal(
+    await page.locator("#e2e-upload-form").getAttribute("enctype"),
+    "multipart/form-data"
+  );
+  assert.equal(await page.locator("#e2e-upload-file").getAttribute("accept"), "text/plain");
+
+  await page.locator("#e2e-upload-caption").fill("Release notes");
+  await page.locator("#e2e-upload-file").setInputFiles({
+    name: "notes.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("upload bytes")
+  });
+  await page.locator("#e2e-upload-submit").click();
+
+  await waitForText(
+    page.locator("#e2e-upload-result"),
+    "Uploaded: Release notes|notes.txt|12|upload bytes"
+  );
 }
 
 async function testDelegatedEvents(page, baseUrl) {

@@ -14,6 +14,8 @@ dotnet add package HeimdallFramework.Web
 
 Use the package through its Razor Class Library asset. See [the current documentation](https://heimdall-framework.org) for the supported asset reference and application setup.
 
+Forms containing file inputs are submitted as `multipart/form-data`; other declarative form payloads remain JSON. `Heimdall.invoke` also accepts a browser `FormData` instance for programmatic uploads.
+
 ## Links
 
 - [Documentation](https://heimdall-framework.org)

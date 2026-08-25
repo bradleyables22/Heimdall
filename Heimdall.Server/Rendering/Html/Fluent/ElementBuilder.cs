@@ -148,6 +148,21 @@ namespace Heimdall.Server.Rendering
 			public ElementBuilder Name(string name) { _parts.Add(Html.Name(name)); return this; }
 
 			/// <summary>
+			/// Adds an <c>accept</c> attribute from file extensions, MIME types, or media wildcards.
+			/// </summary>
+			public ElementBuilder Accept(params string?[] fileTypes) { _parts.Add(Html.Accept(fileTypes)); return this; }
+
+			/// <summary>
+			/// Adds a <c>capture</c> attribute from a raw current or future browser value.
+			/// </summary>
+			public ElementBuilder Capture(string value) { _parts.Add(Html.Capture(value)); return this; }
+
+			/// <summary>
+			/// Adds a <c>capture</c> attribute from a known camera direction hint.
+			/// </summary>
+			public ElementBuilder Capture(Html.CaptureMode capture) { _parts.Add(Html.Capture(capture)); return this; }
+
+			/// <summary>
 			/// Adds a <c>value</c> attribute.
 			/// </summary>
 			public ElementBuilder Value(string value) { _parts.Add(Html.Value(value)); return this; }
@@ -261,6 +276,11 @@ namespace Heimdall.Server.Rendering
 			/// Adds an <c>enctype</c> attribute.
 			/// </summary>
 			public ElementBuilder EncType(string value) { _parts.Add(Html.EncType(value)); return this; }
+
+			/// <summary>
+			/// Adds <c>enctype="multipart/form-data"</c> for a form containing files.
+			/// </summary>
+			public ElementBuilder MultipartFormData() { _parts.Add(Html.MultipartFormData()); return this; }
 
 			/// <summary>
 			/// Adds a <c>rel</c> attribute.

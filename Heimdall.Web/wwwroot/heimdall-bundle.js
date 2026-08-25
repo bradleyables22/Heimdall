@@ -67,6 +67,13 @@
     }
     return obj;
   }
+  function formDataToPayload(fd) {
+    for (const value of fd.values()) {
+      if (typeof Blob !== "undefined" && value instanceof Blob)
+        return fd;
+    }
+    return formDataToObject(fd);
+  }
   function getByPath(root, path) {
     if (!path)
       return void 0;
@@ -262,28 +269,33 @@
       const token = await ensureCsrfToken();
       if (!coordinator.isCurrent(context))
         return coordinator.getCancellationResult(context);
+      const isFormData = typeof global.FormData === "function" && context.payload instanceof global.FormData;
       const headers = {
-        "Content-Type": "application/json",
         [actionHeader]: context.actionId,
         [csrfHeader]: token
       };
+      if (!isFormData)
+        headers["Content-Type"] = "application/json";
       for (const key in context.headers)
         headers[key] = context.headers[key];
-      let body = "{}";
-      try {
-        body = context.payload == null ? "{}" : JSON.stringify(context.payload);
-      } catch (e) {
-        const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
-        err.cause = e;
-        emit("heimdall:error", {
-          actionId: context.actionId,
-          payload: context.payload,
-          target: context.target,
-          swap: context.swap,
-          status: 0,
-          error: err
-        });
-        throw err;
+      let body = context.payload;
+      if (!isFormData) {
+        body = "{}";
+        try {
+          body = context.payload == null ? "{}" : JSON.stringify(context.payload);
+        } catch (e) {
+          const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
+          err.cause = e;
+          emit("heimdall:error", {
+            actionId: context.actionId,
+            payload: context.payload,
+            target: context.target,
+            swap: context.swap,
+            status: 0,
+            error: err
+          });
+          throw err;
+        }
       }
       context.request = {
         url: url.toString(),
@@ -551,11 +563,11 @@
       let payload = payloadFromElement(el);
       if (payload == null && triggerName === "submit") {
         if (el && el.tagName === "FORM") {
-          payload = formDataToObject(new FormData(el));
+          payload = formDataToPayload(new FormData(el));
         } else {
           const form = el.closest && el.closest("form");
           if (form)
-            payload = formDataToObject(new FormData(form));
+            payload = formDataToPayload(new FormData(form));
         }
       }
       return { target, swap, payload, sync, syncGroup };
@@ -1564,7 +1576,7 @@
         const form2 = el.closest("form");
         if (!form2)
           return null;
-        return formDataToObject(new FormData(form2));
+        return formDataToPayload(new FormData(form2));
       }
       if (from === "self") {
         const obj = {};
@@ -1573,7 +1585,7 @@
       }
       const form = document.querySelector(fromRaw);
       if (form && form.tagName === "FORM") {
-        return formDataToObject(new FormData(form));
+        return formDataToPayload(new FormData(form));
       }
       return null;
     }

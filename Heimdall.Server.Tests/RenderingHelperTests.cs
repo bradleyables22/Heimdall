@@ -78,6 +78,52 @@ public sealed class RenderingHelperTests
     }
 
     [Fact]
+    public void FluentHelpers_RenderCompleteFileUploadForm()
+    {
+        var html = Render(FluentHtml.Form(form =>
+        {
+            form.MultipartFormData();
+            form.Heimdall()
+                .OnSubmit("profile.save")
+                .Target("#profile-result");
+
+            form.Input(Html.InputType.file, input => input
+                .Name("avatar")
+                .Accept(".png", "image/jpeg")
+                .Capture(Html.CaptureMode.environment)
+                .Required()
+                .Multiple());
+
+            form.Button(button => button
+                .Type("submit")
+                .Text("Upload"));
+        }));
+
+        Assert.Equal(
+            "<form enctype=\"multipart/form-data\" " +
+            "heimdall-content-submit=\"profile.save\" " +
+            "heimdall-content-target=\"#profile-result\">" +
+            "<input type=\"file\" name=\"avatar\" accept=\".png,image/jpeg\" " +
+            "capture=\"environment\" required multiple />" +
+            "<button type=\"submit\">Upload</button>" +
+            "</form>",
+            html);
+    }
+
+    [Fact]
+    public void StaticHelpers_RenderRawFileInputHints()
+    {
+        var html = Render(Html.Input(
+            Html.InputType.file,
+            Html.Accept(" image/png ", "", "image/jpeg"),
+            Html.Capture("user")));
+
+        Assert.Equal(
+            "<input type=\"file\" accept=\"image/png,image/jpeg\" capture=\"user\" />",
+            html);
+    }
+
+    [Fact]
     public void HtmlHelpers_RenderRawCustomCommandsAcrossStaticAndFluentApis()
     {
         var staticHtml = Render(Html.Button(
@@ -178,6 +224,7 @@ public sealed class RenderingHelperTests
         Assert.Throws<ArgumentException>(() => HeimdallHtml.SyncGroup(" "));
         Assert.Throws<ArgumentOutOfRangeException>(() => HeimdallHtml.Sync((HeimdallHtml.RequestSync)999));
         Assert.Throws<ArgumentOutOfRangeException>(() => Html.Command((Html.CommandType)999));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Html.Capture((Html.CaptureMode)999));
     }
 
     [Fact]

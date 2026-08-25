@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Reflection;
 using System.Reflection.Emit;
@@ -15,6 +16,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Timeouts;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
@@ -322,6 +324,323 @@ public sealed class ServerIntegrationTests
         Assert.True(response.StatusCode == HttpStatusCode.OK, html);
         Assert.Contains("from-payload", html);
         Assert.DoesNotContain("from-service", html);
+    }
+
+    [Fact]
+    public async Task FromFormAttribute_ForcesRegisteredTypeToBindFromFormAndHonorsNameAliases()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddSingleton(new ServiceLikePayload { Value = "from-service" });
+        });
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent("from-form"), "model.Value");
+        content.Add(new ByteArrayContent([1, 2, 3]), "file", "aliased.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.from-form-aliases",
+            content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>from-form|aliased.bin|3</span>", html);
+        Assert.DoesNotContain("from-service", html);
+    }
+
+    [Fact]
+    public async Task FromFormAttribute_RejectsJsonRequest()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.AddSingleton(new ServiceLikePayload { Value = "from-service" });
+        });
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(
+            client,
+            "tests.upload.from-form-aliases",
+            new { Value = "from-json" });
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Contains("requires a form content type", body);
+    }
+
+    [Fact]
+    public async Task ContentAction_BindsMultipartPayloadAndUploadedFile()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent("Ada"), "Name");
+        content.Add(new StringContent("7"), "Count");
+        content.Add(new StringContent("on"), "Enabled");
+        content.Add(new StringContent("beta"), "Mode");
+        content.Add(new ByteArrayContent(Encoding.UTF8.GetBytes("avatar bytes")), "avatar", "avatar.txt");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.single",
+            content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>Ada|7|True|Beta|avatar.txt|12</span>", html);
+    }
+
+    [Theory]
+    [InlineData("tests.upload.multiple")]
+    [InlineData("tests.upload.enumerable")]
+    [InlineData("tests.upload.readonly-collection")]
+    [InlineData("tests.upload.collection")]
+    [InlineData("tests.upload.list-interface")]
+    [InlineData("tests.upload.list")]
+    [InlineData("tests.upload.form-file-collection")]
+    [InlineData("tests.upload.array")]
+    public async Task ContentAction_BindsSupportedUploadedFileCollectionsByParameterName(string actionId)
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent([1, 2]), "attachments", "one.bin");
+        content.Add(new ByteArrayContent([3, 4, 5]), "attachments", "two.bin");
+        content.Add(new ByteArrayContent([6]), "unrelated", "ignored.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            actionId,
+            content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>one.bin:2|two.bin:3</span>", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_BindsMultipartPayloadWithParameterPrefixes()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent("Grace"), "payload.Name");
+        content.Add(new StringContent("11"), "payload[Count]");
+        content.Add(new StringContent("true"), "payload.Enabled");
+        content.Add(new StringContent("alpha"), "payload.Mode");
+        content.Add(new ByteArrayContent([1, 2, 3]), "avatar", "profile.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.single",
+            content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>Grace|11|True|Alpha|profile.bin|3</span>", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_BindsMultipartPayloadFromEmbeddedJsonField()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(
+            new StringContent("{\"name\":\"Lin\",\"count\":4,\"enabled\":true,\"mode\":\"beta\"}"),
+            "payload");
+        content.Add(new ByteArrayContent([1]), "avatar", "profile.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.single",
+            content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>Lin|4|True|Beta|profile.bin|1</span>", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_MissingOptionalUploadedFileBindsNull()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent("no replacement"), "description");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.optional",
+            content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>none</span>", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_BlankBrowserFileInputDoesNotSatisfyRequiredFile()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        var blankFile = new ByteArrayContent([]);
+        blankFile.Headers.ContentDisposition = new ContentDispositionHeaderValue("form-data")
+        {
+            Name = "\"upload\"",
+            FileName = "\"\""
+        };
+        content.Add(blankFile);
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.required",
+            content);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Missing required uploaded file", body);
+    }
+
+    [Fact]
+    public async Task ContentAction_MissingRequiredUploadedFileReturnsBadRequest()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new StringContent("no file"), "description");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.required",
+            content);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("Missing required uploaded file", body);
+    }
+
+    [Fact]
+    public async Task ContentAction_FileParameterRejectsJsonRequests()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+
+        var response = await PostContentActionAsync(client, "tests.upload.required");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.UnsupportedMediaType, response.StatusCode);
+        Assert.Contains("multipart/form-data", body);
+    }
+
+    [Fact]
+    public async Task ContentAction_RequestSizeLimitAttributeReturnsPayloadTooLarge()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent(new byte[1024]), "upload", "large.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.request-size-limited",
+            content);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Contains("Heimdall action request body is too large", body);
+    }
+
+    [Fact]
+    public async Task ContentAction_TypeRequestSizeLimitAppliesToContentAction()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent(new byte[1024]), "upload", "large.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.type-request-size-limited",
+            content);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+    }
+
+    [Theory]
+    [InlineData("tests.upload.request-size-disabled")]
+    [InlineData("tests.upload.request-size-overridden")]
+    public async Task ContentAction_MethodRequestSizeMetadataOverridesTypeLimit(string actionId)
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent(new byte[1024]), "upload", "large.bin");
+
+        var response = await PostMultipartContentActionAsync(client, actionId, content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>1024</span>", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_RequestFormLimitsAttributeReturnsPayloadTooLarge()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent([1, 2, 3, 4, 5]), "upload", "limited.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.type-form-limited",
+            content);
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
+        Assert.Contains("Heimdall action request body is too large", body);
+    }
+
+    [Fact]
+    public async Task ContentAction_MethodRequestFormLimitsOverrideTypeLimit()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent([1, 2, 3, 4, 5]), "upload", "allowed.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.form-limit-overridden",
+            content);
+        var html = await response.Content.ReadAsStringAsync();
+
+        Assert.True(response.StatusCode == HttpStatusCode.OK, html);
+        Assert.Equal("<span>5</span>", html);
+    }
+
+    [Fact]
+    public async Task ContentAction_GlobalAspNetFormOptionsAreStillHonored()
+    {
+        await using var app = await CreateAppAsync(services =>
+        {
+            services.Configure<FormOptions>(options =>
+            {
+                options.MultipartBodyLengthLimit = 4;
+            });
+        });
+        using var client = app.GetTestClient();
+        var content = new MultipartFormDataContent();
+        content.Add(new ByteArrayContent([1, 2, 3, 4, 5]), "upload", "limited.bin");
+
+        var response = await PostMultipartContentActionAsync(
+            client,
+            "tests.upload.required",
+            content);
+
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
     }
 
     [Fact]
@@ -1201,6 +1520,20 @@ public sealed class ServerIntegrationTests
         return await client.SendAsync(request);
     }
 
+    private static async Task<HttpResponseMessage> PostMultipartContentActionAsync(
+        HttpClient client,
+        string actionId,
+        MultipartFormDataContent content)
+    {
+        var csrfToken = await GetCsrfTokenAsync(client);
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/__heimdall/v1/content/actions");
+        request.Headers.Add("X-Heimdall-Content-Action", actionId);
+        request.Headers.Add("RequestVerificationToken", csrfToken.RequestToken);
+        request.Headers.Add("Cookie", csrfToken.CookieHeader);
+        request.Content = content;
+        return await client.SendAsync(request);
+    }
+
     private static async Task<HttpResponseMessage> GetBifrostTokenAsync(
         HttpClient client,
         string topic,
@@ -1553,6 +1886,93 @@ public sealed class ServerIntegrationTests
             return Html.Span(payload.Value);
         }
 
+        [ContentInvocation("tests.upload.from-form-aliases")]
+        public static IHtmlContent FromFormAliases(
+            [FromForm(Name = "model")] ServiceLikePayload payload,
+            [FromForm(Name = "file")] IFormFile upload)
+        {
+            return Html.Span($"{payload.Value}|{upload.FileName}|{upload.Length}");
+        }
+
+        [ContentInvocation("tests.upload.single")]
+        public static IHtmlContent SingleUpload(PayloadDto payload, IFormFile avatar)
+        {
+            return Html.Span(
+                $"{payload.Name}|{payload.Count}|{payload.Enabled}|{payload.Mode}|{avatar.FileName}|{avatar.Length}");
+        }
+
+        [ContentInvocation("tests.upload.multiple")]
+        public static IHtmlContent MultipleUploads(IReadOnlyList<IFormFile> attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.enumerable")]
+        public static IHtmlContent EnumerableUploads(IEnumerable<IFormFile> attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.readonly-collection")]
+        public static IHtmlContent ReadOnlyCollectionUploads(IReadOnlyCollection<IFormFile> attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.collection")]
+        public static IHtmlContent CollectionUploads(ICollection<IFormFile> attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.list-interface")]
+        public static IHtmlContent ListInterfaceUploads(IList<IFormFile> attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.list")]
+        public static IHtmlContent ListUploads(List<IFormFile> attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.form-file-collection")]
+        public static IHtmlContent FileCollectionUploads(IFormFileCollection attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.array")]
+        public static IHtmlContent ArrayUploads(IFormFile[] attachments)
+        {
+            return RenderUploads(attachments);
+        }
+
+        [ContentInvocation("tests.upload.optional")]
+        public static IHtmlContent OptionalUpload(IFormFile? upload = null)
+        {
+            return Html.Span(upload?.FileName ?? "none");
+        }
+
+        [ContentInvocation("tests.upload.required")]
+        public static IHtmlContent RequiredUpload(IFormFile upload)
+        {
+            return Html.Span(upload.FileName);
+        }
+
+        [RequestSizeLimit(256)]
+        [ContentInvocation("tests.upload.request-size-limited")]
+        public static IHtmlContent RequestSizeLimitedUpload(IFormFile upload)
+        {
+            return Html.Span(upload.Length);
+        }
+
+        private static IHtmlContent RenderUploads(IEnumerable<IFormFile> attachments)
+        {
+            return Html.Span(string.Join('|', attachments.Select(file => $"{file.FileName}:{file.Length}")));
+        }
+
         [ContentInvocation("tests.services.implicit")]
         public static IHtmlContent ImplicitService(GreetingService service)
         {
@@ -1734,6 +2154,37 @@ public sealed class ServerIntegrationTests
             await Task.Delay(TimeSpan.FromMilliseconds(125), cancellationToken);
             return Html.Span("not timed out");
         }
+    }
+
+    [RequestSizeLimit(256)]
+    private static class TypeRequestSizeLimitedUploadActions
+    {
+        [ContentInvocation("tests.upload.type-request-size-limited")]
+        public static IHtmlContent Limited(IFormFile upload)
+            => Html.Span(upload.Length);
+
+        [DisableRequestSizeLimit]
+        [ContentInvocation("tests.upload.request-size-disabled")]
+        public static IHtmlContent Disabled(IFormFile upload)
+            => Html.Span(upload.Length);
+
+        [RequestSizeLimit(4096)]
+        [ContentInvocation("tests.upload.request-size-overridden")]
+        public static IHtmlContent Overridden(IFormFile upload)
+            => Html.Span(upload.Length);
+    }
+
+    [RequestFormLimits(MultipartBodyLengthLimit = 4)]
+    private static class TypeFormLimitedUploadActions
+    {
+        [ContentInvocation("tests.upload.type-form-limited")]
+        public static IHtmlContent Limited(IFormFile upload)
+            => Html.Span(upload.Length);
+
+        [RequestFormLimits(MultipartBodyLengthLimit = 128)]
+        [ContentInvocation("tests.upload.form-limit-overridden")]
+        public static IHtmlContent Overridden(IFormFile upload)
+            => Html.Span(upload.Length);
     }
 
     private sealed class PayloadDto
