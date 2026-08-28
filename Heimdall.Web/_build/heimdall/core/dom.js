@@ -4,7 +4,7 @@ import {
     resolveTarget
 } from "./utils.js";
 
-export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid }) {
+export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization }) {
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -67,6 +67,17 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
             return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: false };
 
         stripScripts(fragment);
+
+        if (timeLocalization && typeof timeLocalization.localize === "function") {
+            const contextElement = mode === "outer"
+                ? targetEl.parentElement
+                : targetEl;
+            timeLocalization.localize(fragment, {
+                origin: detail.origin,
+                kind: detail.kind,
+                contextElement
+            });
+        }
 
         const nodes = fragmentToNodesArray(fragment);
         const firstElement = nodes.find(n => n && n.nodeType === 1) || null;

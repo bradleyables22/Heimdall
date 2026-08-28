@@ -2,17 +2,31 @@ import { readFile } from "node:fs/promises";
 
 const testOrigin = "http://heimdall.test";
 
-export async function createRuntimePage(browser, runtime) {
+export async function createRuntimePage(browser, runtime, options = {}) {
   const page = await browser.newPage();
   page.setDefaultTimeout(5000);
+
+  const language = String(options.language || "").trim();
+  const languageAttribute = language ? ` lang="${language}"` : "";
+  const initialBody = options.initialBody || "";
 
   await page.route(`${testOrigin}/**`, route => route.fulfill({
     status: 200,
     contentType: "text/html",
-    body: "<!doctype html><html><head></head><body></body></html>"
+    body: `<!doctype html><html${languageAttribute}><head></head><body>${initialBody}</body></html>`
   }));
 
   await page.goto(`${testOrigin}/`);
+
+  if (options.timezoneId) {
+    const session = await page.context().newCDPSession(page);
+    await session.send("Emulation.setTimezoneOverride", { timezoneId: options.timezoneId });
+    page.__heimdallTimezoneSession = session;
+  }
+
+  if (typeof options.beforeRuntime === "function")
+    await options.beforeRuntime(page);
+
   await page.addScriptTag({ content: await readFile(runtime.path, "utf8") });
   await page.waitForFunction(() => !!window.Heimdall);
 

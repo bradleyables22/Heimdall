@@ -49,7 +49,10 @@ export function createHeimdallRuntime({
             "heimdall-sse-target",
             "heimdall-sse-swap",
             "heimdall-sse-event",
-            "heimdall-sse-disable"
+            "heimdall-sse-disable",
+            "heimdall-time",
+            "heimdall-time-format",
+            "lang"
         ];
 
         const obs = new MutationObserver((mutations) => {
@@ -70,6 +73,12 @@ export function createHeimdallRuntime({
         });
 
         obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter });
+        if (document.documentElement && document.documentElement !== document.body) {
+            obs.observe(document.documentElement, {
+                attributes: true,
+                attributeFilter: ["lang"]
+            });
+        }
         Heimdall._observer = obs;
 
         dbg("MutationObserver installed");

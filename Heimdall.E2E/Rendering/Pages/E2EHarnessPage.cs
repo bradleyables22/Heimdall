@@ -11,6 +11,10 @@ namespace Heimdall.E2E.Rendering.Pages
 	public static class E2EHarnessPage
 	{
 		public const string Action_Load = "e2e.load";
+		public const string Action_LocalTimeLoad = "e2e.local-time.load";
+		public const string Action_LocalTime = "e2e.local-time.action";
+		public const string Action_LocalTimeOob = "e2e.local-time.oob";
+		public const string Action_LocalTimeSse = "e2e.local-time.sse";
 		public const string Action_DynamicBoot = "e2e.dynamic.boot";
 		public const string Action_DynamicLoaded = "e2e.dynamic.loaded";
 		public const string Action_Swap = "e2e.swap";
@@ -48,7 +52,51 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_AuthRequired = "e2e.auth.required";
 
 		private const string SseTopic = "e2e-harness";
+		private const string LocalTimeSseTopic = "e2e-local-time";
 		public const string SseTopic_AuthRequired = "e2e-auth-required";
+		private static readonly DateTimeOffset LocalTimeSample =
+			new(2026, 8, 6, 8, 5, 7, 123, TimeSpan.Zero);
+		private static readonly (string Suffix, string Format)[] LocalTimeFormats =
+		[
+			("standard-d", "d"),
+			("standard-D", "D"),
+			("standard-t", "t"),
+			("standard-T", "T"),
+			("standard-g", "g"),
+			("standard-G", "G"),
+			("day-1", "%d"),
+			("day-2", "dd"),
+			("day-3", "ddd"),
+			("day-4", "dddd"),
+			("month-1", "%M"),
+			("month-2", "MM"),
+			("month-3", "MMM"),
+			("month-4", "MMMM"),
+			("year-1", "%y"),
+			("year-2", "yy"),
+			("year-3", "yyy"),
+			("year-4", "yyyy"),
+			("hour12-1", "%h"),
+			("hour12-2", "hh"),
+			("hour24-1", "%H"),
+			("hour24-2", "HH"),
+			("minute-1", "%m"),
+			("minute-2", "mm"),
+			("second-1", "%s"),
+			("second-2", "ss"),
+			("period-1", "%t"),
+			("period-2", "tt"),
+			("fraction-1", "%f"),
+			("fraction-2", "ff"),
+			("fraction-3", "fff"),
+			("offset-1", "%z"),
+			("offset-2", "zz"),
+			("offset-3", "zzz"),
+			("single-quote", "'literal' yyyy"),
+			("double-quote", "\"double literal\" yyyy"),
+			("escaped", "yyyy \\y"),
+			("composite", "dddd, MMMM d, yyyy 'at' h:mm:ss.fff tt zzz")
+		];
 
 		private const string ClientHarnessScript = """
 window.HeimdallE2E = {
@@ -137,6 +185,7 @@ window.HeimdallE2E = {
 				})
 				.Add(
 					RenderLoadSection(),
+					RenderLocalTimeSection(),
 					RenderDynamicBootSection(),
 					RenderSwapSection(),
 					RenderSwapModesSection(),
@@ -164,6 +213,49 @@ window.HeimdallE2E = {
 		[RequestTimeout(3000)]
 		public static IHtmlContent Load()
 			=> Status("e2e-load-result", "Load completed");
+
+		[ContentInvocation(Action_LocalTimeLoad)]
+		[RequestTimeout(3000)]
+		public static IHtmlContent LocalTimeLoad()
+			=> LocalTimeValue(
+				"e2e-local-time-load-result",
+				"yyyy-MM-dd HH:mm:ss.fff zzz");
+
+		[ContentInvocation(Action_LocalTime)]
+		[RequestTimeout(3000)]
+		public static IHtmlContent LocalTimeAction()
+			=> RenderLocalTimeMatrix("e2e-local-time-action");
+
+		[ContentInvocation(Action_LocalTimeOob)]
+		[RequestTimeout(3000)]
+		public static IHtmlContent LocalTimeOob()
+			=> FluentHtml.Fragment(fragment =>
+			{
+				fragment.Add(LocalTimeValue(
+					"e2e-local-time-oob-main-result",
+					"MMMM d HH:mm"));
+				fragment.Heimdall().Invocation(
+					targetSelector: "#e2e-local-time-oob-side-target",
+					swap: HeimdallHtml.Swap.Inner,
+					payload: LocalTimeValue(
+						"e2e-local-time-oob-side-result",
+						"MMMM d HH:mm"),
+					wrapInTemplate: true);
+			});
+
+		[ContentInvocation(Action_LocalTimeSse)]
+		[RequestTimeout(3000)]
+		public static async Task<IHtmlContent> LocalTimeSse([FromServices] Bifrost bifrost)
+		{
+			await bifrost.PublishAsync(
+				LocalTimeSseTopic,
+				LocalTimeValue(
+					"e2e-local-time-sse-result",
+					"yyyy-MM-dd HH:mm:ss.fff zzz"),
+				TimeSpan.FromSeconds(10));
+
+			return HtmlString.Empty;
+		}
 
 		[ContentInvocation(Action_DynamicBoot)]
 		[RequestTimeout(3000)]
@@ -469,6 +561,52 @@ window.HeimdallE2E = {
 						.SwapInner();
 				})
 				.Div(target => target.Id("e2e-load-target").Text("Load target original"));
+			});
+
+		private static IHtmlContent RenderLocalTimeSection()
+			=> Section("e2e-local-time-section", "Local Time", body =>
+			{
+				body.Add(RenderLocalTimeMatrix("e2e-local-time-initial"))
+					.Div(trigger =>
+					{
+						trigger.Id("e2e-local-time-load-trigger")
+							.Text("Local time load trigger ready");
+						trigger.Heimdall()
+							.Load(Action_LocalTimeLoad)
+							.PayloadEmptyObject()
+							.Target("#e2e-local-time-load-target")
+							.SwapInner();
+					})
+					.Div(target => target.Id("e2e-local-time-load-target").Text("Local time load pending"))
+					.Div(target => target.Id("e2e-local-time-action-target").Text("Local time action pending"))
+					.Add(ActionButton(
+						id: "e2e-local-time-action-button",
+						label: "Render local time matrix",
+						action: Action_LocalTime,
+						targetSelector: "#e2e-local-time-action-target"))
+					.Div(target => target.Id("e2e-local-time-oob-main-target").Text("Local time OOB main pending"))
+					.Div(target => target
+						.Id("e2e-local-time-oob-side-target")
+						.Attr("lang", "fr-FR")
+						.Text("Local time OOB side pending"))
+					.Add(ActionButton(
+						id: "e2e-local-time-oob-button",
+						label: "Render local time OOB",
+						action: Action_LocalTimeOob,
+						targetSelector: "#e2e-local-time-oob-main-target"))
+					.Div(host => host
+						.Id("e2e-local-time-sse-host")
+						.Add(
+							HeimdallHtml.SseTopic(LocalTimeSseTopic),
+							HeimdallHtml.SseTarget("#e2e-local-time-sse-target"),
+							HeimdallHtml.SseSwapMode(HeimdallHtml.Swap.Inner)))
+					.Div(target => target.Id("e2e-local-time-sse-target").Text("Local time SSE pending"))
+					.Add(ActionButton(
+						id: "e2e-local-time-sse-button",
+						label: "Publish local time SSE",
+						action: Action_LocalTimeSse,
+						targetSelector: "#e2e-local-time-sse-target",
+						swap: HeimdallHtml.Swap.None));
 			});
 
 		private static IHtmlContent RenderDynamicBootSection()
@@ -1137,6 +1275,23 @@ window.HeimdallE2E = {
 			=> FluentHtml.Span(span =>
 			{
 				span.Id(id).Text(text);
+			});
+
+		private static IHtmlContent LocalTimeValue(string id, string format)
+			=> FluentHtml.Span(time => time
+				.Id(id)
+				.LocalizeTime(LocalTimeSample, format));
+
+		private static IHtmlContent RenderLocalTimeMatrix(string idPrefix)
+			=> FluentHtml.Div(matrix =>
+			{
+				matrix.Id($"{idPrefix}-matrix");
+				foreach (var (suffix, format) in LocalTimeFormats)
+				{
+					matrix.Span(time => time
+						.Id($"{idPrefix}-{suffix}")
+						.LocalizeTime(LocalTimeSample, format));
+				}
 			});
 
 		private static string Normalize(string? value)

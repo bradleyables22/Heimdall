@@ -16,6 +16,11 @@ const appProject = path.join(projectRoot, "Heimdall.E2E.csproj");
 const tests = [
   ["generates and serves static site output", testStaticSiteGeneration],
   ["boots the harness and runs load triggers", testHarnessBootAndLoad],
+  [
+    "localizes times across initial, load, action, OOB, and SSE delivery paths",
+    testFluentLocalTime,
+    { contextOptions: { locale: "en-US", timezoneId: "America/New_York" } }
+  ],
   ["boots dynamically swapped content and applies swap modes", testDynamicBootAndSwapModes],
   ["applies swaps, OOB, abort, and redirect directives", testResponseDirectives],
   ["binds state, forms, payload refs, and programmatic invokes", testPayloadsAndState],
@@ -40,6 +45,47 @@ const tests = [
     { allowedBrowserErrors: [/Failed to load resource: the server responded with a status of (404|500)/] }
   ]
 ];
+
+const expectedLocalTimeFormats = {
+  "standard-d": "8/6/26",
+  "standard-D": "Thursday, August 6, 2026",
+  "standard-t": "4:05 AM",
+  "standard-T": "4:05:07 AM",
+  "standard-g": "8/6/26, 4:05 AM",
+  "standard-G": "8/6/26, 4:05:07 AM",
+  "day-1": "6",
+  "day-2": "06",
+  "day-3": "Thu",
+  "day-4": "Thursday",
+  "month-1": "8",
+  "month-2": "08",
+  "month-3": "Aug",
+  "month-4": "August",
+  "year-1": "26",
+  "year-2": "26",
+  "year-3": "2026",
+  "year-4": "2026",
+  "hour12-1": "4",
+  "hour12-2": "04",
+  "hour24-1": "4",
+  "hour24-2": "04",
+  "minute-1": "5",
+  "minute-2": "05",
+  "second-1": "7",
+  "second-2": "07",
+  "period-1": "A",
+  "period-2": "AM",
+  "fraction-1": "1",
+  "fraction-2": "12",
+  "fraction-3": "123",
+  "offset-1": "-4",
+  "offset-2": "-04",
+  "offset-3": "-04:00",
+  "single-quote": "literal 2026",
+  "double-quote": "double literal 2026",
+  "escaped": "2026 y",
+  "composite": "Thursday, August 6, 2026 at 4:05:07.123 AM -04:00"
+};
 
 function loadPlaywright() {
   try {
@@ -266,6 +312,18 @@ async function openHarness(page, baseUrl, pathName = "/") {
   await page.locator("#e2e-harness").waitFor();
 }
 
+async function assertLocalTimeMatrix(page, idPrefix) {
+  await page.locator(`#${idPrefix}-composite`).waitFor();
+  const actual = await page.evaluate(({ prefix, suffixes }) => {
+    return Object.fromEntries(suffixes.map(suffix => {
+      const element = document.getElementById(`${prefix}-${suffix}`);
+      return [suffix, element ? element.textContent : null];
+    }));
+  }, { prefix: idPrefix, suffixes: Object.keys(expectedLocalTimeFormats) });
+
+  assert.deepEqual(actual, expectedLocalTimeFormats);
+}
+
 async function runTests() {
   const { chromium } = loadPlaywright();
   const app = await startApp();
@@ -273,7 +331,7 @@ async function runTests() {
 
   try {
     for (const [name, fn, options = {}] of tests) {
-      const context = await browser.newContext();
+      const context = await browser.newContext(options.contextOptions || {});
       const page = await context.newPage();
       page.setDefaultTimeout(8000);
       const browserErrors = [];
@@ -439,6 +497,114 @@ async function testHarnessBootAndLoad(page, baseUrl) {
 
   await openHarness(page, baseUrl, "/e2e");
   await waitForText(page.locator("#e2e-load-target"), "Load completed");
+}
+
+async function testFluentLocalTime(page, baseUrl) {
+  await page.addInitScript(() => {
+    window.__heimdallLocalTimeEvents = [];
+    window.__heimdallLocalTimeSseOpen = false;
+
+    document.addEventListener("heimdall:sse-open", event => {
+      if (event.detail?.topic === "e2e-local-time")
+        window.__heimdallLocalTimeSseOpen = true;
+    });
+
+    document.addEventListener("heimdall:time-after", event => {
+      const element = event.detail?.element;
+      if (!element?.id?.startsWith("e2e-local-time-"))
+        return;
+
+      window.__heimdallLocalTimeEvents.push({
+        id: element.id,
+        connected: element.isConnected,
+        locale: event.detail.locale,
+        origin: event.detail.origin,
+        kind: event.detail.kind
+      });
+    });
+  });
+
+  const requestedUrls = [];
+  page.on("request", request => requestedUrls.push(request.url()));
+
+  await openHarness(page, baseUrl);
+
+  await assertLocalTimeMatrix(page, "e2e-local-time-initial");
+  const initialComposite = page.locator("#e2e-local-time-initial-composite");
+  assert.equal(await initialComposite.getAttribute("heimdall-time"), "2026-08-06T08:05:07.123Z");
+  assert.equal(
+    await initialComposite.getAttribute("heimdall-time-format"),
+    "dddd, MMMM d, yyyy 'at' h:mm:ss.fff tt zzz"
+  );
+
+  await waitForText(
+    page.locator("#e2e-local-time-load-result"),
+    "2026-08-06 04:05:07.123 -04:00"
+  );
+
+  await page.locator("#e2e-local-time-action-button").click();
+  await assertLocalTimeMatrix(page, "e2e-local-time-action");
+
+  await page.locator("#e2e-local-time-oob-button").click();
+  await waitForText(page.locator("#e2e-local-time-oob-main-result"), "August 6 04:05");
+  await waitForText(page.locator("#e2e-local-time-oob-side-result"), "août 6 04:05");
+
+  await page.waitForFunction(() => window.__heimdallLocalTimeSseOpen === true);
+  await page.locator("#e2e-local-time-sse-button").click();
+  await waitForText(
+    page.locator("#e2e-local-time-sse-target #e2e-local-time-sse-result"),
+    "2026-08-06 04:05:07.123 -04:00",
+    10000
+  );
+
+  const lifecycle = await page.evaluate(() => window.__heimdallLocalTimeEvents);
+  const eventFor = (id, predicate = () => true) =>
+    lifecycle.find(event => event.id === id && predicate(event));
+
+  assert.deepEqual(eventFor("e2e-local-time-initial-composite"), {
+    id: "e2e-local-time-initial-composite",
+    connected: true,
+    locale: "en",
+    origin: "boot",
+    kind: null
+  });
+  assert.deepEqual(eventFor("e2e-local-time-load-result"), {
+    id: "e2e-local-time-load-result",
+    connected: false,
+    locale: "en",
+    origin: "action",
+    kind: "main"
+  });
+  assert.deepEqual(eventFor("e2e-local-time-action-composite"), {
+    id: "e2e-local-time-action-composite",
+    connected: false,
+    locale: "en",
+    origin: "action",
+    kind: "main"
+  });
+  assert.deepEqual(eventFor("e2e-local-time-oob-side-result"), {
+    id: "e2e-local-time-oob-side-result",
+    connected: false,
+    locale: "fr-FR",
+    origin: "action",
+    kind: "invocation"
+  });
+  assert.deepEqual(eventFor("e2e-local-time-oob-main-result"), {
+    id: "e2e-local-time-oob-main-result",
+    connected: false,
+    locale: "en",
+    origin: "action",
+    kind: "main"
+  });
+  assert.ok(eventFor(
+    "e2e-local-time-sse-result",
+    event => event.connected === false && event.origin === "sse" && event.kind === "main"
+  ));
+  assert.equal(
+    requestedUrls.some(url => new URL(url).pathname.toLowerCase().includes("/time")),
+    false,
+    "Local time formatting should not call a Heimdall server endpoint."
+  );
 }
 
 async function testDynamicBootAndSwapModes(page, baseUrl) {
@@ -1056,11 +1222,11 @@ async function testHarnessSse(page, baseUrl) {
         window.__heimdallE2ESseOpen = true;
     });
     document.addEventListener("heimdall:swap-before", event => {
-      if (event.detail?.origin === "sse")
+      if (event.detail?.origin === "sse" && event.detail?.sourceElement?.id === "e2e-sse-host")
         window.__heimdallE2ESseSwaps.push(`before:${event.detail.kind}`);
     });
     document.addEventListener("heimdall:swap-after", event => {
-      if (event.detail?.origin === "sse")
+      if (event.detail?.origin === "sse" && event.detail?.sourceElement?.id === "e2e-sse-host")
         window.__heimdallE2ESseSwaps.push(`after:${event.detail.kind}`);
     });
   });

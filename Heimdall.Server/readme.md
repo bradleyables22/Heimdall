@@ -21,6 +21,10 @@ dotnet add package HeimdallFramework.Bootstrap
 
 Continue with the current guide and examples at [heimdall-framework.org](https://heimdall-framework.org).
 
+## Bifrost subscriber hints
+
+Background services can call `Bifrost.HasSubscribers(topic)` before performing expensive work for a live update. The result is an instantaneous view of subscribers connected to the current application instance, so it is an optimization hint rather than a delivery guarantee.
+
 ## Diagnostics
 
 The server runtime emits dependency-free `ActivitySource` traces and `System.Diagnostics.Metrics` instruments for content actions and Bifrost. Register `HeimdallDiagnostics.ActivitySourceName` and `HeimdallDiagnostics.MeterName` with your OpenTelemetry providers. Public activity, metric, and tag names are available as constants on `HeimdallDiagnostics`.
@@ -66,6 +70,23 @@ Forms containing file inputs are sent as `multipart/form-data` by the Heimdall b
 Heimdall honors ASP.NET Core's native `[RequestSizeLimit]`, `[DisableRequestSizeLimit]`, and `[RequestFormLimits]` metadata on content-action methods and declaring types. Method metadata overrides type metadata, while the application's configured `FormOptions` remains the baseline. Limit violations return `413 Payload Too Large`. The request-size limit covers the complete encoded request; the multipart body limit applies to each multipart section, so leave room for form fields and multipart framing when setting both.
 
 Uploads are parsed through ASP.NET Core's buffered `IFormFile` pipeline. Keep the limits finite, validate file signatures rather than trusting extensions or `Content-Type`, generate storage names instead of using `FileName`, and use a dedicated streaming endpoint for files that are too large to buffer safely.
+
+## Browser-local time
+
+Any fluent HTML element can render an absolute time with a server fallback and mark it for conversion to the browser user's local timezone:
+
+```csharp
+var createdAt = new DateTimeOffset(2026, 8, 26, 18, 30, 5, TimeSpan.Zero);
+
+var content = FluentHtml.Span(span => span
+    .LocalizeTime(createdAt, "MMM d, yyyy 'at' h:mm tt"));
+```
+
+`LocalizeTime` accepts `DateTimeOffset` or an absolute UTC/local `DateTime`; it rejects `DateTimeKind.Unspecified`. It emits an invariant UTC timestamp, the selected format, and encoded fallback text using `CultureInfo.CurrentCulture`. The Web runtime converts the timestamp locally without a server request and formats Heimdall response fragments before they enter the DOM.
+
+The supported standard formats are `d`, `D`, `t`, `T`, `g`, and `G`. Custom formats support `d`, `M`, `y`, `h`, `H`, `m`, `s`, `t`, `f` (up to milliseconds), and `z`, including their normal repeated forms plus quoted and escaped literals. This is a documented C#-style subset rather than complete `DateTime.ToString` parity.
+
+This API always means the browser's local timezone. To render a predetermined timezone, use `TimeZoneInfo.ConvertTime` and normal `.Text(...)` rendering instead.
 
 ## Links
 

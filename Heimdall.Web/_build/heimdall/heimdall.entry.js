@@ -9,6 +9,7 @@ import { createRequestCoordinator } from "./core/request-coordinator.js";
 import { createSecurityTokens } from "./core/security-tokens.js";
 import { createHeimdallRuntime } from "./core/startup.js";
 import { createSseRuntime } from "./core/sse.js";
+import { createTimeLocalization } from "./core/time-localization.js";
 import {
     onReady,
     safeText
@@ -325,12 +326,18 @@ import {
         dbg,
         getConfig: getRuntimeConfig
     });
+    const timeLocalization = createTimeLocalization({
+        global,
+        emitLifecycle,
+        dbg
+    });
     const dom = createDomPipeline({
         getConfig: getRuntimeConfig,
         boot: root => boot(root),
         dbg,
         emitLifecycle,
-        jsInvokeVoid
+        jsInvokeVoid,
+        timeLocalization
     });
     const {
         clearBifrostSubscribeToken,
@@ -408,6 +415,7 @@ import {
     });
 
     function boot(root) {
+        timeLocalization.localize(root, { origin: "boot" });
         bootLoads(root);
         bootVisible(root);
         bootScroll(root);

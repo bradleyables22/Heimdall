@@ -11,7 +11,7 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Provides a pooled fluent builder for constructing a single HTML element.
 		/// </summary>
-		public sealed class ElementBuilder : IDisposable
+		public sealed partial class ElementBuilder : IDisposable
 		{
 			private PooledBuffer<object?> _parts;
 

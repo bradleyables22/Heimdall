@@ -1336,6 +1336,69 @@ public sealed class ServerIntegrationTests
     }
 
     [Fact]
+    public void Bifrost_HasSubscribers_ReturnsFalseWhenTopicHasNeverHadSubscribers()
+    {
+        var bifrost = new Bifrost();
+
+        Assert.False(bifrost.HasSubscribers("orders"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t\r\n")]
+    public void Bifrost_HasSubscribers_RejectsMissingTopics(string? topic)
+    {
+        var bifrost = new Bifrost();
+
+        var exception = Assert.Throws<ArgumentException>(() => bifrost.HasSubscribers(topic!));
+
+        Assert.Equal("topic", exception.ParamName);
+    }
+
+    [Fact]
+    public async Task Bifrost_HasSubscribers_TracksLocalStreamLifecycleCaseInsensitively()
+    {
+        await using var app = await CreateAppAsync(configureHeimdall: options =>
+        {
+            options.AuthorizeBifrostTopic = (_, _) => ValueTask.FromResult(true);
+        });
+        using var client = app.GetTestClient();
+        var bifrost = app.Services.GetRequiredService<Bifrost>();
+
+        Assert.False(bifrost.HasSubscribers("orders"));
+
+        var tokenResponse = await GetBifrostTokenAsync(client, "Orders", "alice");
+        var token = await tokenResponse.Content.ReadFromJsonAsync<BifrostTokenResponse>();
+        using var streamCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/__heimdall/v1/bifrost?topic=Orders&st={Uri.EscapeDataString(token!.Token!)}");
+        request.Headers.Add(TestAuthHandler.UserHeaderName, "alice");
+
+        using var response = await client.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            streamCts.Token);
+        using var stream = await response.Content.ReadAsStreamAsync(streamCts.Token);
+        var connectedBody = await ReadUntilAsync(stream, "data: topic:Orders", streamCts.Token);
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Contains("data: topic:Orders", connectedBody);
+        Assert.True(bifrost.HasSubscribers("orders"));
+        Assert.True(bifrost.HasSubscribers("ORDERS"));
+        Assert.False(bifrost.HasSubscribers("other-topic"));
+
+        await streamCts.CancelAsync();
+        stream.Dispose();
+        response.Dispose();
+
+        await WaitUntilAsync(() => !bifrost.HasSubscribers("orders"), TimeSpan.FromSeconds(2));
+        Assert.False(bifrost.HasSubscribers("orders"));
+    }
+
+    [Fact]
     public async Task BifrostStream_DeliversPublishedHtmlWithNamedEvent()
     {
         await using var app = await CreateAppAsync(configureHeimdall: options =>
@@ -1590,6 +1653,23 @@ public sealed class ServerIntegrationTests
         }
 
         throw new TimeoutException($"SSE stream did not include expected content: {expected}");
+    }
+
+    private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+    {
+        using var timeoutCts = new CancellationTokenSource(timeout);
+
+        while (!condition())
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(10), timeoutCts.Token);
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            {
+                throw new TimeoutException("Condition was not satisfied before the timeout elapsed.");
+            }
+        }
     }
 
     private static void AddAssemblyToContentRegistry(Assembly assembly)

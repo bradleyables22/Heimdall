@@ -16,6 +16,10 @@ Use the package through its Razor Class Library asset. See [the current document
 
 Forms containing file inputs are submitted as `multipart/form-data`; other declarative form payloads remain JSON. `Heimdall.invoke` also accepts a browser `FormData` instance for programmatic uploads.
 
+Elements rendered by the Server package's fluent `.LocalizeTime(...)` helper are converted to the browser user's local timezone entirely on the client. Initial document content is processed during startup; content returned by actions, out-of-band invocations, and Bifrost is formatted before insertion. Dynamically added elements and changes to `heimdall-time`, `heimdall-time-format`, or inherited `lang` values are handled by the runtime observer.
+
+Applications can customize or observe formatting through the cancellable `heimdall:time-before` event and the `heimdall:time-after` and `heimdall:time-error` events. Formatted output is always assigned as text, and formatting failures preserve the server fallback.
+
 ## Links
 
 - [Documentation](https://heimdall-framework.org)
