@@ -1,9 +1,12 @@
 import { createActionInvoker } from "./core/actions.js";
 import { createBootTriggers } from "./core/boot-triggers.js";
+import { createBusyStateManager } from "./core/busy-state.js";
+import { createClientInfoRuntime } from "./core/client-info.js";
 import { createDiagnostics } from "./core/diagnostics.js";
 import { createDomPipeline } from "./core/dom.js";
 import { createEventDelegates } from "./core/event-delegates.js";
 import { createJsInvokeVoidRuntime } from "./core/js-invoke-void.js";
+import { createMutationRuntime } from "./core/mutations.js";
 import { createPayloadResolver } from "./core/payloads.js";
 import { createRequestCoordinator } from "./core/request-coordinator.js";
 import { createSecurityTokens } from "./core/security-tokens.js";
@@ -239,6 +242,10 @@ import {
     //   - heimdall-payload-from="closest-form|self|#form|ref:path|closest-state[:key]"
     //   - heimdall-payload-ref="Path.To.Object"
     //
+    // Capture timing:
+    //   - closest-state is refreshed when a coordinated request actually starts
+    //   - forms, files, inline payloads, and element datasets are event snapshots
+    //
     // ---------------------------------------------------------------------------
     // Trigger Modifiers
     // ---------------------------------------------------------------------------
@@ -312,9 +319,10 @@ import {
 
     const ACTION_HEADER = "X-Heimdall-Content-Action";
     const CSRF_HEADER = "RequestVerificationToken";
+    const CLIENT_INFO_HEADER = "X-Heimdall-Client-Info";
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
-    const { payloadFromElement } = createPayloadResolver(global);
+    const { payloadBindingFromElement } = createPayloadResolver(global);
     const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
     const coordinator = createRequestCoordinator({
         global,
@@ -331,13 +339,28 @@ import {
         emitLifecycle,
         dbg
     });
+    const busyState = createBusyStateManager();
+    const clientInfo = createClientInfoRuntime({
+        global,
+        getConfig: getRuntimeConfig,
+        emitLifecycle,
+        dbg
+    });
+    const mutations = createMutationRuntime({
+        global,
+        emitLifecycle,
+        dbg,
+        boot: root => boot(root),
+        busyState
+    });
     const dom = createDomPipeline({
         getConfig: getRuntimeConfig,
         boot: root => boot(root),
         dbg,
         emitLifecycle,
         jsInvokeVoid,
-        timeLocalization
+        timeLocalization,
+        mutations
     });
     const {
         clearBifrostSubscribeToken,
@@ -364,12 +387,15 @@ import {
         emit,
         emitLifecycle,
         dbg,
-        payloadFromElement,
+        payloadBindingFromElement,
         boot: root => boot(root),
         dom,
         coordinator,
+        busyState,
+        getClientInfoHeader: clientInfo.getHeaderValue,
         actionHeader: ACTION_HEADER,
-        csrfHeader: CSRF_HEADER
+        csrfHeader: CSRF_HEADER,
+        clientInfoHeader: CLIENT_INFO_HEADER
     });
     const {
         handleChange,

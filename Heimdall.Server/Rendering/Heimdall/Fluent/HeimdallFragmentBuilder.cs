@@ -45,6 +45,32 @@ namespace Heimdall.Server.Rendering
 				return this;
 			}
 
+			/// <summary>Adds a single-root in-place mutation directive to the response fragment.</summary>
+			public HeimdallFragmentBuilder Mutate(
+				string targetSelector,
+				Action<MutationBuilder> build,
+				HeimdallHtml.MutationScope scope = default)
+			{
+				ArgumentNullException.ThrowIfNull(build);
+				var mutation = new MutationBuilder();
+				build(mutation);
+				_f.Add(HeimdallHtml.Mutate(targetSelector, scope, allTargets: false, mutation.ToArray()));
+				return this;
+			}
+
+			/// <summary>Adds an in-place mutation directive for every root matching the target selector.</summary>
+			public HeimdallFragmentBuilder MutateAll(
+				string targetSelector,
+				Action<MutationBuilder> build,
+				HeimdallHtml.MutationScope scope = default)
+			{
+				ArgumentNullException.ThrowIfNull(build);
+				var mutation = new MutationBuilder();
+				build(mutation);
+				_f.Add(HeimdallHtml.Mutate(targetSelector, scope, allTargets: true, mutation.ToArray()));
+				return this;
+			}
+
 			/// <summary>
 			/// Adds an abort directive that suppresses the main target swap.
 			/// </summary>

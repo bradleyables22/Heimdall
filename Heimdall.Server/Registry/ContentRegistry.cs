@@ -1,4 +1,5 @@
 ﻿using Heimdall.Server.Registry;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
@@ -94,6 +95,9 @@ namespace Heimdall.Server
             var formOptions = ResolveNearestMetadata<IFormOptionsMetadata>(
                 method,
                 "request-form limits");
+            var antiforgery = ResolveNearestMetadata<IAntiforgeryMetadata>(
+                method,
+                "antiforgery");
 
             if (requestSizeLimit?.MaxRequestBodySize < 0)
             {
@@ -112,7 +116,8 @@ namespace Heimdall.Server
                 authorizationMetadata.AuthorizeData,
                 authorizationMetadata.AllowAnonymous,
                 requestSizeLimit,
-                formOptions);
+                formOptions,
+                antiforgery?.RequiresValidation ?? true);
         }
 
         private static void ValidateCallable(MethodInfo method)
@@ -193,6 +198,12 @@ namespace Heimdall.Server
                     continue;
                 }
 
+                if (pt == typeof(HeimdallClientInfo))
+                {
+                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.ClientInfo));
+                    continue;
+                }
+
                 if (IsFormFileParameterType(pt))
                 {
                     if (IsExplicitServiceParameter(p) || IsExplicitPayloadParameter(p))
@@ -267,6 +278,7 @@ namespace Heimdall.Server
                 if (pt == typeof(HttpContext) ||
                     pt == typeof(CancellationToken) ||
                     pt == typeof(System.Security.Claims.ClaimsPrincipal) ||
+                    pt == typeof(HeimdallClientInfo) ||
                     IsFormFileParameterType(pt))
                 {
                     continue;

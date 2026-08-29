@@ -24,7 +24,6 @@ namespace Heimdall.Server
 
             app.MapGet("__heimdall/v1/bifrost/token", async (
 				HttpContext ctx,
-				[FromServices] IAntiforgery antiforgery,
 				[FromServices] BifrostSubscribeToken tokenSvc,
 				[FromServices] IOptions<HeimdallServiceSettings> options) =>
             {
@@ -33,29 +32,33 @@ namespace Heimdall.Server
                 if (string.IsNullOrWhiteSpace(topic))
                     return Results.BadRequest("Querystring 'topic' is required.");
 
-                try
+                if (options.Value.EnableAntiforgery)
                 {
-                    await antiforgery.ValidateRequestAsync(ctx);
-                }
-                catch (AntiforgeryValidationException ex)
-                {
-                    logger?.LogWarning(
-                        ex,
-                        "Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        topic,
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        ctx.TraceIdentifier);
-
-                    if (options.Value.EnableDetailedErrors)
+                    var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+                    try
                     {
-                        return Results.Problem(
-                            detail: ex.ToString(),
-                            title: "Invalid Heimdall antiforgery token",
-                            statusCode: StatusCodes.Status400BadRequest);
+                        await antiforgery.ValidateRequestAsync(ctx);
                     }
+                    catch (AntiforgeryValidationException ex)
+                    {
+                        logger?.LogWarning(
+                            ex,
+                            "Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                            topic,
+                            ctx.Request.Method,
+                            ctx.Request.Path,
+                            ctx.TraceIdentifier);
 
-                    return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                        if (options.Value.EnableDetailedErrors)
+                        {
+                            return Results.Problem(
+                                detail: ex.ToString(),
+                                title: "Invalid Heimdall antiforgery token",
+                                statusCode: StatusCodes.Status400BadRequest);
+                        }
+
+                        return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                    }
                 }
 
 				var authorizationResult = await AuthorizeBifrostTopicAsync(ctx, topic, options.Value);

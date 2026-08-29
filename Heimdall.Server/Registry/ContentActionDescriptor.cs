@@ -35,6 +35,8 @@ namespace Heimdall.Server
 
         public IFormOptionsMetadata? FormOptions { get; }
 
+        public bool RequiresAntiforgery { get; }
+
         public bool RequiresAuthorization => AuthorizeData.Count > 0 && !AllowAnonymous;
 
         public bool HasPayload => PayloadParameter is not null;
@@ -53,7 +55,8 @@ namespace Heimdall.Server
             IReadOnlyList<IAuthorizeData> authorizeData,
             bool allowAnonymous,
             IRequestSizeLimitMetadata? requestSizeLimit,
-            IFormOptionsMetadata? formOptions)
+            IFormOptionsMetadata? formOptions,
+            bool requiresAntiforgery)
         {
             ActionId = actionId;
             Method = method;
@@ -65,6 +68,7 @@ namespace Heimdall.Server
             AllowAnonymous = allowAnonymous;
             RequestSizeLimit = requestSizeLimit;
             FormOptions = formOptions;
+            RequiresAntiforgery = requiresAntiforgery;
             PayloadParameter = parameters.FirstOrDefault(x =>
                 x.Kind is ContentActionParameterKind.Payload or ContentActionParameterKind.FormPayload);
             _invoker = CompileInvoker(method);

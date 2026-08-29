@@ -145,6 +145,9 @@ namespace Heimdall.Server
             Action<HeimdallServiceSettings>? configure,
             Assembly[]? assemblies)
         {
+            // Bifrost subscribe tokens require data protection independently of antiforgery.
+            services.AddDataProtection();
+
             if (configure != null)
                 services.Configure(configure);
             else

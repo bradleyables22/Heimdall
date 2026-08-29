@@ -15,7 +15,10 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Disables the element while a request is in progress.
 		/// </summary>
-		public static Html.HtmlAttr Disable(bool on = true) => Html.Bool(Attrs.Disable, on);
+		public static Html.HtmlAttr Disable(bool on = true)
+			=> on
+				? Html.Bool(Attrs.Disable, true)
+				: Html.Attr(Attrs.Disable, "false");
 
 		/// <summary>
 		/// Prevents default browser behavior for the element.

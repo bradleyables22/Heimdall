@@ -634,6 +634,7 @@ export function createSseRuntime({
         let abortReason = null;
         let redirectUrl = null;
         let jsAfter = [];
+        let mutationTargets = [];
 
         try {
             const oob = dom.processOob(html, state.el, {
@@ -650,6 +651,7 @@ export function createSseRuntime({
             abortReason = oob.abortReason || null;
             redirectUrl = oob.redirectUrl || null;
             jsAfter = oob.jsAfter || [];
+            mutationTargets = oob.mutationTargets || [];
         } catch (e) {
             emit("heimdall:sse-error", { topic: state.topic, url, el: state.el, error: e });
             if (getConfig().debug) {
@@ -683,6 +685,7 @@ export function createSseRuntime({
             dom.stripAbortsFromFragment(mainTpl.content);
             dom.stripRedirectsFromFragment(mainTpl.content);
             dom.stripJsInvokeVoidFromFragment(mainTpl.content);
+            dom.stripMutationsFromFragment(mainTpl.content);
 
             const swapResult = dom.applySwap(targetEl, mainTpl.content, swapMode, {
                 kind: "sse",
@@ -699,6 +702,8 @@ export function createSseRuntime({
                 catch { /* ignore */ }
             }
         }
+
+        dom.reconcileMutations(mutationTargets);
 
         dom.invokeJsInvokeVoidDirectives(jsAfter, {
             phase: "after",

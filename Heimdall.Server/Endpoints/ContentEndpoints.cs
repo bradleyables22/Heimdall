@@ -80,42 +80,47 @@ namespace Heimdall.Server
                     }
                 }
 
-                var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-                try
+                var requiresAntiforgery = settings.EnableAntiforgery &&
+                    (action?.RequiresAntiforgery ?? true);
+                if (requiresAntiforgery)
                 {
-                    await antiforgery.ValidateRequestAsync(ctx);
-                }
-                catch (Exception ex) when (IsRequestTooLargeException(ex))
-                {
-                    telemetry.RecordException(ex, StatusCodes.Status413PayloadTooLarge);
-                    logger?.LogWarning(
-                        ex,
-                        "Heimdall content action request body exceeded an ASP.NET Core request or form limit for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        ctx.TraceIdentifier);
-
-                    return CreateRequestTooLargeResult(settings, ex);
-                }
-                catch (AntiforgeryValidationException ex)
-                {
-                    telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
-                    logger?.LogWarning(
-                        ex,
-                        "Heimdall content action request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        ctx.TraceIdentifier);
-
-                    if (settings.EnableDetailedErrors)
+                    var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+                    try
                     {
-                        return Results.Problem(
-                            detail: ex.ToString(),
-                            title: "Invalid Heimdall antiforgery token",
-                            statusCode: StatusCodes.Status400BadRequest);
+                        await antiforgery.ValidateRequestAsync(ctx);
                     }
+                    catch (Exception ex) when (IsRequestTooLargeException(ex))
+                    {
+                        telemetry.RecordException(ex, StatusCodes.Status413PayloadTooLarge);
+                        logger?.LogWarning(
+                            ex,
+                            "Heimdall content action request body exceeded an ASP.NET Core request or form limit for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                            ctx.Request.Method,
+                            ctx.Request.Path,
+                            ctx.TraceIdentifier);
 
-                    return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                        return CreateRequestTooLargeResult(settings, ex);
+                    }
+                    catch (AntiforgeryValidationException ex)
+                    {
+                        telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
+                        logger?.LogWarning(
+                            ex,
+                            "Heimdall content action request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                            ctx.Request.Method,
+                            ctx.Request.Path,
+                            ctx.TraceIdentifier);
+
+                        if (settings.EnableDetailedErrors)
+                        {
+                            return Results.Problem(
+                                detail: ex.ToString(),
+                                title: "Invalid Heimdall antiforgery token",
+                                statusCode: StatusCodes.Status400BadRequest);
+                        }
+
+                        return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                    }
                 }
 
                 if (!hasActionHeader)
@@ -393,8 +398,10 @@ namespace Heimdall.Server
             var args = new object?[action.Parameters.Count];
             JsonElement? bodyJson = null;
             IFormCollection? requestForm = null;
+            HeimdallClientInfo? clientInfo = null;
             bool bodyRead = false;
             bool formRead = false;
+            bool clientInfoRead = false;
 
             foreach (var parameter in action.Parameters)
             {
@@ -403,6 +410,7 @@ namespace Heimdall.Server
                     ContentActionParameterKind.HttpContext => ctx,
                     ContentActionParameterKind.CancellationToken => ctx.RequestAborted,
                     ContentActionParameterKind.ClaimsPrincipal => ctx.User,
+                    ContentActionParameterKind.ClientInfo => BindClientInfo(ctx),
                     ContentActionParameterKind.Service => ResolveRequiredService(ctx, action, parameter),
                     ContentActionParameterKind.Payload => await BindPayloadParameterAsync(ctx, parameter),
                     ContentActionParameterKind.FormPayload => await BindFormPayloadParameterAsync(ctx, parameter),
@@ -413,6 +421,47 @@ namespace Heimdall.Server
             }
 
             return args;
+
+            HeimdallClientInfo BindClientInfo(HttpContext httpContext)
+            {
+                if (clientInfoRead)
+                    return clientInfo!;
+
+                clientInfoRead = true;
+                if (!httpContext.Request.Headers.TryGetValue(HeimdallClientInfo.HeaderName, out var values))
+                    return clientInfo = new HeimdallClientInfo();
+
+                if (values.Count != 1 || string.IsNullOrWhiteSpace(values[0]))
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status400BadRequest,
+                        $"The {HeimdallClientInfo.HeaderName} header must contain one JSON object.");
+                }
+
+                var raw = values[0]!;
+                if (raw.Length > HeimdallClientInfo.MaxHeaderLength)
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status400BadRequest,
+                        $"The {HeimdallClientInfo.HeaderName} header exceeds the " +
+                        $"{HeimdallClientInfo.MaxHeaderLength}-character limit.");
+                }
+
+                try
+                {
+                    clientInfo = JsonSerializer.Deserialize<HeimdallClientInfo>(raw, JsonOptions)
+                        ?? throw new JsonException("The client information value was null.");
+                    clientInfo.IsAvailable = true;
+                    return clientInfo;
+                }
+                catch (JsonException ex)
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status400BadRequest,
+                        $"The {HeimdallClientInfo.HeaderName} header does not contain valid client information.",
+                        ex);
+                }
+            }
 
             async Task<object?> BindPayloadParameterAsync(
                 HttpContext httpContext,

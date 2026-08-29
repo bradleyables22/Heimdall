@@ -22,17 +22,42 @@ export function createPayloadResolver(global) {
         return null;
     }
 
-    function readClosestState(el, key) {
-        const host = findClosestStateElement(el, key);
-        if (!host)
+    function readStateAttribute(host, attr) {
+        if (!host || !host.hasAttribute || !host.hasAttribute(attr))
             return null;
 
-        const attr = key ? `data-heimdall-state-${key}` : "data-heimdall-state";
         const raw = host.getAttribute(attr);
         if (!raw)
             return null;
 
         return safeJsonParse(raw);
+    }
+
+    function createClosestStateBinding(el, key) {
+        const host = findClosestStateElement(el, key);
+        if (!host)
+            return null;
+
+        const attribute = key ? `data-heimdall-state-${key}` : "data-heimdall-state";
+        return {
+            kind: "closest-state",
+            host,
+            attribute,
+            value: readStateAttribute(host, attribute),
+            resolve() {
+                if (host.isConnected === false || !host.hasAttribute(attribute)) {
+                    return {
+                        available: false,
+                        value: null
+                    };
+                }
+
+                return {
+                    available: true,
+                    value: readStateAttribute(host, attribute)
+                };
+            }
+        };
     }
 
     function resolvePayloadRef(el) {
@@ -48,14 +73,14 @@ export function createPayloadResolver(global) {
         return undefined;
     }
 
-    function payloadFromElement(el) {
+    function payloadBindingFromElement(el) {
         const payloadAttr = getAttr(el, "heimdall-payload");
         if (payloadAttr)
-            return safeJsonParse(payloadAttr);
+            return { value: safeJsonParse(payloadAttr), binding: null };
 
         const refObj = resolvePayloadRef(el);
         if (refObj !== undefined)
-            return refObj;
+            return { value: refObj, binding: null };
 
         const fromRaw = (getAttr(el, "heimdall-payload-from") || "").trim();
         const from = fromRaw.toLowerCase();
@@ -65,34 +90,42 @@ export function createPayloadResolver(global) {
             const key = from.startsWith("closest-state:")
                 ? fromRaw.substring("closest-state:".length).trim()
                 : null;
-            return readClosestState(el, key || null);
+            const binding = createClosestStateBinding(el, key || null);
+            return binding
+                ? { value: binding.value, binding }
+                : { value: null, binding: null };
         }
 
         if (!from)
-            return null;
+            return { value: null, binding: null };
 
         if (from === "closest-form") {
             const form = el.closest("form");
             if (!form)
-                return null;
-            return formDataToPayload(new FormData(form));
+                return { value: null, binding: null };
+            return { value: formDataToPayload(new FormData(form)), binding: null };
         }
 
         if (from === "self") {
             const obj = {};
             for (const key in el.dataset) obj[key] = el.dataset[key];
-            return obj;
+            return { value: obj, binding: null };
         }
 
         const form = document.querySelector(fromRaw);
         if (form && form.tagName === "FORM") {
-            return formDataToPayload(new FormData(form));
+            return { value: formDataToPayload(new FormData(form)), binding: null };
         }
 
-        return null;
+        return { value: null, binding: null };
+    }
+
+    function payloadFromElement(el) {
+        return payloadBindingFromElement(el).value;
     }
 
     return {
+        payloadBindingFromElement,
         payloadFromElement
     };
 }

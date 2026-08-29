@@ -77,8 +77,9 @@ export function createSecurityTokens({
     }
 
     async function fetchBifrostSubscribeToken(t, shouldRetry) {
-        const csrf = await ensureCsrfToken();
         const config = getConfig();
+        const antiforgeryEnabled = config.antiforgery !== false;
+        const csrf = antiforgeryEnabled ? await ensureCsrfToken() : null;
 
         const base = config.endpoints && config.endpoints.bifrostToken
             ? config.endpoints.bifrostToken
@@ -87,13 +88,16 @@ export function createSecurityTokens({
         const url = new URL(base, global.location?.origin || undefined);
         url.searchParams.set("topic", t);
 
+        const headers = {
+            "X-Requested-With": "XMLHttpRequest"
+        };
+        if (antiforgeryEnabled)
+            headers[csrfHeader] = csrf;
+
         const res = await global.fetch(url.toString(), {
             method: "GET",
             credentials: "same-origin",
-            headers: {
-                "X-Requested-With": "XMLHttpRequest",
-                [csrfHeader]: csrf
-            }
+            headers
         });
 
         const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
@@ -122,7 +126,7 @@ export function createSecurityTokens({
         if (!res.ok) {
             const body = await safeText(res);
 
-            if (shouldRetry && isAntiforgeryFailure(res.status, body)) {
+            if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res.status, body)) {
                 if (typeof dbg === "function")
                     dbg("bifrost csrf validation suspected; retrying once with fresh token", { topic: t });
 

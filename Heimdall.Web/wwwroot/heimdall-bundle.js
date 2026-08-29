@@ -144,66 +144,106 @@
     emit,
     emitLifecycle,
     dbg,
-    payloadFromElement,
+    payloadBindingFromElement,
     boot,
     dom,
     coordinator,
+    busyState,
+    getClientInfoHeader,
     actionHeader,
-    csrfHeader
+    csrfHeader,
+    clientInfoHeader
   }) {
-    const busyStates = /* @__PURE__ */ new WeakMap();
     let nextRequestId = 0;
-    function acquireBusyState(el) {
-      if (!el)
-        return;
-      let state = busyStates.get(el);
-      if (!state) {
-        state = {
-          count: 0,
-          hadDisabled: false,
-          hadAriaBusy: false,
-          ariaBusy: null
-        };
-        busyStates.set(el, state);
+    const payloadStates = /* @__PURE__ */ new WeakMap();
+    const targetStates = /* @__PURE__ */ new WeakMap();
+    function payloadSignature(value) {
+      try {
+        return JSON.stringify(value);
+      } catch {
+        return null;
       }
-      if (state.count === 0) {
-        state.hadDisabled = el.hasAttribute("disabled");
-        state.hadAriaBusy = el.hasAttribute("aria-busy");
-        state.ariaBusy = el.getAttribute("aria-busy");
-      }
-      state.count++;
-      el.setAttribute("disabled", "disabled");
-      el.setAttribute("aria-busy", "true");
     }
-    function releaseBusyState(el) {
-      if (!el)
+    function installPayloadState(context, payload, binding) {
+      const state = {
+        value: payload,
+        binding: binding || null,
+        assigned: false,
+        initialSignature: payloadSignature(payload),
+        refreshAtExecution: false
+      };
+      Object.defineProperty(context, "payload", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          return state.value;
+        },
+        set(value) {
+          state.assigned = true;
+          state.value = value;
+        }
+      });
+      payloadStates.set(context, state);
+    }
+    function finalizePayloadConfiguration(context) {
+      const state = payloadStates.get(context);
+      if (!state || !state.binding)
         return;
-      const state = busyStates.get(el);
+      const changedInPlace = payloadSignature(state.value) !== state.initialSignature;
+      state.refreshAtExecution = !state.assigned && !changedInPlace;
+    }
+    function refreshExecutionPayload(context) {
+      const state = payloadStates.get(context);
+      if (!state || !state.refreshAtExecution || !state.binding)
+        return true;
+      const resolved = state.binding.resolve();
+      if (!resolved || !resolved.available)
+        return false;
+      state.value = resolved.value;
+      return true;
+    }
+    function initializeTargetState(context) {
+      const source = context.target;
+      const resolved = resolveTarget(source, context.fallbackTarget);
+      const state = {
+        source,
+        resolved,
+        wasConnected: !!(resolved && resolved.isConnected)
+      };
+      context.target = resolved;
+      targetStates.set(context, state);
+    }
+    function refreshTarget(context, rejectDisconnected) {
+      const state = targetStates.get(context);
       if (!state)
-        return;
-      state.count = Math.max(0, state.count - 1);
-      if (state.count > 0)
-        return;
-      if (!state.hadDisabled)
-        el.removeAttribute("disabled");
-      if (state.hadAriaBusy)
-        el.setAttribute("aria-busy", state.ariaBusy == null ? "" : state.ariaBusy);
-      else
-        el.removeAttribute("aria-busy");
-      busyStates.delete(el);
+        return true;
+      if (context.target !== state.resolved) {
+        state.source = context.target;
+        state.wasConnected = !!(context.target && context.target.isConnected);
+      }
+      if (typeof state.source === "string") {
+        state.resolved = resolveTarget(state.source, null);
+        context.target = state.resolved;
+        return true;
+      }
+      const target = resolveTarget(state.source, context.fallbackTarget);
+      if (rejectDisconnected && state.wasConnected && target && target.isConnected === false)
+        return false;
+      state.resolved = target;
+      context.target = target;
+      return true;
     }
     function createRequestContext(actionId, payload, options) {
       const config = getConfig();
       const sourceElement = options.sourceEl || null;
       const configuredSync = options.sync != null ? options.sync : sourceElement ? getAttr(sourceElement, "heimdall-sync") : null;
       const configuredGroup = options.syncGroup != null ? options.syncGroup : sourceElement ? getAttr(sourceElement, "heimdall-sync-group") : null;
-      return {
+      const context = {
         requestId: ++nextRequestId,
         attempt: 0,
         actionId,
         trigger: options.triggerName || null,
         sourceElement,
-        payload,
         target: options.target,
         fallbackTarget: options.fallbackTarget || null,
         swap: options.swap || "inner",
@@ -227,6 +267,8 @@
         startedExecutionAt: null,
         finishedAt: null
       };
+      installPayloadState(context, payload, options.payloadBinding);
+      return context;
     }
     function emitCancellation(context, result) {
       const detail = context;
@@ -239,15 +281,24 @@
       options = options || {};
       const context = createRequestContext(actionId, payload, options);
       emitLifecycle(context.sourceElement, "heimdall:request-config", context);
-      context.target = resolveTarget(context.target, context.fallbackTarget);
+      finalizePayloadConfiguration(context);
+      initializeTargetState(context);
       context.sync = coordinator.normalizeStrategy(context.sync, getConfig().requestSync || "parallel");
       try {
         const result = await coordinator.run(context, async () => {
-          acquireBusyState(context.disableElement);
+          if (!refreshExecutionPayload(context)) {
+            coordinator.cancel(context, "payload-source-unavailable");
+            return coordinator.getCancellationResult(context);
+          }
+          if (!refreshTarget(context, true)) {
+            coordinator.cancel(context, "target-disconnected");
+            return coordinator.getCancellationResult(context);
+          }
+          busyState.acquire(context.disableElement);
           try {
             return await executeRequestAttempt(context, options, true);
           } finally {
-            releaseBusyState(context.disableElement);
+            busyState.release(context.disableElement);
           }
         });
         context.result = result;
@@ -266,14 +317,22 @@
       context.attempt++;
       const url = new URL(context.endpoint, global.location?.origin || void 0);
       url.searchParams.set("action", context.actionId);
-      const token = await ensureCsrfToken();
-      if (!coordinator.isCurrent(context))
-        return coordinator.getCancellationResult(context);
+      const antiforgeryEnabled = getConfig().antiforgery !== false;
+      let token = null;
+      if (antiforgeryEnabled) {
+        token = await ensureCsrfToken();
+        if (!coordinator.isCurrent(context))
+          return coordinator.getCancellationResult(context);
+      }
       const isFormData = typeof global.FormData === "function" && context.payload instanceof global.FormData;
       const headers = {
-        [actionHeader]: context.actionId,
-        [csrfHeader]: token
+        [actionHeader]: context.actionId
       };
+      if (antiforgeryEnabled)
+        headers[csrfHeader] = token;
+      const clientInfo = typeof getClientInfoHeader === "function" ? getClientInfoHeader(context) : null;
+      if (clientInfo)
+        headers[clientInfoHeader] = clientInfo;
       if (!isFormData)
         headers["Content-Type"] = "application/json";
       for (const key in context.headers)
@@ -367,7 +426,7 @@
       context.rawHtml = rawHtml;
       if (!coordinator.isCurrent(context))
         return coordinator.getCancellationResult(context);
-      if (response.status === 400 && shouldRetry) {
+      if (antiforgeryEnabled && response.status === 400 && shouldRetry) {
         const lower = rawHtml.toLowerCase();
         if (lower.includes("csrf") || lower.includes("antiforgery")) {
           dbg("csrf validation suspected; retrying once with fresh token");
@@ -407,6 +466,7 @@
       let abortReason = null;
       let redirectUrl = null;
       let jsAfter = [];
+      let oobMutationTargets = [];
       if (response.ok) {
         const oob = dom.processOob(html, context.sourceElement, {
           kind: "action",
@@ -424,6 +484,7 @@
         abortReason = oob.abortReason || null;
         redirectUrl = oob.redirectUrl || null;
         jsAfter = oob.jsAfter || [];
+        oobMutationTargets = oob.mutationTargets || [];
       } else {
         html = dom.sanitizeHtmlStringNoApply(html);
       }
@@ -464,12 +525,16 @@
         });
         dbg("swap aborted", { actionId: context.actionId, reason: abortReason, target: context.target });
       }
+      if (response.ok && !abortSwap) {
+        refreshTarget(context, false);
+      }
       if (response.ok && context.target && !abortSwap) {
         const mainTemplate = dom.parseHtmlToTemplate(html);
         dom.stripInvocationsFromFragment(mainTemplate.content);
         dom.stripAbortsFromFragment(mainTemplate.content);
         dom.stripRedirectsFromFragment(mainTemplate.content);
         dom.stripJsInvokeVoidFromFragment(mainTemplate.content);
+        dom.stripMutationsFromFragment(mainTemplate.content);
         const swapResult = dom.applySwap(
           context.target,
           mainTemplate.content,
@@ -489,6 +554,8 @@
           }
         }
       }
+      if (response.ok)
+        dom.reconcileMutations(oobMutationTargets);
       if (response.ok) {
         dom.invokeJsInvokeVoidDirectives(jsAfter, {
           phase: "after",
@@ -560,24 +627,29 @@
       const swap = getAttr(el, "heimdall-content-swap") || "inner";
       const sync = getAttr(el, "heimdall-sync");
       const syncGroup = getAttr(el, "heimdall-sync-group");
-      let payload = payloadFromElement(el);
+      let payloadResolution = payloadBindingFromElement(el);
+      let payload = payloadResolution.value;
+      let payloadBinding = payloadResolution.binding;
       if (payload == null && triggerName === "submit") {
         if (el && el.tagName === "FORM") {
           payload = formDataToPayload(new FormData(el));
+          payloadBinding = null;
         } else {
           const form = el.closest && el.closest("form");
-          if (form)
+          if (form) {
             payload = formDataToPayload(new FormData(form));
+            payloadBinding = null;
+          }
         }
       }
-      return { target, swap, payload, sync, syncGroup };
+      return { target, swap, payload, payloadBinding, sync, syncGroup };
     }
     async function runActionFromElement(el, actionId, triggerName, extraOptions) {
       if (!el || !actionId)
         return;
       if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
         return;
-      const { target, swap, payload, sync, syncGroup } = getCommonOptions(el, triggerName);
+      const { target, swap, payload, payloadBinding, sync, syncGroup } = getCommonOptions(el, triggerName);
       const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
       const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
       const opts = Object.assign({
@@ -588,6 +660,7 @@
         fallbackTarget: el,
         sourceEl: el,
         triggerName,
+        payloadBinding,
         disableElement: shouldDisable ? el : null
       }, extraOptions || {});
       try {
@@ -611,25 +684,43 @@
     function matchesTriggerAttr(el, attr) {
       return isElement(el) && el.hasAttribute(attr);
     }
-    function bootLoads(root) {
+    function candidates(root, selector) {
+      const result = [];
+      const seen = /* @__PURE__ */ new Set();
+      const add = (el) => {
+        if (!isElement(el) || seen.has(el))
+          return;
+        seen.add(el);
+        result.push(el);
+      };
+      add(root);
       const scope = isElement(root) ? root : document;
-      const candidates = [];
-      if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-load"))
-        candidates.push(root);
-      for (const el of scope.querySelectorAll("[heimdall-content-load]"))
-        candidates.push(el);
-      for (const el of candidates) {
-        if (el.__heimdallLoaded)
-          continue;
-        el.__heimdallLoaded = true;
-        const actionId = getAttr(el, "heimdall-content-load");
-        if (!actionId)
-          continue;
-        runActionFromElement(el, actionId, "load").catch(() => {
-        });
+      for (const el of scope.querySelectorAll(selector))
+        add(el);
+      return result;
+    }
+    const _loadActions = /* @__PURE__ */ new WeakMap();
+    function reconcileLoad(el) {
+      const actionId = (getAttr(el, "heimdall-content-load") || "").trim();
+      const previous = _loadActions.get(el) || null;
+      if (!actionId) {
+        _loadActions.delete(el);
+        el.__heimdallLoaded = false;
+        return;
       }
+      if (previous === actionId)
+        return;
+      _loadActions.set(el, actionId);
+      el.__heimdallLoaded = true;
+      runActionFromElement(el, actionId, "load").catch(() => {
+      });
+    }
+    function bootLoads(root) {
+      for (const el of candidates(root, "[heimdall-content-load]"))
+        reconcileLoad(el);
     }
     let _visibleObserver = null;
+    const _visibleStates = /* @__PURE__ */ new WeakMap();
     function ensureVisibleObserver() {
       if (_visibleObserver)
         return _visibleObserver;
@@ -654,6 +745,9 @@
               _visibleObserver.unobserve(el);
             } catch {
             }
+            const state = _visibleStates.get(el);
+            if (state)
+              state.observed = false;
           }
           runActionFromElement(el, actionId, "visible").catch(() => {
           });
@@ -665,46 +759,79 @@
       });
       return _visibleObserver;
     }
-    function bootVisible(root) {
-      const scope = isElement(root) ? root : document;
-      const obs = ensureVisibleObserver();
-      const candidates = [];
-      if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-visible"))
-        candidates.push(root);
-      for (const el of scope.querySelectorAll("[heimdall-content-visible]"))
-        candidates.push(el);
-      for (const el of candidates) {
-        if (el.__heimdallVisibleBound)
-          continue;
-        el.__heimdallVisibleBound = true;
-        try {
-          obs.observe(el);
-        } catch {
-        }
+    function stopVisible(el) {
+      const state = _visibleStates.get(el);
+      if (!state)
+        return;
+      try {
+        ensureVisibleObserver().unobserve(el);
+      } catch {
+      }
+      _visibleStates.delete(el);
+      el.__heimdallVisibleBound = false;
+    }
+    function reconcileVisible(el) {
+      const actionId = (getAttr(el, "heimdall-content-visible") || "").trim();
+      if (!actionId) {
+        stopVisible(el);
+        return;
+      }
+      const once = truthyAttr(el, "heimdall-visible-once", true);
+      const previous = _visibleStates.get(el);
+      if (previous && previous.actionId === actionId && previous.once === once)
+        return;
+      if (previous)
+        stopVisible(el);
+      _visibleStates.set(el, { actionId, once, observed: true });
+      el.__heimdallVisibleBound = true;
+      try {
+        ensureVisibleObserver().observe(el);
+      } catch {
       }
     }
-    const _scrollState = /* @__PURE__ */ new WeakMap();
+    function bootVisible(root) {
+      for (const el of candidates(root, "[heimdall-content-visible]"))
+        reconcileVisible(el);
+    }
+    const _scrollStates = /* @__PURE__ */ new WeakMap();
     function isNearScrollEnd(el, thresholdPx) {
       const target = el === document.body || el === document.documentElement ? document.scrollingElement || document.documentElement : el;
       if (!target)
         return false;
-      const scrollTop = target.scrollTop;
-      const clientHeight = target.clientHeight;
-      const scrollHeight = target.scrollHeight;
-      return scrollTop + clientHeight >= scrollHeight - thresholdPx;
+      return target.scrollTop + target.clientHeight >= target.scrollHeight - thresholdPx;
     }
-    function attachScroll(el) {
-      if (el.__heimdallScrollBound)
+    function stopScroll(el) {
+      const state = _scrollStates.get(el);
+      if (!state)
         return;
-      el.__heimdallScrollBound = true;
-      const handler = () => {
-        const state = _scrollState.get(el) || { ticking: false, lastFire: 0 };
+      try {
+        el.removeEventListener("scroll", state.handler);
+      } catch {
+      }
+      _scrollStates.delete(el);
+      el.__heimdallScrollBound = false;
+    }
+    function reconcileScroll(el) {
+      const actionId = (getAttr(el, "heimdall-content-scroll") || "").trim();
+      if (!actionId) {
+        stopScroll(el);
+        return;
+      }
+      const previous = _scrollStates.get(el);
+      if (previous && previous.actionId === actionId)
+        return;
+      if (previous)
+        stopScroll(el);
+      const state = { actionId, ticking: false, lastFire: 0, handler: null };
+      state.handler = () => {
         if (state.ticking)
           return;
         state.ticking = true;
-        _scrollState.set(el, state);
         requestAnimationFrame(() => {
           state.ticking = false;
+          const currentActionId = getAttr(el, "heimdall-content-scroll");
+          if (!currentActionId)
+            return;
           const config = getConfig();
           const threshold = intAttr(el, "heimdall-scroll-threshold", config.scrollThresholdPx || 120);
           const minInterval = config.scrollMinIntervalMs || 250;
@@ -714,87 +841,83 @@
           if (now - state.lastFire < minInterval)
             return;
           state.lastFire = now;
-          const actionId = getAttr(el, "heimdall-content-scroll");
-          if (!actionId)
-            return;
-          runActionFromElement(el, actionId, "scroll").catch(() => {
+          runActionFromElement(el, currentActionId, "scroll").catch(() => {
           });
         });
       };
-      el.addEventListener("scroll", handler, { passive: true });
+      _scrollStates.set(el, state);
+      el.__heimdallScrollBound = true;
+      el.addEventListener("scroll", state.handler, { passive: true });
     }
     function bootScroll(root) {
-      const scope = isElement(root) ? root : document;
-      if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-scroll"))
-        attachScroll(root);
-      for (const el of scope.querySelectorAll("[heimdall-content-scroll]"))
-        attachScroll(el);
+      for (const el of candidates(root, "[heimdall-content-scroll]"))
+        reconcileScroll(el);
     }
-    const _pollState = /* @__PURE__ */ new WeakMap();
-    function attachPoll(el) {
-      if (el.__heimdallPollBound)
+    const _pollStates = /* @__PURE__ */ new WeakMap();
+    function stopPoll(el) {
+      const state = _pollStates.get(el);
+      if (!state)
         return;
+      clearTimeout(state.timerId);
+      _pollStates.delete(el);
+      el.__heimdallPollBound = false;
+    }
+    function startPoll(el, actionId, intervalMs) {
+      const state = { actionId, intervalMs, timerId: null, inFlight: false };
+      _pollStates.set(el, state);
       el.__heimdallPollBound = true;
-      const intervalMs = intAttr(el, "heimdall-poll", 0);
-      if (!intervalMs || intervalMs <= 0)
-        return;
-      const actionId = getAttr(el, "heimdall-content-load");
-      if (!actionId) {
-        console.warn(`[Heimdall] heimdall-poll set but no heimdall-content-load found on element.`, el);
-        return;
-      }
-      const state = { timerId: null, inFlight: false };
-      _pollState.set(el, state);
       const tick = async () => {
         if (!el.isConnected) {
           stopPoll(el);
           return;
         }
-        if (document.hidden)
-          return;
-        if (state.inFlight)
+        if (document.hidden || state.inFlight)
           return;
         state.inFlight = true;
         try {
-          await runActionFromElement(el, actionId, "load", { reason: "poll" });
+          await runActionFromElement(el, state.actionId, "load", { reason: "poll" });
         } finally {
           state.inFlight = false;
         }
       };
       const schedule = () => {
-        if (!el.isConnected) {
+        if (!el.isConnected || _pollStates.get(el) !== state) {
           stopPoll(el);
           return;
         }
-        const st = _pollState.get(el);
-        if (!st)
-          return;
-        clearTimeout(st.timerId);
-        st.timerId = setTimeout(async () => {
+        clearTimeout(state.timerId);
+        state.timerId = setTimeout(async () => {
           try {
             await tick();
           } catch {
           } finally {
-            schedule();
+            if (_pollStates.get(el) === state)
+              schedule();
           }
-        }, intervalMs);
+        }, state.intervalMs);
       };
       schedule();
     }
-    function stopPoll(el) {
-      const st = _pollState.get(el);
-      if (!st)
+    function reconcilePoll(el) {
+      const intervalMs = intAttr(el, "heimdall-poll", 0);
+      const actionId = (getAttr(el, "heimdall-content-load") || "").trim();
+      const previous = _pollStates.get(el);
+      if (!intervalMs || intervalMs <= 0 || !actionId) {
+        if (intervalMs > 0 && !actionId) {
+          console.warn(`[Heimdall] heimdall-poll set but no heimdall-content-load found on element.`, el);
+        }
+        stopPoll(el);
         return;
-      clearTimeout(st.timerId);
-      _pollState.delete(el);
-      el.__heimdallPollBound = false;
+      }
+      if (previous && previous.intervalMs === intervalMs && previous.actionId === actionId)
+        return;
+      if (previous)
+        stopPoll(el);
+      startPoll(el, actionId, intervalMs);
     }
     function bootPoll(root) {
-      const scope = isElement(root) ? root : document;
-      if (isElement(root) && matchesTriggerAttr(root, "heimdall-poll"))
-        attachPoll(root);
-      for (const el of scope.querySelectorAll("[heimdall-poll]"))
-        attachPoll(el);
+      for (const el of candidates(root, "[heimdall-poll]"))
+        reconcilePoll(el);
     }
     return {
       bootLoads,
@@ -802,6 +925,257 @@
       bootScroll,
       bootVisible,
       matchesTriggerAttr
+    };
+  }
+
+  // core/busy-state.js
+  function createBusyStateManager() {
+    const states = /* @__PURE__ */ new WeakMap();
+    function acquire(el) {
+      if (!el)
+        return;
+      let state = states.get(el);
+      if (!state) {
+        state = {
+          count: 0,
+          hadDisabled: false,
+          hadAriaBusy: false,
+          ariaBusy: null
+        };
+        states.set(el, state);
+      }
+      if (state.count === 0) {
+        state.hadDisabled = el.hasAttribute("disabled");
+        state.hadAriaBusy = el.hasAttribute("aria-busy");
+        state.ariaBusy = el.getAttribute("aria-busy");
+      }
+      state.count++;
+      el.setAttribute("disabled", "disabled");
+      el.setAttribute("aria-busy", "true");
+    }
+    function release(el) {
+      if (!el)
+        return;
+      const state = states.get(el);
+      if (!state)
+        return;
+      state.count = Math.max(0, state.count - 1);
+      if (state.count > 0)
+        return;
+      if (state.hadDisabled)
+        el.setAttribute("disabled", "disabled");
+      else
+        el.removeAttribute("disabled");
+      if (state.hadAriaBusy)
+        el.setAttribute("aria-busy", state.ariaBusy == null ? "" : state.ariaBusy);
+      else
+        el.removeAttribute("aria-busy");
+      states.delete(el);
+    }
+    function rebaseAttribute(el, name, present, value) {
+      const state = el ? states.get(el) : null;
+      if (!state || state.count <= 0)
+        return;
+      const normalized = String(name || "").toLowerCase();
+      if (normalized === "disabled") {
+        state.hadDisabled = !!present;
+        el.setAttribute("disabled", "disabled");
+        return;
+      }
+      if (normalized === "aria-busy") {
+        state.hadAriaBusy = !!present;
+        state.ariaBusy = present ? String(value == null ? "" : value) : null;
+        el.setAttribute("aria-busy", "true");
+      }
+    }
+    return {
+      acquire,
+      rebaseAttribute,
+      release
+    };
+  }
+
+  // core/client-info.js
+  var MEDIA_QUERIES = [
+    "(prefers-color-scheme: dark)",
+    "(prefers-color-scheme: light)",
+    "(prefers-reduced-motion: reduce)",
+    "(prefers-contrast: more)",
+    "(prefers-contrast: less)",
+    "(prefers-contrast: custom)",
+    "(forced-colors: active)",
+    "(pointer: coarse)",
+    "(pointer: fine)",
+    "(hover: hover)"
+  ];
+  function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg }) {
+    const media = /* @__PURE__ */ new Map();
+    let installed = false;
+    let dirty = true;
+    let cachedInfo = null;
+    let capturedAt = 0;
+    function markDirty() {
+      dirty = true;
+    }
+    function getMediaQuery(query) {
+      if (media.has(query))
+        return media.get(query);
+      let result = null;
+      try {
+        result = typeof global.matchMedia === "function" ? global.matchMedia(query) : null;
+      } catch {
+        result = null;
+      }
+      media.set(query, result);
+      return result;
+    }
+    function matches(query) {
+      return getMediaQuery(query)?.matches === true;
+    }
+    function listen(target, eventName) {
+      if (target && typeof target.addEventListener === "function")
+        target.addEventListener(eventName, markDirty, { passive: true });
+    }
+    function installInvalidationListeners() {
+      if (installed)
+        return;
+      installed = true;
+      for (const eventName of ["resize", "orientationchange", "languagechange", "online", "offline"])
+        listen(global, eventName);
+      listen(global.visualViewport, "resize");
+      listen(global.screen?.orientation, "change");
+      for (const query of MEDIA_QUERIES) {
+        const result = getMediaQuery(query);
+        if (!result)
+          continue;
+        if (typeof result.addEventListener === "function")
+          result.addEventListener("change", markDirty);
+        else if (typeof result.addListener === "function")
+          result.addListener(markDirty);
+      }
+    }
+    function finiteNumber(value, fallback = 0) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    }
+    function wholeNumber(value, fallback = 0) {
+      return Math.max(0, Math.round(finiteNumber(value, fallback)));
+    }
+    function shortString(value, maxLength) {
+      return String(value || "").trim().slice(0, maxLength);
+    }
+    function preferredContrast() {
+      if (matches("(prefers-contrast: more)")) return "more";
+      if (matches("(prefers-contrast: less)")) return "less";
+      if (matches("(prefers-contrast: custom)")) return "custom";
+      return "no-preference";
+    }
+    function colorScheme() {
+      if (matches("(prefers-color-scheme: dark)")) return "dark";
+      if (matches("(prefers-color-scheme: light)")) return "light";
+      return "no-preference";
+    }
+    function collect() {
+      const navigator = global.navigator || {};
+      const screen = global.screen || {};
+      const viewport = global.visualViewport;
+      const viewportWidth = finiteNumber(viewport?.width, finiteNumber(global.innerWidth));
+      const viewportHeight = finiteNumber(viewport?.height, finiteNumber(global.innerHeight));
+      const screenWidth = wholeNumber(screen.width, viewportWidth);
+      const screenHeight = wholeNumber(screen.height, viewportHeight);
+      const maxTouchPoints = wholeNumber(navigator.maxTouchPoints);
+      const touch = maxTouchPoints > 0 || "ontouchstart" in global;
+      const coarsePointer = matches("(pointer: coarse)");
+      const pointer = coarsePointer ? "coarse" : matches("(pointer: fine)") ? "fine" : "none";
+      const shortSide = Math.min(
+        screenWidth || wholeNumber(viewportWidth),
+        screenHeight || wholeNumber(viewportHeight)
+      );
+      const deviceCategory = touch && coarsePointer ? shortSide < 600 ? "mobile" : shortSide < 1024 ? "tablet" : "desktop" : "desktop";
+      let timeZone = "";
+      try {
+        timeZone = shortString(global.Intl?.DateTimeFormat().resolvedOptions().timeZone, 128);
+      } catch {
+        timeZone = "";
+      }
+      const languages = Array.isArray(navigator.languages) ? navigator.languages : [navigator.language];
+      return {
+        timeZone: timeZone || null,
+        utcOffsetMinutes: -(/* @__PURE__ */ new Date()).getTimezoneOffset(),
+        locale: shortString(navigator.language, 64) || null,
+        languages: languages.map((language) => shortString(language, 64)).filter(Boolean).slice(0, 16),
+        viewportWidth,
+        viewportHeight,
+        screenWidth,
+        screenHeight,
+        devicePixelRatio: finiteNumber(global.devicePixelRatio, 1),
+        orientation: viewportHeight >= viewportWidth ? "portrait" : "landscape",
+        deviceCategory,
+        colorScheme: colorScheme(),
+        prefersReducedMotion: matches("(prefers-reduced-motion: reduce)"),
+        prefersContrast: preferredContrast(),
+        forcedColors: matches("(forced-colors: active)"),
+        touch,
+        maxTouchPoints,
+        pointer,
+        hover: matches("(hover: hover)"),
+        online: navigator.onLine !== false
+      };
+    }
+    function cloneInfo(info) {
+      return {
+        ...info,
+        languages: Array.isArray(info.languages) ? [...info.languages] : []
+      };
+    }
+    function getHeaderValue(requestContext) {
+      const config = getConfig();
+      if (!config || config.clientInfo !== true)
+        return null;
+      installInvalidationListeners();
+      const configuredMaxAge = Number(config.clientInfoMaxAgeMs);
+      const maxAge = Number.isFinite(configuredMaxAge) ? Math.max(0, configuredMaxAge) : 6e4;
+      const now = Date.now();
+      const age = now - capturedAt;
+      if (!cachedInfo || dirty || age < 0 || age >= maxAge) {
+        try {
+          cachedInfo = collect();
+          capturedAt = now;
+          dirty = false;
+        } catch (error) {
+          cachedInfo = null;
+          if (typeof dbg === "function")
+            dbg("client information collection failed", error);
+        }
+      }
+      if (!cachedInfo)
+        return null;
+      const detail = {
+        actionId: requestContext?.actionId || null,
+        requestId: requestContext?.requestId || null,
+        attempt: requestContext?.attempt || 0,
+        sourceElement: requestContext?.sourceElement || null,
+        info: cloneInfo(cachedInfo)
+      };
+      const shouldInclude = typeof emitLifecycle !== "function" || emitLifecycle(
+        requestContext?.sourceElement || null,
+        "heimdall:client-info-before",
+        detail,
+        { cancelable: true }
+      );
+      if (!shouldInclude || detail.info == null)
+        return null;
+      try {
+        return JSON.stringify(detail.info);
+      } catch (error) {
+        if (typeof dbg === "function")
+          dbg("client information serialization failed", error);
+        return null;
+      }
+    }
+    return {
+      getHeaderValue,
+      invalidate: markDirty
     };
   }
 
@@ -843,7 +1217,7 @@
   }
 
   // core/dom.js
-  function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization }) {
+  function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
     function stripScripts(rootNode) {
       if (!rootNode || !rootNode.querySelectorAll)
         return;
@@ -951,6 +1325,13 @@
       for (const inv of invs)
         inv.remove();
     }
+    function stripMutationsFromFragment(fragment) {
+      if (!fragment || !fragment.querySelectorAll)
+        return;
+      const directives = fragment.querySelectorAll("mutation");
+      for (const directive of directives)
+        directive.remove();
+    }
     function stripAbortsFromFragment(fragment) {
       if (!fragment || !fragment.querySelectorAll)
         return;
@@ -1047,13 +1428,15 @@
       const hasAbort = containsTag(html, "abort");
       const hasRedirect = containsTag(html, "redirect");
       const hasJsInvokeVoid = containsTag(html, "javascript");
-      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid)
+      const hasMutation = containsTag(html, "mutation");
+      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation)
         return html;
       const tpl = parseHtmlToTemplate(html);
       stripInvocationsFromFragment(tpl.content);
       stripAbortsFromFragment(tpl.content);
       stripRedirectsFromFragment(tpl.content);
       stripJsInvokeVoidFromFragment(tpl.content);
+      stripMutationsFromFragment(tpl.content);
       return fragmentToHtml(tpl.content);
     }
     function processOob(html, sourceEl, context) {
@@ -1062,14 +1445,16 @@
       const hasAbort = containsTag(html, "abort");
       const hasRedirect = containsTag(html, "redirect");
       const hasJsInvokeVoid = containsTag(html, "javascript");
-      if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid) {
+      const hasMutation = containsTag(html, "mutation");
+      if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation) {
         return {
           html: html || "",
           applied: 0,
           abortSwap: false,
           abortReason: null,
           redirectUrl: null,
-          jsAfter: []
+          jsAfter: [],
+          mutationTargets: []
         };
       }
       const tpl = parseHtmlToTemplate(html);
@@ -1083,7 +1468,8 @@
           abortSwap: true,
           abortReason: "redirect",
           redirectUrl: redirect.url,
-          jsAfter: []
+          jsAfter: [],
+          mutationTargets: []
         };
       }
       const jsDirectives = collectJsInvokeVoidDirectives(fragment);
@@ -1101,30 +1487,44 @@
           abortEl.remove();
         }
       }
-      const invocations = fragment.querySelectorAll("invocation");
-      if (!invocations || invocations.length === 0) {
+      const commands = fragment.querySelectorAll("invocation,mutation");
+      if (!commands || commands.length === 0) {
         return {
           html: fragmentToHtml(fragment),
           applied: 0,
           abortSwap,
           abortReason,
           redirectUrl: null,
-          jsAfter: jsGroups.after
+          jsAfter: jsGroups.after,
+          mutationTargets: []
         };
       }
       if (!getConfig().oobEnabled) {
         stripInvocationsFromFragment(fragment);
+        stripMutationsFromFragment(fragment);
         return {
           html: fragmentToHtml(fragment),
           applied: 0,
           abortSwap,
           abortReason,
           redirectUrl: null,
-          jsAfter: jsGroups.after
+          jsAfter: jsGroups.after,
+          mutationTargets: []
         };
       }
       let applied = 0;
-      for (const invEl of Array.from(invocations)) {
+      const mutationTargets = [];
+      for (const commandEl of Array.from(commands)) {
+        if (String(commandEl.localName || "").toLowerCase() === "mutation") {
+          const result = mutations.apply(commandEl, sourceEl, context || {});
+          if (result && result.applied) {
+            applied++;
+            mutationTargets.push(...result.reconcileTargets || []);
+          }
+          commandEl.remove();
+          continue;
+        }
+        const invEl = commandEl;
         const targetSel = getAttr(invEl, "heimdall-content-target");
         if (!targetSel) {
           dbg("Invocation missing heimdall-content-target; stripping", invEl);
@@ -1147,6 +1547,8 @@
             payloadFrag = parseHtmlToTemplate(invEl.innerHTML || "").content;
           }
           stripScripts(payloadFrag);
+          stripInvocationsFromFragment(payloadFrag);
+          stripMutationsFromFragment(payloadFrag);
           const swapResult = applySwap(targetEl, payloadFrag, swap, Object.assign({}, context || {}, {
             sourceEl,
             swapKind: "invocation"
@@ -1170,17 +1572,24 @@
         abortSwap,
         abortReason,
         redirectUrl: null,
-        jsAfter: jsGroups.after
+        jsAfter: jsGroups.after,
+        mutationTargets
       };
+    }
+    function reconcileMutations(targets) {
+      if (mutations && typeof mutations.reconcile === "function")
+        mutations.reconcile(targets);
     }
     return {
       applySwap,
       parseHtmlToTemplate,
       processOob,
+      reconcileMutations,
       sanitizeHtmlStringNoApply,
       invokeJsInvokeVoidDirectives,
       stripAbortsFromFragment,
       stripInvocationsFromFragment,
+      stripMutationsFromFragment,
       stripJsInvokeVoidFromFragment,
       stripRedirectsFromFragment
     };
@@ -1527,6 +1936,201 @@
     };
   }
 
+  // core/mutations.js
+  function createMutationRuntime({ global, emitLifecycle, dbg, boot, busyState }) {
+    function mutationError(sourceEl, directive, context, code, message, error) {
+      const detail = {
+        origin: context && context.kind ? context.kind : "action",
+        sourceElement: sourceEl || null,
+        requestContext: context && context.requestContext ? context.requestContext : null,
+        directive,
+        code,
+        message,
+        error: error || null
+      };
+      if (emitLifecycle)
+        emitLifecycle(sourceEl, "heimdall:mutation-error", detail);
+      dbg("mutation error", detail);
+      return { applied: false, cancelled: false, targets: [], error: detail };
+    }
+    function validateAttributeName(name) {
+      const probe = document.createElement("div");
+      probe.setAttribute(name, "");
+    }
+    function classTokens(raw) {
+      return String(raw || "").split(/\s+/).map((token) => token.trim()).filter(Boolean);
+    }
+    function parseOperations(directive) {
+      const operations = [];
+      for (const child of Array.from(directive.children || [])) {
+        const tag = String(child.localName || "").toLowerCase();
+        if (tag === "mutation-attr") {
+          const name = (getAttr(child, "name") || "").trim();
+          if (!name)
+            throw new Error("mutation-attr requires a non-empty name attribute.");
+          validateAttributeName(name);
+          operations.push(child.hasAttribute("value") ? { type: "attribute", action: "set", name, value: child.getAttribute("value") || "" } : { type: "attribute", action: "remove", name, value: null });
+          continue;
+        }
+        if (tag === "mutation-class") {
+          const hasAdd = child.hasAttribute("add");
+          const hasRemove = child.hasAttribute("remove");
+          if (hasAdd === hasRemove)
+            throw new Error("mutation-class requires exactly one of add or remove.");
+          const action = hasAdd ? "add" : "remove";
+          const tokens = classTokens(child.getAttribute(action));
+          if (tokens.length === 0)
+            throw new Error(`mutation-class ${action} requires at least one class token.`);
+          operations.push({ type: "class", action, tokens });
+          continue;
+        }
+        throw new Error(`Unsupported mutation operation '${tag || "unknown"}'.`);
+      }
+      return operations;
+    }
+    function resolveRoots(targetSelector, allTargets) {
+      return allTargets ? Array.from(document.querySelectorAll(targetSelector)) : [document.querySelector(targetSelector)].filter(Boolean);
+    }
+    function resolveTargets(roots, scope, selector) {
+      const targets = [];
+      const seen = /* @__PURE__ */ new Set();
+      function add(el) {
+        if (!isElement(el) || seen.has(el))
+          return;
+        seen.add(el);
+        targets.push(el);
+      }
+      for (const root of roots) {
+        if (scope === "self") {
+          add(root);
+          continue;
+        }
+        if (scope === "subtree") {
+          add(root);
+          for (const el of root.querySelectorAll("*"))
+            add(el);
+          continue;
+        }
+        for (const el of root.querySelectorAll(selector))
+          add(el);
+      }
+      return targets;
+    }
+    function applyOperation(target, operation) {
+      if (operation.type === "attribute") {
+        if (operation.action === "set")
+          target.setAttribute(operation.name, operation.value);
+        else
+          target.removeAttribute(operation.name);
+        if (busyState && typeof busyState.rebaseAttribute === "function") {
+          busyState.rebaseAttribute(
+            target,
+            operation.name,
+            operation.action === "set",
+            operation.value
+          );
+        }
+        return;
+      }
+      if (operation.action === "add")
+        target.classList.add(...operation.tokens);
+      else
+        target.classList.remove(...operation.tokens);
+    }
+    function requiresBehaviorReconciliation(operation) {
+      if (!operation || operation.type !== "attribute")
+        return false;
+      const name = String(operation.name || "").toLowerCase();
+      return name === "lang" || name.startsWith("heimdall-");
+    }
+    function apply(directive, sourceEl, context) {
+      context = context || {};
+      const targetSelector = (getAttr(directive, "heimdall-content-target") || "").trim();
+      if (!targetSelector)
+        return mutationError(sourceEl, directive, context, "missing-target", "Mutation target selector is required.");
+      const scope = (getAttr(directive, "scope") || "self").trim().toLowerCase();
+      if (scope !== "self" && scope !== "subtree" && scope !== "select")
+        return mutationError(sourceEl, directive, context, "invalid-scope", `Unsupported mutation scope '${scope}'.`);
+      const selector = (getAttr(directive, "selector") || "").trim();
+      if (scope === "select" && !selector)
+        return mutationError(sourceEl, directive, context, "missing-selector", "Select-scoped mutation requires a selector.");
+      let operations;
+      let roots;
+      let targets;
+      try {
+        operations = parseOperations(directive);
+        roots = resolveRoots(targetSelector, directive.hasAttribute("all"));
+        targets = resolveTargets(roots, scope, selector);
+      } catch (error) {
+        return mutationError(sourceEl, directive, context, "invalid-directive", error.message, error);
+      }
+      if (roots.length === 0)
+        return mutationError(sourceEl, directive, context, "target-not-found", `Mutation target '${targetSelector}' was not found.`);
+      const detail = {
+        origin: context.kind || "action",
+        sourceElement: sourceEl || null,
+        requestContext: context.requestContext || null,
+        directive,
+        targetSelector,
+        scope,
+        selector: scope === "select" ? selector : null,
+        allTargets: directive.hasAttribute("all"),
+        rootTargets: roots,
+        targets,
+        operations
+      };
+      if (emitLifecycle && !emitLifecycle(
+        sourceEl,
+        "heimdall:mutation-before",
+        detail,
+        { cancelable: true }
+      )) {
+        return { applied: false, cancelled: true, targets: [], detail };
+      }
+      const startedAt = global.performance && typeof global.performance.now === "function" ? global.performance.now() : Date.now();
+      try {
+        for (const target of targets) {
+          for (const operation of operations)
+            applyOperation(target, operation);
+        }
+      } catch (error) {
+        return mutationError(sourceEl, directive, context, "apply-failed", error.message, error);
+      }
+      const finishedAt = global.performance && typeof global.performance.now === "function" ? global.performance.now() : Date.now();
+      const durationMs = Math.max(0, finishedAt - startedAt);
+      if (emitLifecycle) {
+        emitLifecycle(sourceEl, "heimdall:mutation-after", {
+          ...detail,
+          rootCount: roots.length,
+          targetCount: targets.length,
+          operationCount: operations.length,
+          durationMs
+        });
+      }
+      if (durationMs > 16)
+        dbg("long mutation batch", { targetSelector, targetCount: targets.length, operationCount: operations.length, durationMs });
+      const reconcileTargets = operations.some(requiresBehaviorReconciliation) ? targets : [];
+      return { applied: true, cancelled: false, targets, reconcileTargets, detail };
+    }
+    function reconcile(targets) {
+      const seen = /* @__PURE__ */ new Set();
+      for (const target of targets || []) {
+        if (!isElement(target) || !target.isConnected || seen.has(target))
+          continue;
+        seen.add(target);
+        try {
+          boot(target);
+        } catch (error) {
+          dbg("mutation reconciliation failed", { target, error });
+        }
+      }
+    }
+    return {
+      apply,
+      reconcile
+    };
+  }
+
   // core/payloads.js
   function createPayloadResolver(global) {
     function findClosestStateElement(el, key) {
@@ -1544,15 +2148,37 @@
       }
       return null;
     }
-    function readClosestState(el, key) {
-      const host = findClosestStateElement(el, key);
-      if (!host)
+    function readStateAttribute(host, attr) {
+      if (!host || !host.hasAttribute || !host.hasAttribute(attr))
         return null;
-      const attr = key ? `data-heimdall-state-${key}` : "data-heimdall-state";
       const raw = host.getAttribute(attr);
       if (!raw)
         return null;
       return safeJsonParse(raw);
+    }
+    function createClosestStateBinding(el, key) {
+      const host = findClosestStateElement(el, key);
+      if (!host)
+        return null;
+      const attribute = key ? `data-heimdall-state-${key}` : "data-heimdall-state";
+      return {
+        kind: "closest-state",
+        host,
+        attribute,
+        value: readStateAttribute(host, attribute),
+        resolve() {
+          if (host.isConnected === false || !host.hasAttribute(attribute)) {
+            return {
+              available: false,
+              value: null
+            };
+          }
+          return {
+            available: true,
+            value: readStateAttribute(host, attribute)
+          };
+        }
+      };
     }
     function resolvePayloadRef(el) {
       const ref = getAttr(el, "heimdall-payload-ref");
@@ -1565,39 +2191,44 @@
       }
       return void 0;
     }
-    function payloadFromElement(el) {
+    function payloadBindingFromElement(el) {
       const payloadAttr = getAttr(el, "heimdall-payload");
       if (payloadAttr)
-        return safeJsonParse(payloadAttr);
+        return { value: safeJsonParse(payloadAttr), binding: null };
       const refObj = resolvePayloadRef(el);
       if (refObj !== void 0)
-        return refObj;
+        return { value: refObj, binding: null };
       const fromRaw = (getAttr(el, "heimdall-payload-from") || "").trim();
       const from = fromRaw.toLowerCase();
       if (from === "closest-state" || from.startsWith("closest-state:")) {
         const key = from.startsWith("closest-state:") ? fromRaw.substring("closest-state:".length).trim() : null;
-        return readClosestState(el, key || null);
+        const binding = createClosestStateBinding(el, key || null);
+        return binding ? { value: binding.value, binding } : { value: null, binding: null };
       }
       if (!from)
-        return null;
+        return { value: null, binding: null };
       if (from === "closest-form") {
         const form2 = el.closest("form");
         if (!form2)
-          return null;
-        return formDataToPayload(new FormData(form2));
+          return { value: null, binding: null };
+        return { value: formDataToPayload(new FormData(form2)), binding: null };
       }
       if (from === "self") {
         const obj = {};
         for (const key in el.dataset) obj[key] = el.dataset[key];
-        return obj;
+        return { value: obj, binding: null };
       }
       const form = document.querySelector(fromRaw);
       if (form && form.tagName === "FORM") {
-        return formDataToPayload(new FormData(form));
+        return { value: formDataToPayload(new FormData(form)), binding: null };
       }
-      return null;
+      return { value: null, binding: null };
+    }
+    function payloadFromElement(el) {
+      return payloadBindingFromElement(el).value;
     }
     return {
+      payloadBindingFromElement,
       payloadFromElement
     };
   }
@@ -1934,18 +2565,21 @@
       return lower.includes("csrf") || lower.includes("antiforgery");
     }
     async function fetchBifrostSubscribeToken(t, shouldRetry) {
-      const csrf = await ensureCsrfToken();
       const config = getConfig();
+      const antiforgeryEnabled = config.antiforgery !== false;
+      const csrf = antiforgeryEnabled ? await ensureCsrfToken() : null;
       const base = config.endpoints && config.endpoints.bifrostToken ? config.endpoints.bifrostToken : defaultBifrostTokenEndpoint;
       const url = new URL(base, global.location?.origin || void 0);
       url.searchParams.set("topic", t);
+      const headers = {
+        "X-Requested-With": "XMLHttpRequest"
+      };
+      if (antiforgeryEnabled)
+        headers[csrfHeader] = csrf;
       const res = await global.fetch(url.toString(), {
         method: "GET",
         credentials: "same-origin",
-        headers: {
-          "X-Requested-With": "XMLHttpRequest",
-          [csrfHeader]: csrf
-        }
+        headers
       });
       const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
       if (authRedirectUrl) {
@@ -1968,7 +2602,7 @@
       }
       if (!res.ok) {
         const body = await safeText2(res);
-        if (shouldRetry && isAntiforgeryFailure(res.status, body)) {
+        if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res.status, body)) {
           if (typeof dbg === "function")
             dbg("bifrost csrf validation suspected; retrying once with fresh token", { topic: t });
           clearCsrfToken();
@@ -2061,6 +2695,11 @@
         Promise.resolve().then(flush);
       }
       const attributeFilter = [
+        "heimdall-content-load",
+        "heimdall-content-visible",
+        "heimdall-content-scroll",
+        "heimdall-poll",
+        "heimdall-visible-once",
         "heimdall-sse",
         "heimdall-sse-topic",
         "heimdall-sse-target",
@@ -2120,6 +2759,9 @@
         observeDom: true,
         debug: false,
         authReturnUrlParameter: "ReturnUrl",
+        antiforgery: true,
+        clientInfo: false,
+        clientInfoMaxAgeMs: 6e4,
         inputDebounceMs: 250,
         hoverDelayMs: 150,
         scrollThresholdPx: 120,
@@ -2653,6 +3295,7 @@ ${topic}`;
       let abortReason = null;
       let redirectUrl = null;
       let jsAfter = [];
+      let mutationTargets = [];
       try {
         const oob = dom.processOob(html, state.el, {
           phase: "before",
@@ -2668,6 +3311,7 @@ ${topic}`;
         abortReason = oob.abortReason || null;
         redirectUrl = oob.redirectUrl || null;
         jsAfter = oob.jsAfter || [];
+        mutationTargets = oob.mutationTargets || [];
       } catch (e) {
         emit("heimdall:sse-error", { topic: state.topic, url, el: state.el, error: e });
         if (getConfig().debug) {
@@ -2696,6 +3340,7 @@ ${topic}`;
         dom.stripAbortsFromFragment(mainTpl.content);
         dom.stripRedirectsFromFragment(mainTpl.content);
         dom.stripJsInvokeVoidFromFragment(mainTpl.content);
+        dom.stripMutationsFromFragment(mainTpl.content);
         const swapResult = dom.applySwap(targetEl, mainTpl.content, swapMode, {
           kind: "sse",
           swapKind: "main",
@@ -2710,6 +3355,7 @@ ${topic}`;
           }
         }
       }
+      dom.reconcileMutations(mutationTargets);
       dom.invokeJsInvokeVoidDirectives(jsAfter, {
         phase: "after",
         kind: "sse",
@@ -3337,9 +3983,10 @@ ${topic}`;
     const DEFAULT_BIFROST_TOKEN_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/bifrost/token`;
     const ACTION_HEADER = "X-Heimdall-Content-Action";
     const CSRF_HEADER = "RequestVerificationToken";
+    const CLIENT_INFO_HEADER = "X-Heimdall-Client-Info";
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
-    const { payloadFromElement } = createPayloadResolver(global);
+    const { payloadBindingFromElement } = createPayloadResolver(global);
     const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
     const coordinator = createRequestCoordinator({
       global,
@@ -3356,13 +4003,28 @@ ${topic}`;
       emitLifecycle,
       dbg
     });
+    const busyState = createBusyStateManager();
+    const clientInfo = createClientInfoRuntime({
+      global,
+      getConfig: getRuntimeConfig,
+      emitLifecycle,
+      dbg
+    });
+    const mutations = createMutationRuntime({
+      global,
+      emitLifecycle,
+      dbg,
+      boot: (root) => boot(root),
+      busyState
+    });
     const dom = createDomPipeline({
       getConfig: getRuntimeConfig,
       boot: (root) => boot(root),
       dbg,
       emitLifecycle,
       jsInvokeVoid,
-      timeLocalization
+      timeLocalization,
+      mutations
     });
     const {
       clearBifrostSubscribeToken,
@@ -3389,12 +4051,15 @@ ${topic}`;
       emit,
       emitLifecycle,
       dbg,
-      payloadFromElement,
+      payloadBindingFromElement,
       boot: (root) => boot(root),
       dom,
       coordinator,
+      busyState,
+      getClientInfoHeader: clientInfo.getHeaderValue,
       actionHeader: ACTION_HEADER,
-      csrfHeader: CSRF_HEADER
+      csrfHeader: CSRF_HEADER,
+      clientInfoHeader: CLIENT_INFO_HEADER
     });
     const {
       handleChange,

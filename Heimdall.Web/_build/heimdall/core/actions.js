@@ -18,63 +18,112 @@ export function createActionInvoker({
     emit,
     emitLifecycle,
     dbg,
-    payloadFromElement,
+    payloadBindingFromElement,
     boot,
     dom,
     coordinator,
+    busyState,
+    getClientInfoHeader,
     actionHeader,
-    csrfHeader
+    csrfHeader,
+    clientInfoHeader
 }) {
-    const busyStates = new WeakMap();
     let nextRequestId = 0;
+    const payloadStates = new WeakMap();
+    const targetStates = new WeakMap();
 
-    function acquireBusyState(el) {
-        if (!el)
-            return;
-
-        let state = busyStates.get(el);
-        if (!state) {
-            state = {
-                count: 0,
-                hadDisabled: false,
-                hadAriaBusy: false,
-                ariaBusy: null
-            };
-            busyStates.set(el, state);
+    function payloadSignature(value) {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return null;
         }
-
-        if (state.count === 0) {
-            state.hadDisabled = el.hasAttribute("disabled");
-            state.hadAriaBusy = el.hasAttribute("aria-busy");
-            state.ariaBusy = el.getAttribute("aria-busy");
-        }
-
-        state.count++;
-        el.setAttribute("disabled", "disabled");
-        el.setAttribute("aria-busy", "true");
     }
 
-    function releaseBusyState(el) {
-        if (!el)
+    function installPayloadState(context, payload, binding) {
+        const state = {
+            value: payload,
+            binding: binding || null,
+            assigned: false,
+            initialSignature: payloadSignature(payload),
+            refreshAtExecution: false
+        };
+
+        Object.defineProperty(context, "payload", {
+            configurable: true,
+            enumerable: true,
+            get() {
+                return state.value;
+            },
+            set(value) {
+                state.assigned = true;
+                state.value = value;
+            }
+        });
+
+        payloadStates.set(context, state);
+    }
+
+    function finalizePayloadConfiguration(context) {
+        const state = payloadStates.get(context);
+        if (!state || !state.binding)
             return;
 
-        const state = busyStates.get(el);
+        const changedInPlace = payloadSignature(state.value) !== state.initialSignature;
+        state.refreshAtExecution = !state.assigned && !changedInPlace;
+    }
+
+    function refreshExecutionPayload(context) {
+        const state = payloadStates.get(context);
+        if (!state || !state.refreshAtExecution || !state.binding)
+            return true;
+
+        const resolved = state.binding.resolve();
+        if (!resolved || !resolved.available)
+            return false;
+
+        state.value = resolved.value;
+        return true;
+    }
+
+    function initializeTargetState(context) {
+        const source = context.target;
+        const resolved = resolveTarget(source, context.fallbackTarget);
+        const state = {
+            source,
+            resolved,
+            wasConnected: !!(resolved && resolved.isConnected)
+        };
+
+        context.target = resolved;
+        targetStates.set(context, state);
+    }
+
+    function refreshTarget(context, rejectDisconnected) {
+        const state = targetStates.get(context);
         if (!state)
-            return;
+            return true;
 
-        state.count = Math.max(0, state.count - 1);
-        if (state.count > 0)
-            return;
+        // Lifecycle handlers may intentionally replace context.target. Treat that
+        // value as the new target source instead of restoring the original one.
+        if (context.target !== state.resolved) {
+            state.source = context.target;
+            state.wasConnected = !!(context.target && context.target.isConnected);
+        }
 
-        if (!state.hadDisabled)
-            el.removeAttribute("disabled");
+        if (typeof state.source === "string") {
+            state.resolved = resolveTarget(state.source, null);
+            context.target = state.resolved;
+            return true;
+        }
 
-        if (state.hadAriaBusy)
-            el.setAttribute("aria-busy", state.ariaBusy == null ? "" : state.ariaBusy);
-        else
-            el.removeAttribute("aria-busy");
+        const target = resolveTarget(state.source, context.fallbackTarget);
+        if (rejectDisconnected && state.wasConnected && target && target.isConnected === false)
+            return false;
 
-        busyStates.delete(el);
+        state.resolved = target;
+        context.target = target;
+        return true;
     }
 
     function createRequestContext(actionId, payload, options) {
@@ -87,13 +136,12 @@ export function createActionInvoker({
             ? options.syncGroup
             : (sourceElement ? getAttr(sourceElement, "heimdall-sync-group") : null);
 
-        return {
+        const context = {
             requestId: ++nextRequestId,
             attempt: 0,
             actionId,
             trigger: options.triggerName || null,
             sourceElement,
-            payload,
             target: options.target,
             fallbackTarget: options.fallbackTarget || null,
             swap: options.swap || "inner",
@@ -121,6 +169,9 @@ export function createActionInvoker({
             startedExecutionAt: null,
             finishedAt: null
         };
+
+        installPayloadState(context, payload, options.payloadBinding);
+        return context;
     }
 
     function emitCancellation(context, result) {
@@ -138,16 +189,27 @@ export function createActionInvoker({
         const context = createRequestContext(actionId, payload, options);
 
         emitLifecycle(context.sourceElement, "heimdall:request-config", context);
-        context.target = resolveTarget(context.target, context.fallbackTarget);
+        finalizePayloadConfiguration(context);
+        initializeTargetState(context);
         context.sync = coordinator.normalizeStrategy(context.sync, getConfig().requestSync || "parallel");
 
         try {
             const result = await coordinator.run(context, async () => {
-                acquireBusyState(context.disableElement);
+                if (!refreshExecutionPayload(context)) {
+                    coordinator.cancel(context, "payload-source-unavailable");
+                    return coordinator.getCancellationResult(context);
+                }
+
+                if (!refreshTarget(context, true)) {
+                    coordinator.cancel(context, "target-disconnected");
+                    return coordinator.getCancellationResult(context);
+                }
+
+                busyState.acquire(context.disableElement);
                 try {
                     return await executeRequestAttempt(context, options, true);
                 } finally {
-                    releaseBusyState(context.disableElement);
+                    busyState.release(context.disableElement);
                 }
             });
 
@@ -172,16 +234,28 @@ export function createActionInvoker({
         const url = new URL(context.endpoint, global.location?.origin || undefined);
         url.searchParams.set("action", context.actionId);
 
-        const token = await ensureCsrfToken();
-        if (!coordinator.isCurrent(context))
-            return coordinator.getCancellationResult(context);
+        const antiforgeryEnabled = getConfig().antiforgery !== false;
+        let token = null;
+        if (antiforgeryEnabled) {
+            token = await ensureCsrfToken();
+            if (!coordinator.isCurrent(context))
+                return coordinator.getCancellationResult(context);
+        }
 
         const isFormData = typeof global.FormData === "function" &&
             context.payload instanceof global.FormData;
         const headers = {
-            [actionHeader]: context.actionId,
-            [csrfHeader]: token
+            [actionHeader]: context.actionId
         };
+
+        if (antiforgeryEnabled)
+            headers[csrfHeader] = token;
+
+        const clientInfo = typeof getClientInfoHeader === "function"
+            ? getClientInfoHeader(context)
+            : null;
+        if (clientInfo)
+            headers[clientInfoHeader] = clientInfo;
 
         if (!isFormData)
             headers["Content-Type"] = "application/json";
@@ -289,7 +363,7 @@ export function createActionInvoker({
         if (!coordinator.isCurrent(context))
             return coordinator.getCancellationResult(context);
 
-        if (response.status === 400 && shouldRetry) {
+        if (antiforgeryEnabled && response.status === 400 && shouldRetry) {
             const lower = rawHtml.toLowerCase();
             if (lower.includes("csrf") || lower.includes("antiforgery")) {
                 dbg("csrf validation suspected; retrying once with fresh token");
@@ -334,6 +408,7 @@ export function createActionInvoker({
         let abortReason = null;
         let redirectUrl = null;
         let jsAfter = [];
+        let oobMutationTargets = [];
 
         if (response.ok) {
             const oob = dom.processOob(html, context.sourceElement, {
@@ -352,6 +427,7 @@ export function createActionInvoker({
             abortReason = oob.abortReason || null;
             redirectUrl = oob.redirectUrl || null;
             jsAfter = oob.jsAfter || [];
+            oobMutationTargets = oob.mutationTargets || [];
         } else {
             html = dom.sanitizeHtmlStringNoApply(html);
         }
@@ -397,12 +473,17 @@ export function createActionInvoker({
             dbg("swap aborted", { actionId: context.actionId, reason: abortReason, target: context.target });
         }
 
+        if (response.ok && !abortSwap) {
+            refreshTarget(context, false);
+        }
+
         if (response.ok && context.target && !abortSwap) {
             const mainTemplate = dom.parseHtmlToTemplate(html);
             dom.stripInvocationsFromFragment(mainTemplate.content);
             dom.stripAbortsFromFragment(mainTemplate.content);
             dom.stripRedirectsFromFragment(mainTemplate.content);
             dom.stripJsInvokeVoidFromFragment(mainTemplate.content);
+            dom.stripMutationsFromFragment(mainTemplate.content);
 
             const swapResult = dom.applySwap(
                 context.target,
@@ -425,6 +506,9 @@ export function createActionInvoker({
                 }
             }
         }
+
+        if (response.ok)
+            dom.reconcileMutations(oobMutationTargets);
 
         if (response.ok) {
             dom.invokeJsInvokeVoidDirectives(jsAfter, {
@@ -504,18 +588,23 @@ export function createActionInvoker({
         const sync = getAttr(el, "heimdall-sync");
         const syncGroup = getAttr(el, "heimdall-sync-group");
 
-        let payload = payloadFromElement(el);
+        let payloadResolution = payloadBindingFromElement(el);
+        let payload = payloadResolution.value;
+        let payloadBinding = payloadResolution.binding;
         if ((payload == null) && triggerName === "submit") {
             if (el && el.tagName === "FORM") {
                 payload = formDataToPayload(new FormData(el));
+                payloadBinding = null;
             } else {
                 const form = el.closest && el.closest("form");
-                if (form)
+                if (form) {
                     payload = formDataToPayload(new FormData(form));
+                    payloadBinding = null;
+                }
             }
         }
 
-        return { target, swap, payload, sync, syncGroup };
+        return { target, swap, payload, payloadBinding, sync, syncGroup };
     }
 
     async function runActionFromElement(el, actionId, triggerName, extraOptions) {
@@ -524,7 +613,7 @@ export function createActionInvoker({
         if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
             return;
 
-        const { target, swap, payload, sync, syncGroup } = getCommonOptions(el, triggerName);
+        const { target, swap, payload, payloadBinding, sync, syncGroup } = getCommonOptions(el, triggerName);
 
         const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
         const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
@@ -536,6 +625,7 @@ export function createActionInvoker({
             fallbackTarget: el,
             sourceEl: el,
             triggerName,
+            payloadBinding,
             disableElement: shouldDisable ? el : null
         }, extraOptions || {});
 

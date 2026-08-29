@@ -31,6 +31,55 @@ The server runtime emits dependency-free `ActivitySource` traces and `System.Dia
 
 Diagnostics include action outcomes, durations, exceptions, cancellations, request and rendered response sizes, active SSE connections and subscribers, and Bifrost message delivery outcomes. Action payloads, user identities, and Bifrost topic names are not included.
 
+## Antiforgery configuration
+
+Antiforgery validation is enabled by default. A specific content action—or every action on a declaring type—can opt out using ASP.NET Core's native metadata:
+
+```csharp
+using Microsoft.AspNetCore.Antiforgery;
+
+[RequireAntiforgeryToken(false)]
+[ContentInvocation("webhook.receive")]
+public static IHtmlContent Receive(WebhookPayload payload)
+{
+    return Html.Span("Accepted");
+}
+```
+
+Method metadata overrides declaring-type metadata. Disable validation globally for all Heimdall content actions and Bifrost subscribe-token requests through service configuration:
+
+```csharp
+builder.Services.AddHeimdall(options =>
+{
+    options.EnableAntiforgery = false;
+});
+```
+
+The global switch is authoritative and defaults to `true`. When disabling it, also set `Heimdall.config.antiforgery = false` in the browser before actions or SSE subscriptions start so the runtime does not request or send CSRF tokens. Disabling antiforgery is appropriate only when another protection makes cross-site requests harmless, such as an API that does not use ambient cookie authentication.
+
+When Heimdall antiforgery is globally disabled, Heimdall itself does not require `AddAntiforgery()` or `UseAntiforgery()`. Keep those registrations when other application endpoints still use ASP.NET Core antiforgery. Bifrost's signed subscribe tokens continue to use data protection independently.
+
+## Client browser information
+
+Applications can opt in to a bounded browser-capability snapshot on content-action requests. Declare `HeimdallClientInfo` like another framework-provided action parameter; it does not consume the action's payload slot:
+
+```csharp
+[ContentInvocation("dashboard.render")]
+public static IHtmlContent Render(
+    DashboardRequest request,
+    HeimdallClientInfo client)
+{
+    if (!client.IsAvailable)
+        return Html.Span("Browser information was not supplied.");
+
+    return Html.Span($"{client.TimeZone}|{client.ViewportWidth}|{client.ColorScheme}");
+}
+```
+
+Enable collection in the browser with `Heimdall.config.clientInfo = true`. The model includes locale/languages, IANA timezone and current UTC offset, viewport and screen dimensions, pixel ratio, orientation, color/motion/contrast preferences, forced colors, online state, and pointer/touch/hover capabilities. `DeviceCategory` is only a mobile/tablet/desktop heuristic.
+
+When an action binds `HeimdallClientInfo`, the serialized `X-Heimdall-Client-Info` header is capped at 4096 characters; malformed or oversized values receive `400 Bad Request`. Every property is untrusted client input and must never control authorization, pricing, auditing, or other security-sensitive behavior. Cross-origin applications must allow this header in their CORS policy.
+
 ## File uploads
 
 Content actions accept uploaded files as `IFormFile`, `IFormFileCollection`, `IFormFile[]`, or the common generic file collection interfaces. File parameters bind by parameter name and can be combined with the action's normal payload parameter:

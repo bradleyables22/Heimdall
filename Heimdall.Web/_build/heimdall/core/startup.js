@@ -44,6 +44,11 @@ export function createHeimdallRuntime({
         }
 
         const attributeFilter = [
+            "heimdall-content-load",
+            "heimdall-content-visible",
+            "heimdall-content-scroll",
+            "heimdall-poll",
+            "heimdall-visible-once",
             "heimdall-sse",
             "heimdall-sse-topic",
             "heimdall-sse-target",
@@ -114,6 +119,9 @@ export function createHeimdallRuntime({
             observeDom: true,
             debug: false,
             authReturnUrlParameter: "ReturnUrl",
+            antiforgery: true,
+            clientInfo: false,
+            clientInfoMaxAgeMs: 60000,
 
             inputDebounceMs: 250,
             hoverDelayMs: 150,
