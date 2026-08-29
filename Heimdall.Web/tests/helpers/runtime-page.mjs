@@ -41,6 +41,9 @@ export async function installFakeServer(page, options = {}) {
     const csrfTokens = Array.isArray(serverOptions.csrfTokens) && serverOptions.csrfTokens.length > 0
       ? [...serverOptions.csrfTokens]
       : ["csrf-token"];
+    const csrfTokenResponses = Array.isArray(serverOptions.csrfTokenResponses)
+      ? [...serverOptions.csrfTokenResponses]
+      : null;
     const bifrostTokens = Array.isArray(serverOptions.bifrostTokens) && serverOptions.bifrostTokens.length > 0
       ? [...serverOptions.bifrostTokens]
       : ["bifrost-token"];
@@ -120,6 +123,32 @@ export async function installFakeServer(page, options = {}) {
       }
 
       if (url.includes("/__heimdall/v1/csrf")) {
+        if (csrfTokenResponses) {
+          const response = csrfTokenResponses.length > 1
+            ? csrfTokenResponses.shift()
+            : csrfTokenResponses[0];
+          const responseHeaders = {
+            "Content-Type": response.contentType || "application/json"
+          };
+          if (response.location)
+            responseHeaders.Location = response.location;
+          if (response.headers)
+            Object.assign(responseHeaders, response.headers);
+
+          const body = response.body != null
+            ? response.body
+            : JSON.stringify({ requestToken: response.token || "csrf-token" });
+          const result = new Response(body, {
+            status: response.status || 200,
+            headers: responseHeaders
+          });
+          if (typeof response.redirected === "boolean")
+            Object.defineProperty(result, "redirected", { value: response.redirected });
+          if (response.url)
+            Object.defineProperty(result, "url", { value: response.url });
+          return result;
+        }
+
         const token = csrfTokens.length > 1 ? csrfTokens.shift() : csrfTokens[0];
         return new Response(JSON.stringify({ requestToken: token }), {
           status: 200,

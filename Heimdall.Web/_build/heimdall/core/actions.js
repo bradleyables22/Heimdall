@@ -9,6 +9,8 @@ import {
     getAuthRedirectUrlFromResponse,
     normalizeFollowedAuthRedirectUrl
 } from "./auth-redirects.js";
+import { REQUEST_HEADERS_FAILED_CODE } from "./request-headers.js";
+import { emitUnauthorized } from "./unauthorized.js";
 
 export function createActionInvoker({
     global,
@@ -23,6 +25,8 @@ export function createActionInvoker({
     dom,
     coordinator,
     busyState,
+    resolveRequestHeaders,
+    mergeRequestHeaders,
     getClientInfoHeader,
     actionHeader,
     csrfHeader,
@@ -184,6 +188,36 @@ export function createActionInvoker({
         emitLifecycle(context.sourceElement, "heimdall:request-cancel", detail);
     }
 
+    function requestHeadersFailure(context, error) {
+        context.request = null;
+        context.response = null;
+        context.rawHtml = null;
+
+        const result = {
+            ok: false,
+            status: 0,
+            code: REQUEST_HEADERS_FAILED_CODE,
+            error: error.message,
+            response: null,
+            html: null,
+            ms: Math.max(0, performance.now() - (context.startedExecutionAt || context.startedAt)),
+            requestId: context.requestId
+        };
+
+        emit("heimdall:error", {
+            actionId: context.actionId,
+            payload: context.payload,
+            target: context.target,
+            swap: context.swap,
+            status: 0,
+            code: REQUEST_HEADERS_FAILED_CODE,
+            phase: "request-headers",
+            error
+        });
+
+        return result;
+    }
+
     async function invoke(actionId, payload, options) {
         options = options || {};
         const context = createRequestContext(actionId, payload, options);
@@ -237,14 +271,22 @@ export function createActionInvoker({
         const antiforgeryEnabled = getConfig().antiforgery !== false;
         let token = null;
         if (antiforgeryEnabled) {
-            token = await ensureCsrfToken();
+            try {
+                token = await ensureCsrfToken();
+            } catch (error) {
+                if (!coordinator.isCurrent(context))
+                    return coordinator.getCancellationResult(context);
+                if (error?.code === REQUEST_HEADERS_FAILED_CODE)
+                    return requestHeadersFailure(context, error);
+                throw error;
+            }
             if (!coordinator.isCurrent(context))
                 return coordinator.getCancellationResult(context);
         }
 
         const isFormData = typeof global.FormData === "function" &&
             context.payload instanceof global.FormData;
-        const headers = {
+        let headers = {
             [actionHeader]: context.actionId
         };
 
@@ -260,8 +302,36 @@ export function createActionInvoker({
         if (!isFormData)
             headers["Content-Type"] = "application/json";
 
-        for (const key in context.headers)
-            headers[key] = context.headers[key];
+        if (typeof resolveRequestHeaders === "function") {
+            try {
+                headers = await resolveRequestHeaders({
+                    kind: "content-action",
+                    url: url.toString(),
+                    method: "POST",
+                    actionId: context.actionId,
+                    requestId: context.requestId,
+                    attempt: context.attempt,
+                    sourceElement: context.sourceElement,
+                    signal: context.signal
+                }, headers);
+            } catch (error) {
+                if (!coordinator.isCurrent(context))
+                    return coordinator.getCancellationResult(context);
+                if (error?.code === REQUEST_HEADERS_FAILED_CODE)
+                    return requestHeadersFailure(context, error);
+                throw error;
+            }
+        }
+
+        if (!coordinator.isCurrent(context))
+            return coordinator.getCancellationResult(context);
+
+        if (typeof mergeRequestHeaders === "function")
+            mergeRequestHeaders(headers, context.headers);
+        else {
+            for (const key in context.headers)
+                headers[key] = context.headers[key];
+        }
 
         let body = context.payload;
         if (!isFormData) {
@@ -373,8 +443,28 @@ export function createActionInvoker({
         }
 
         const authRedirectUrl = getAuthRedirectUrlFromResponse(response);
-        if (authRedirectUrl) {
-            const redirectUrl = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
+        const normalizedAuthRedirectUrl = authRedirectUrl
+            ? normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl)
+            : null;
+        const useDefaultUnauthorizedHandling = emitUnauthorized({
+            response,
+            emitLifecycle,
+            sourceElement: context.sourceElement,
+            detail: {
+                kind: "content-action",
+                actionId: context.actionId,
+                requestId: context.requestId,
+                attempt: context.attempt,
+                sourceElement: context.sourceElement,
+                url: context.request.url,
+                method: "POST",
+                body: rawHtml,
+                redirectUrl: normalizedAuthRedirectUrl,
+                requestContext: context
+            }
+        });
+        if (authRedirectUrl && useDefaultUnauthorizedHandling) {
+            const redirectUrl = normalizedAuthRedirectUrl;
 
             emit("heimdall:redirect", {
                 actionId: context.actionId,

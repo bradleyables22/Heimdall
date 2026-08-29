@@ -9,6 +9,7 @@ import { createJsInvokeVoidRuntime } from "./core/js-invoke-void.js";
 import { createMutationRuntime } from "./core/mutations.js";
 import { createPayloadResolver } from "./core/payloads.js";
 import { createRequestCoordinator } from "./core/request-coordinator.js";
+import { createRequestHeadersRuntime } from "./core/request-headers.js";
 import { createSecurityTokens } from "./core/security-tokens.js";
 import { createHeimdallRuntime } from "./core/startup.js";
 import { createSseRuntime } from "./core/sse.js";
@@ -328,6 +329,10 @@ import {
         global,
         dbg
     });
+    const requestHeaders = createRequestHeadersRuntime({
+        global,
+        getConfig: getRuntimeConfig
+    });
     const jsInvokeVoid = createJsInvokeVoidRuntime({
         global,
         emit,
@@ -371,8 +376,10 @@ import {
         global,
         getConfig: getRuntimeConfig,
         emit,
+        emitLifecycle,
         dbg,
         safeText,
+        resolveRequestHeaders: requestHeaders.resolve,
         csrfHeader: CSRF_HEADER,
         defaultBifrostTokenEndpoint: DEFAULT_BIFROST_TOKEN_ENDPOINT
     });
@@ -392,6 +399,8 @@ import {
         dom,
         coordinator,
         busyState,
+        resolveRequestHeaders: requestHeaders.resolve,
+        mergeRequestHeaders: requestHeaders.merge,
         getClientInfoHeader: clientInfo.getHeaderValue,
         actionHeader: ACTION_HEADER,
         csrfHeader: CSRF_HEADER,

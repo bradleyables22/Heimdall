@@ -20,6 +20,7 @@ import { tests as javascript } from "./runtime/javascript.spec.mjs";
 import { tests as sseSecurity } from "./runtime/sse-security.spec.mjs";
 import { tests as antiforgeryConfig } from "./runtime/antiforgery-config.spec.mjs";
 import { tests as clientInfo } from "./runtime/client-info.spec.mjs";
+import { tests as requestHeaders } from "./runtime/request-headers.spec.mjs";
 import { tests as sseDelivery } from "./runtime/sse-delivery.spec.mjs";
 import { tests as sseReconnect } from "./runtime/sse-reconnect.spec.mjs";
 import { tests as sseLifecycle } from "./runtime/sse-lifecycle.spec.mjs";
@@ -48,6 +49,7 @@ const tests = [
   ...sseSecurity,
   ...antiforgeryConfig,
   ...clientInfo,
+  ...requestHeaders,
   ...sseDelivery,
   ...sseReconnect,
   ...sseLifecycle

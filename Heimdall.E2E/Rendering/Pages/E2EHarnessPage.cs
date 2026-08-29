@@ -58,6 +58,8 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_AuthRequired = "e2e.auth.required";
 		public const string Action_AntiforgeryDisabled = "e2e.antiforgery.disabled";
 		public const string Action_ClientInfo = "e2e.client-info";
+		public const string Action_RequestHeaders = "e2e.request-headers";
+		public const string Action_Unauthorized = "e2e.unauthorized";
 
 		private const string SseTopic = "e2e-harness";
 		private const string LocalTimeSseTopic = "e2e-local-time";

@@ -18,6 +18,7 @@ async function testPublicApi(page) {
     antiforgery: window.Heimdall.config.antiforgery,
     clientInfo: window.Heimdall.config.clientInfo,
     clientInfoMaxAgeMs: window.Heimdall.config.clientInfoMaxAgeMs,
+    requestHeaders: window.Heimdall.config.requestHeaders,
     requestSync: window.Heimdall.config.requestSync,
     requestTimeoutMs: window.Heimdall.config.requestTimeoutMs
   }));
@@ -32,6 +33,7 @@ async function testPublicApi(page) {
   assert.equal(api.antiforgery, true);
   assert.equal(api.clientInfo, false);
   assert.equal(api.clientInfoMaxAgeMs, 60000);
+  assert.equal(api.requestHeaders, null);
   assert.equal(api.requestSync, "parallel");
   assert.equal(api.requestTimeoutMs, 0);
 }

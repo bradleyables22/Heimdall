@@ -119,6 +119,7 @@ export function createHeimdallRuntime({
             observeDom: true,
             debug: false,
             authReturnUrlParameter: "ReturnUrl",
+            requestHeaders: null,
             antiforgery: true,
             clientInfo: false,
             clientInfoMaxAgeMs: 60000,

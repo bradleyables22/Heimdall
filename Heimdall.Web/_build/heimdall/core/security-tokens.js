@@ -2,13 +2,16 @@ import {
     getAuthRedirectUrlFromResponse,
     normalizeFollowedAuthRedirectUrl
 } from "./auth-redirects.js";
+import { emitUnauthorized } from "./unauthorized.js";
 
 export function createSecurityTokens({
     global,
     getConfig,
     emit,
+    emitLifecycle,
     dbg,
     safeText,
+    resolveRequestHeaders,
     csrfHeader,
     defaultBifrostTokenEndpoint
 }) {
@@ -26,14 +29,67 @@ export function createSecurityTokens({
 
         csrfTokenPromise = (async () => {
             try {
-                const res = await global.fetch(getConfig().endpoints.csrf, {
+                const configuredUrl = getConfig().endpoints.csrf;
+                const url = new URL(configuredUrl, global.location?.origin || undefined).toString();
+                let headers = { "X-Requested-With": "XMLHttpRequest" };
+                if (typeof resolveRequestHeaders === "function") {
+                    headers = await resolveRequestHeaders({
+                        kind: "csrf-token",
+                        url,
+                        method: "GET",
+                        actionId: null,
+                        topic: null,
+                        requestId: null,
+                        attempt: 1,
+                        sourceElement: null,
+                        signal: null
+                    }, headers);
+                }
+
+                const res = await global.fetch(url, {
                     method: "GET",
                     credentials: "same-origin",
-                    headers: { "X-Requested-With": "XMLHttpRequest" }
+                    headers
                 });
 
-                if (!res.ok)
-                    throw new Error(`CSRF token fetch failed: ${res.status}`);
+                if (!res.ok) {
+                    const body = await safeText(res);
+                    const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+                    const redirectUrl = authRedirectUrl
+                        ? normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl)
+                        : null;
+                    const useDefaultUnauthorizedHandling = emitUnauthorized({
+                        response: res,
+                        emitLifecycle,
+                        sourceElement: null,
+                        detail: {
+                            kind: "csrf-token",
+                            actionId: null,
+                            topic: null,
+                            requestId: null,
+                            attempt: 1,
+                            sourceElement: null,
+                            url,
+                            method: "GET",
+                            body,
+                            redirectUrl,
+                            requestContext: null
+                        }
+                    });
+
+                    const performedRedirect = !!(authRedirectUrl && useDefaultUnauthorizedHandling);
+                    if (performedRedirect) {
+                        if (typeof dbg === "function")
+                            dbg("csrf token redirecting", { redirectUrl });
+                        global.location.href = redirectUrl;
+                    }
+
+                    const error = new Error(`CSRF token fetch failed: ${res.status}. ${body || ""}`.trim());
+                    error.status = res.status;
+                    error.body = body;
+                    error.redirectUrl = performedRedirect ? redirectUrl : null;
+                    throw error;
+                }
 
                 const data = await res.json();
                 csrfToken = data && data.requestToken;
@@ -88,11 +144,25 @@ export function createSecurityTokens({
         const url = new URL(base, global.location?.origin || undefined);
         url.searchParams.set("topic", t);
 
-        const headers = {
+        let headers = {
             "X-Requested-With": "XMLHttpRequest"
         };
         if (antiforgeryEnabled)
             headers[csrfHeader] = csrf;
+
+        if (typeof resolveRequestHeaders === "function") {
+            headers = await resolveRequestHeaders({
+                kind: "bifrost-token",
+                url: url.toString(),
+                method: "GET",
+                actionId: null,
+                topic: t,
+                requestId: null,
+                attempt: shouldRetry ? 1 : 2,
+                sourceElement: null,
+                signal: null
+            }, headers);
+        }
 
         const res = await global.fetch(url.toString(), {
             method: "GET",
@@ -100,9 +170,34 @@ export function createSecurityTokens({
             headers
         });
 
+        let responseBody = null;
+        if (res.status === 401)
+            responseBody = await safeText(res);
+
         const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
-        if (authRedirectUrl) {
-            const redirectUrl = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
+        const normalizedAuthRedirectUrl = authRedirectUrl
+            ? normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl)
+            : null;
+        const useDefaultUnauthorizedHandling = emitUnauthorized({
+            response: res,
+            emitLifecycle,
+            sourceElement: null,
+            detail: {
+                kind: "bifrost-token",
+                actionId: null,
+                topic: t,
+                requestId: null,
+                attempt: shouldRetry ? 1 : 2,
+                sourceElement: null,
+                url: url.toString(),
+                method: "GET",
+                body: responseBody,
+                redirectUrl: normalizedAuthRedirectUrl,
+                requestContext: null
+            }
+        });
+        if (authRedirectUrl && useDefaultUnauthorizedHandling) {
+            const redirectUrl = normalizedAuthRedirectUrl;
             const error = new Error(`Bifrost token fetch redirected: ${redirectUrl}`);
             error.status = res.status;
             error.redirectUrl = redirectUrl;
@@ -124,7 +219,7 @@ export function createSecurityTokens({
         }
 
         if (!res.ok) {
-            const body = await safeText(res);
+            const body = responseBody == null ? await safeText(res) : responseBody;
 
             if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res.status, body)) {
                 if (typeof dbg === "function")

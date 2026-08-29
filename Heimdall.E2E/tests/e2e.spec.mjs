@@ -11,6 +11,7 @@ import { tests as lifecycle } from "./specs/lifecycle.spec.mjs";
 import { tests as sse } from "./specs/sse.spec.mjs";
 import { tests as antiforgery } from "./specs/antiforgery.spec.mjs";
 import { tests as client_info } from "./specs/client-info.spec.mjs";
+import { tests as request_headers } from "./specs/request-headers.spec.mjs";
 import { tests as auth_and_errors } from "./specs/auth-and-errors.spec.mjs";
 
 const tests = [
@@ -25,6 +26,7 @@ const tests = [
   ...sse,
   ...antiforgery,
   ...client_info,
+  ...request_headers,
   ...auth_and_errors
 ];
 

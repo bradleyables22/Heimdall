@@ -135,6 +135,137 @@
     }
   }
 
+  // core/request-headers.js
+  var REQUEST_HEADERS_FAILED_CODE = "request-headers-failed";
+  function createRequestHeadersRuntime({ global, getConfig }) {
+    function abortError() {
+      if (typeof global.DOMException === "function")
+        return new global.DOMException("The request was aborted.", "AbortError");
+      const error = new Error("The request was aborted.");
+      error.name = "AbortError";
+      return error;
+    }
+    function waitForProvider(value, signal) {
+      const promise = Promise.resolve(value);
+      if (!signal || typeof signal.addEventListener !== "function")
+        return promise;
+      if (signal.aborted)
+        return Promise.reject(abortError());
+      return new Promise((resolve2, reject) => {
+        let settled = false;
+        const onAbort = () => {
+          if (settled)
+            return;
+          settled = true;
+          reject(abortError());
+        };
+        signal.addEventListener("abort", onAbort, { once: true });
+        promise.then(
+          (result) => {
+            if (settled)
+              return;
+            settled = true;
+            signal.removeEventListener("abort", onAbort);
+            resolve2(result);
+          },
+          (error) => {
+            if (settled)
+              return;
+            settled = true;
+            signal.removeEventListener("abort", onAbort);
+            reject(error);
+          }
+        );
+      });
+    }
+    function sourceEntries(source) {
+      if (source == null)
+        return [];
+      if (typeof global.Headers === "function" && source instanceof global.Headers)
+        return Array.from(source.entries());
+      if (Array.isArray(source))
+        return source;
+      if (typeof source === "object")
+        return Object.entries(source);
+      throw new TypeError("requestHeaders must return a Headers instance, header pairs, an object, or null.");
+    }
+    function validatedEntry(entry) {
+      if (!Array.isArray(entry) || entry.length !== 2)
+        throw new TypeError("requestHeaders header pairs must contain exactly a name and value.");
+      const name = String(entry[0]);
+      const value = entry[1];
+      if (typeof global.Headers !== "function")
+        return [name, String(value)];
+      const validation = new global.Headers([[name, value]]);
+      return [name, validation.get(name) || ""];
+    }
+    function setHeader(target, name, value) {
+      const lowerName = name.toLowerCase();
+      for (const existing of Object.keys(target)) {
+        if (existing.toLowerCase() === lowerName)
+          delete target[existing];
+      }
+      target[name] = value;
+    }
+    function merge(target, source) {
+      for (const entry of sourceEntries(source)) {
+        const [name, value] = validatedEntry(entry);
+        setHeader(target, name, value);
+      }
+      return target;
+    }
+    async function resolve(context, initialHeaders) {
+      const headers = merge({}, initialHeaders);
+      const configured = getConfig()?.requestHeaders;
+      if (configured == null)
+        return headers;
+      try {
+        const providerContext = {
+          ...context,
+          headers
+        };
+        const provided = typeof configured === "function" ? await waitForProvider(configured(providerContext), context?.signal) : configured;
+        const normalized = merge({}, headers);
+        merge(normalized, provided);
+        return normalized;
+      } catch (cause) {
+        const kind = context?.kind || "request";
+        const message = cause && cause.message ? cause.message : String(cause || "Unknown request header provider failure.");
+        const error = new Error(`Heimdall requestHeaders failed for ${kind}: ${message}`);
+        error.name = "HeimdallRequestHeadersError";
+        error.code = REQUEST_HEADERS_FAILED_CODE;
+        error.requestKind = kind;
+        error.cause = cause;
+        throw error;
+      }
+    }
+    return {
+      merge,
+      resolve
+    };
+  }
+
+  // core/unauthorized.js
+  function emitUnauthorized({
+    response,
+    emitLifecycle,
+    sourceElement,
+    detail
+  }) {
+    if (Number(response?.status) !== 401 || typeof emitLifecycle !== "function")
+      return true;
+    return emitLifecycle(
+      sourceElement || null,
+      "heimdall:unauthorized",
+      {
+        ...detail,
+        status: 401,
+        response
+      },
+      { cancelable: true }
+    );
+  }
+
   // core/actions.js
   function createActionInvoker({
     global,
@@ -149,6 +280,8 @@
     dom,
     coordinator,
     busyState,
+    resolveRequestHeaders,
+    mergeRequestHeaders,
     getClientInfoHeader,
     actionHeader,
     csrfHeader,
@@ -277,6 +410,32 @@
         emitLifecycle(context.sourceElement, "heimdall:request-timeout", detail);
       emitLifecycle(context.sourceElement, "heimdall:request-cancel", detail);
     }
+    function requestHeadersFailure(context, error) {
+      context.request = null;
+      context.response = null;
+      context.rawHtml = null;
+      const result = {
+        ok: false,
+        status: 0,
+        code: REQUEST_HEADERS_FAILED_CODE,
+        error: error.message,
+        response: null,
+        html: null,
+        ms: Math.max(0, performance.now() - (context.startedExecutionAt || context.startedAt)),
+        requestId: context.requestId
+      };
+      emit("heimdall:error", {
+        actionId: context.actionId,
+        payload: context.payload,
+        target: context.target,
+        swap: context.swap,
+        status: 0,
+        code: REQUEST_HEADERS_FAILED_CODE,
+        phase: "request-headers",
+        error
+      });
+      return result;
+    }
     async function invoke(actionId, payload, options) {
       options = options || {};
       const context = createRequestContext(actionId, payload, options);
@@ -320,12 +479,20 @@
       const antiforgeryEnabled = getConfig().antiforgery !== false;
       let token = null;
       if (antiforgeryEnabled) {
-        token = await ensureCsrfToken();
+        try {
+          token = await ensureCsrfToken();
+        } catch (error) {
+          if (!coordinator.isCurrent(context))
+            return coordinator.getCancellationResult(context);
+          if (error?.code === REQUEST_HEADERS_FAILED_CODE)
+            return requestHeadersFailure(context, error);
+          throw error;
+        }
         if (!coordinator.isCurrent(context))
           return coordinator.getCancellationResult(context);
       }
       const isFormData = typeof global.FormData === "function" && context.payload instanceof global.FormData;
-      const headers = {
+      let headers = {
         [actionHeader]: context.actionId
       };
       if (antiforgeryEnabled)
@@ -335,8 +502,34 @@
         headers[clientInfoHeader] = clientInfo;
       if (!isFormData)
         headers["Content-Type"] = "application/json";
-      for (const key in context.headers)
-        headers[key] = context.headers[key];
+      if (typeof resolveRequestHeaders === "function") {
+        try {
+          headers = await resolveRequestHeaders({
+            kind: "content-action",
+            url: url.toString(),
+            method: "POST",
+            actionId: context.actionId,
+            requestId: context.requestId,
+            attempt: context.attempt,
+            sourceElement: context.sourceElement,
+            signal: context.signal
+          }, headers);
+        } catch (error) {
+          if (!coordinator.isCurrent(context))
+            return coordinator.getCancellationResult(context);
+          if (error?.code === REQUEST_HEADERS_FAILED_CODE)
+            return requestHeadersFailure(context, error);
+          throw error;
+        }
+      }
+      if (!coordinator.isCurrent(context))
+        return coordinator.getCancellationResult(context);
+      if (typeof mergeRequestHeaders === "function")
+        mergeRequestHeaders(headers, context.headers);
+      else {
+        for (const key in context.headers)
+          headers[key] = context.headers[key];
+      }
       let body = context.payload;
       if (!isFormData) {
         body = "{}";
@@ -435,8 +628,26 @@
         }
       }
       const authRedirectUrl = getAuthRedirectUrlFromResponse(response);
-      if (authRedirectUrl) {
-        const redirectUrl2 = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
+      const normalizedAuthRedirectUrl = authRedirectUrl ? normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl) : null;
+      const useDefaultUnauthorizedHandling = emitUnauthorized({
+        response,
+        emitLifecycle,
+        sourceElement: context.sourceElement,
+        detail: {
+          kind: "content-action",
+          actionId: context.actionId,
+          requestId: context.requestId,
+          attempt: context.attempt,
+          sourceElement: context.sourceElement,
+          url: context.request.url,
+          method: "POST",
+          body: rawHtml,
+          redirectUrl: normalizedAuthRedirectUrl,
+          requestContext: context
+        }
+      });
+      if (authRedirectUrl && useDefaultUnauthorizedHandling) {
+        const redirectUrl2 = normalizedAuthRedirectUrl;
         emit("heimdall:redirect", {
           actionId: context.actionId,
           payload: context.payload,
@@ -2508,8 +2719,10 @@
     global,
     getConfig,
     emit,
+    emitLifecycle,
     dbg,
     safeText: safeText2,
+    resolveRequestHeaders,
     csrfHeader,
     defaultBifrostTokenEndpoint
   }) {
@@ -2524,13 +2737,61 @@
         return csrfTokenPromise;
       csrfTokenPromise = (async () => {
         try {
-          const res = await global.fetch(getConfig().endpoints.csrf, {
+          const configuredUrl = getConfig().endpoints.csrf;
+          const url = new URL(configuredUrl, global.location?.origin || void 0).toString();
+          let headers = { "X-Requested-With": "XMLHttpRequest" };
+          if (typeof resolveRequestHeaders === "function") {
+            headers = await resolveRequestHeaders({
+              kind: "csrf-token",
+              url,
+              method: "GET",
+              actionId: null,
+              topic: null,
+              requestId: null,
+              attempt: 1,
+              sourceElement: null,
+              signal: null
+            }, headers);
+          }
+          const res = await global.fetch(url, {
             method: "GET",
             credentials: "same-origin",
-            headers: { "X-Requested-With": "XMLHttpRequest" }
+            headers
           });
-          if (!res.ok)
-            throw new Error(`CSRF token fetch failed: ${res.status}`);
+          if (!res.ok) {
+            const body = await safeText2(res);
+            const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
+            const redirectUrl = authRedirectUrl ? normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl) : null;
+            const useDefaultUnauthorizedHandling = emitUnauthorized({
+              response: res,
+              emitLifecycle,
+              sourceElement: null,
+              detail: {
+                kind: "csrf-token",
+                actionId: null,
+                topic: null,
+                requestId: null,
+                attempt: 1,
+                sourceElement: null,
+                url,
+                method: "GET",
+                body,
+                redirectUrl,
+                requestContext: null
+              }
+            });
+            const performedRedirect = !!(authRedirectUrl && useDefaultUnauthorizedHandling);
+            if (performedRedirect) {
+              if (typeof dbg === "function")
+                dbg("csrf token redirecting", { redirectUrl });
+              global.location.href = redirectUrl;
+            }
+            const error = new Error(`CSRF token fetch failed: ${res.status}. ${body || ""}`.trim());
+            error.status = res.status;
+            error.body = body;
+            error.redirectUrl = performedRedirect ? redirectUrl : null;
+            throw error;
+          }
           const data = await res.json();
           csrfToken = data && data.requestToken;
           if (!csrfToken)
@@ -2571,19 +2832,54 @@
       const base = config.endpoints && config.endpoints.bifrostToken ? config.endpoints.bifrostToken : defaultBifrostTokenEndpoint;
       const url = new URL(base, global.location?.origin || void 0);
       url.searchParams.set("topic", t);
-      const headers = {
+      let headers = {
         "X-Requested-With": "XMLHttpRequest"
       };
       if (antiforgeryEnabled)
         headers[csrfHeader] = csrf;
+      if (typeof resolveRequestHeaders === "function") {
+        headers = await resolveRequestHeaders({
+          kind: "bifrost-token",
+          url: url.toString(),
+          method: "GET",
+          actionId: null,
+          topic: t,
+          requestId: null,
+          attempt: shouldRetry ? 1 : 2,
+          sourceElement: null,
+          signal: null
+        }, headers);
+      }
       const res = await global.fetch(url.toString(), {
         method: "GET",
         credentials: "same-origin",
         headers
       });
+      let responseBody = null;
+      if (res.status === 401)
+        responseBody = await safeText2(res);
       const authRedirectUrl = getAuthRedirectUrlFromResponse(res);
-      if (authRedirectUrl) {
-        const redirectUrl = normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl);
+      const normalizedAuthRedirectUrl = authRedirectUrl ? normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl) : null;
+      const useDefaultUnauthorizedHandling = emitUnauthorized({
+        response: res,
+        emitLifecycle,
+        sourceElement: null,
+        detail: {
+          kind: "bifrost-token",
+          actionId: null,
+          topic: t,
+          requestId: null,
+          attempt: shouldRetry ? 1 : 2,
+          sourceElement: null,
+          url: url.toString(),
+          method: "GET",
+          body: responseBody,
+          redirectUrl: normalizedAuthRedirectUrl,
+          requestContext: null
+        }
+      });
+      if (authRedirectUrl && useDefaultUnauthorizedHandling) {
+        const redirectUrl = normalizedAuthRedirectUrl;
         const error = new Error(`Bifrost token fetch redirected: ${redirectUrl}`);
         error.status = res.status;
         error.redirectUrl = redirectUrl;
@@ -2601,7 +2897,7 @@
         throw error;
       }
       if (!res.ok) {
-        const body = await safeText2(res);
+        const body = responseBody == null ? await safeText2(res) : responseBody;
         if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res.status, body)) {
           if (typeof dbg === "function")
             dbg("bifrost csrf validation suspected; retrying once with fresh token", { topic: t });
@@ -2759,6 +3055,7 @@
         observeDom: true,
         debug: false,
         authReturnUrlParameter: "ReturnUrl",
+        requestHeaders: null,
         antiforgery: true,
         clientInfo: false,
         clientInfoMaxAgeMs: 6e4,
@@ -3992,6 +4289,10 @@ ${topic}`;
       global,
       dbg
     });
+    const requestHeaders = createRequestHeadersRuntime({
+      global,
+      getConfig: getRuntimeConfig
+    });
     const jsInvokeVoid = createJsInvokeVoidRuntime({
       global,
       emit,
@@ -4035,8 +4336,10 @@ ${topic}`;
       global,
       getConfig: getRuntimeConfig,
       emit,
+      emitLifecycle,
       dbg,
       safeText,
+      resolveRequestHeaders: requestHeaders.resolve,
       csrfHeader: CSRF_HEADER,
       defaultBifrostTokenEndpoint: DEFAULT_BIFROST_TOKEN_ENDPOINT
     });
@@ -4056,6 +4359,8 @@ ${topic}`;
       dom,
       coordinator,
       busyState,
+      resolveRequestHeaders: requestHeaders.resolve,
+      mergeRequestHeaders: requestHeaders.merge,
       getClientInfoHeader: clientInfo.getHeaderValue,
       actionHeader: ACTION_HEADER,
       csrfHeader: CSRF_HEADER,
