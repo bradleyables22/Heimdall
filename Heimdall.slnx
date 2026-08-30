@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="CHANGELOG.md" />
+  </Folder>
   <Project Path="Heimdall.Bootstrap/Heimdall.Bootstrap.csproj" Id="f373c3c2-fd49-45b5-bdf0-9ed29893e472" />
   <Project Path="Heimdall.E2E/Heimdall.E2E.csproj" Id="2d86aa94-6af2-4187-b86a-944ed07f9ecb" />
   <Project Path="Heimdall.Server.Tests/Heimdall.Server.Tests.csproj" Id="804d9ecd-9cad-4cf2-99a4-c8ec78d86e24" />

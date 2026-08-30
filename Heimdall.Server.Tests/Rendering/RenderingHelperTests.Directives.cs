@@ -17,6 +17,25 @@ public sealed partial class RenderingHelperTests
     }
 
     [Fact]
+    public void StaticHelpers_RenderHistoryDirectives()
+    {
+        var html = Render(Html.Fragment(
+            HeimdallHtml.History(HeimdallHtml.HistoryMode.Push, "orders/42?tab=activity"),
+            HeimdallHtml.HistoryReplace("/orders/42")));
+
+        Assert.Contains("<history mode=\"push\" url=\"orders/42?tab=activity\"></history>", html);
+        Assert.Contains("<history mode=\"replace\" url=\"/orders/42\"></history>", html);
+    }
+
+    [Fact]
+    public void StaticHelpers_EncodeHistoryUrl()
+    {
+        var html = Render(HeimdallHtml.HistoryPush("orders?filter=<open>&owner=me"));
+
+        Assert.Contains("url=\"orders?filter=&lt;open&gt;&amp;owner=me\"", html);
+    }
+
+    [Fact]
     public void StaticHelpers_RenderJsInvokeVoidDirective()
     {
         var html = Render(Html.Fragment(

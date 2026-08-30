@@ -70,6 +70,14 @@ app.MapHeimdallPage("/e2e", (_, ctx) =>
 {
 	return MainLayout.Render(E2EHarnessPage.Render(), "E2E Harness");
 });
+app.MapHeimdallPage("/history/pushed", (_, ctx) =>
+{
+	return MainLayout.Render(E2EHarnessPage.Render(), "History Push");
+});
+app.MapHeimdallPage("/history/replaced", (_, ctx) =>
+{
+	return MainLayout.Render(E2EHarnessPage.Render(), "History Replace");
+});
 
 app.MapGet("/e2e-signin", () =>
 	Results.Content(

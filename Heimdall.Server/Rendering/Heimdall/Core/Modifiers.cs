@@ -137,6 +137,8 @@ namespace Heimdall.Server.Rendering
 			Trigger.Blur => "blur",
 			Trigger.Hover => "hover",
 			Trigger.Visible => "visible",
+			Trigger.DocumentVisible => "document-visible",
+			Trigger.Online => "online",
 			Trigger.Scroll => "scroll",
 			_ => throw new ArgumentOutOfRangeException(nameof(trigger))
 		};

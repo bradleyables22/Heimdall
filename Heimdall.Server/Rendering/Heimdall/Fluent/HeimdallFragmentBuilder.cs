@@ -93,6 +93,27 @@ namespace Heimdall.Server.Rendering
 				return this;
 			}
 
+			/// <summary>Adds a browser history directive to the response fragment.</summary>
+			public HeimdallFragmentBuilder History(HeimdallHtml.HistoryMode mode, string url)
+			{
+				_f.Add(HeimdallHtml.History(mode, url));
+				return this;
+			}
+
+			/// <summary>Adds a new browser history entry for the supplied URL.</summary>
+			public HeimdallFragmentBuilder HistoryPush(string url)
+			{
+				_f.Add(HeimdallHtml.HistoryPush(url));
+				return this;
+			}
+
+			/// <summary>Replaces the browser's current history entry with the supplied URL.</summary>
+			public HeimdallFragmentBuilder HistoryReplace(string url)
+			{
+				_f.Add(HeimdallHtml.HistoryReplace(url));
+				return this;
+			}
+
 			/// <summary>
 			/// Adds a JavaScript void invocation directive that runs after response swaps.
 			/// </summary>

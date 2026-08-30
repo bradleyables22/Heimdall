@@ -23,6 +23,7 @@ export function createActionInvoker({
     payloadBindingFromElement,
     boot,
     dom,
+    historyRuntime,
     coordinator,
     busyState,
     resolveRequestHeaders,
@@ -499,6 +500,7 @@ export function createActionInvoker({
         let redirectUrl = null;
         let jsAfter = [];
         let oobMutationTargets = [];
+        let historyCommand = null;
 
         if (response.ok) {
             const oob = dom.processOob(html, context.sourceElement, {
@@ -518,6 +520,7 @@ export function createActionInvoker({
             redirectUrl = oob.redirectUrl || null;
             jsAfter = oob.jsAfter || [];
             oobMutationTargets = oob.mutationTargets || [];
+            historyCommand = oob.historyCommand || null;
         } else {
             html = dom.sanitizeHtmlStringNoApply(html);
         }
@@ -572,6 +575,7 @@ export function createActionInvoker({
             dom.stripInvocationsFromFragment(mainTemplate.content);
             dom.stripAbortsFromFragment(mainTemplate.content);
             dom.stripRedirectsFromFragment(mainTemplate.content);
+            dom.stripHistoryFromFragment(mainTemplate.content);
             dom.stripJsInvokeVoidFromFragment(mainTemplate.content);
             dom.stripMutationsFromFragment(mainTemplate.content);
 
@@ -600,6 +604,13 @@ export function createActionInvoker({
         if (response.ok)
             dom.reconcileMutations(oobMutationTargets);
 
+        let historyResult = null;
+        if (response.ok && historyCommand) {
+            historyResult = historyRuntime.apply(historyCommand, context.sourceElement, {
+                requestContext: context
+            });
+        }
+
         if (response.ok) {
             dom.invokeJsInvokeVoidDirectives(jsAfter, {
                 phase: "after",
@@ -625,6 +636,9 @@ export function createActionInvoker({
             redirectUrl,
             requestId: context.requestId
         };
+
+        if (historyResult)
+            result.history = historyResult;
 
         if (!response.ok) {
             emit("heimdall:error", {
@@ -668,6 +682,8 @@ export function createActionInvoker({
         blur: false,
         hover: false,
         visible: false,
+        "document-visible": false,
+        online: false,
         scroll: false,
         sse: false
     };

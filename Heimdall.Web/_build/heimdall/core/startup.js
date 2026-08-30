@@ -14,6 +14,7 @@ export function createHeimdallRuntime({
     sseDisconnect,
     sseDisconnectAll,
     handlers,
+    installPageLifecycle,
     installSseSweeper,
     dbg,
     onRuntimeCreated
@@ -170,6 +171,7 @@ export function createHeimdallRuntime({
 
         boot(document);
         installObserver();
+        installPageLifecycle();
         installSseSweeper();
 
         if (global.Blazor && typeof global.Blazor.addEventListener === "function") {

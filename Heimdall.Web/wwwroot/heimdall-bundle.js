@@ -278,6 +278,7 @@
     payloadBindingFromElement,
     boot,
     dom,
+    historyRuntime,
     coordinator,
     busyState,
     resolveRequestHeaders,
@@ -678,6 +679,7 @@
       let redirectUrl = null;
       let jsAfter = [];
       let oobMutationTargets = [];
+      let historyCommand = null;
       if (response.ok) {
         const oob = dom.processOob(html, context.sourceElement, {
           kind: "action",
@@ -696,6 +698,7 @@
         redirectUrl = oob.redirectUrl || null;
         jsAfter = oob.jsAfter || [];
         oobMutationTargets = oob.mutationTargets || [];
+        historyCommand = oob.historyCommand || null;
       } else {
         html = dom.sanitizeHtmlStringNoApply(html);
       }
@@ -744,6 +747,7 @@
         dom.stripInvocationsFromFragment(mainTemplate.content);
         dom.stripAbortsFromFragment(mainTemplate.content);
         dom.stripRedirectsFromFragment(mainTemplate.content);
+        dom.stripHistoryFromFragment(mainTemplate.content);
         dom.stripJsInvokeVoidFromFragment(mainTemplate.content);
         dom.stripMutationsFromFragment(mainTemplate.content);
         const swapResult = dom.applySwap(
@@ -767,6 +771,12 @@
       }
       if (response.ok)
         dom.reconcileMutations(oobMutationTargets);
+      let historyResult = null;
+      if (response.ok && historyCommand) {
+        historyResult = historyRuntime.apply(historyCommand, context.sourceElement, {
+          requestContext: context
+        });
+      }
       if (response.ok) {
         dom.invokeJsInvokeVoidDirectives(jsAfter, {
           phase: "after",
@@ -791,6 +801,8 @@
         redirectUrl,
         requestId: context.requestId
       };
+      if (historyResult)
+        result.history = historyResult;
       if (!response.ok) {
         emit("heimdall:error", {
           actionId: context.actionId,
@@ -830,6 +842,8 @@
       blur: false,
       hover: false,
       visible: false,
+      "document-visible": false,
+      online: false,
       scroll: false,
       sse: false
     };
@@ -1557,6 +1571,31 @@
       for (const redirectEl of redirects)
         redirectEl.remove();
     }
+    function stripHistoryFromFragment(fragment) {
+      if (!fragment || !fragment.querySelectorAll)
+        return;
+      const directives = fragment.querySelectorAll("history");
+      for (const directive of directives)
+        directive.remove();
+    }
+    function extractHistoryFromFragment(fragment) {
+      if (!fragment || !fragment.querySelectorAll)
+        return null;
+      const directives = Array.from(fragment.querySelectorAll("history"));
+      if (directives.length === 0)
+        return null;
+      if (directives.length > 1) {
+        stripHistoryFromFragment(fragment);
+        return { error: "A Heimdall response can contain only one history directive." };
+      }
+      const directive = directives[0];
+      const command = {
+        mode: getAttr(directive, "mode"),
+        url: getAttr(directive, "url") || (directive.textContent || "").trim()
+      };
+      directive.remove();
+      return command;
+    }
     function normalizeJsInvokeTiming(value) {
       return jsInvokeVoid && typeof jsInvokeVoid.normalizeTiming === "function" ? jsInvokeVoid.normalizeTiming(value) : String(value || "after").toLowerCase().trim() === "before" ? "before" : "after";
     }
@@ -1640,7 +1679,8 @@
       const hasRedirect = containsTag(html, "redirect");
       const hasJsInvokeVoid = containsTag(html, "javascript");
       const hasMutation = containsTag(html, "mutation");
-      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation)
+      const hasHistory = containsTag(html, "history");
+      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory)
         return html;
       const tpl = parseHtmlToTemplate(html);
       stripInvocationsFromFragment(tpl.content);
@@ -1648,6 +1688,7 @@
       stripRedirectsFromFragment(tpl.content);
       stripJsInvokeVoidFromFragment(tpl.content);
       stripMutationsFromFragment(tpl.content);
+      stripHistoryFromFragment(tpl.content);
       return fragmentToHtml(tpl.content);
     }
     function processOob(html, sourceEl, context) {
@@ -1657,7 +1698,8 @@
       const hasRedirect = containsTag(html, "redirect");
       const hasJsInvokeVoid = containsTag(html, "javascript");
       const hasMutation = containsTag(html, "mutation");
-      if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation) {
+      const hasHistory = containsTag(html, "history");
+      if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory) {
         return {
           html: html || "",
           applied: 0,
@@ -1665,7 +1707,8 @@
           abortReason: null,
           redirectUrl: null,
           jsAfter: [],
-          mutationTargets: []
+          mutationTargets: [],
+          historyCommand: null
         };
       }
       const tpl = parseHtmlToTemplate(html);
@@ -1673,6 +1716,7 @@
       const redirect = extractRedirectFromFragment(fragment);
       if (redirect && redirect.url) {
         stripRedirectsFromFragment(fragment);
+        stripHistoryFromFragment(fragment);
         return {
           html: fragmentToHtml(fragment),
           applied: 0,
@@ -1680,9 +1724,11 @@
           abortReason: "redirect",
           redirectUrl: redirect.url,
           jsAfter: [],
-          mutationTargets: []
+          mutationTargets: [],
+          historyCommand: null
         };
       }
+      const historyCommand = extractHistoryFromFragment(fragment);
       const jsDirectives = collectJsInvokeVoidDirectives(fragment);
       const jsGroups = splitJsInvokeVoidDirectives(jsDirectives);
       invokeJsInvokeVoidDirectives(jsGroups.before, Object.assign({ phase: "before", sourceEl }, context || {}));
@@ -1707,7 +1753,8 @@
           abortReason,
           redirectUrl: null,
           jsAfter: jsGroups.after,
-          mutationTargets: []
+          mutationTargets: [],
+          historyCommand
         };
       }
       if (!getConfig().oobEnabled) {
@@ -1720,7 +1767,8 @@
           abortReason,
           redirectUrl: null,
           jsAfter: jsGroups.after,
-          mutationTargets: []
+          mutationTargets: [],
+          historyCommand
         };
       }
       let applied = 0;
@@ -1760,6 +1808,7 @@
           stripScripts(payloadFrag);
           stripInvocationsFromFragment(payloadFrag);
           stripMutationsFromFragment(payloadFrag);
+          stripHistoryFromFragment(payloadFrag);
           const swapResult = applySwap(targetEl, payloadFrag, swap, Object.assign({}, context || {}, {
             sourceEl,
             swapKind: "invocation"
@@ -1784,7 +1833,8 @@
         abortReason,
         redirectUrl: null,
         jsAfter: jsGroups.after,
-        mutationTargets
+        mutationTargets,
+        historyCommand
       };
     }
     function reconcileMutations(targets) {
@@ -1802,7 +1852,8 @@
       stripInvocationsFromFragment,
       stripMutationsFromFragment,
       stripJsInvokeVoidFromFragment,
-      stripRedirectsFromFragment
+      stripRedirectsFromFragment,
+      stripHistoryFromFragment
     };
   }
 
@@ -2044,6 +2095,104 @@
       handleMouseOver,
       handleSubmit
     };
+  }
+
+  // core/history.js
+  var HISTORY_STATE_KEY = "__heimdall_history_v1";
+  function createHistoryRuntime({ global, emitLifecycle, dbg }) {
+    function currentUrl() {
+      return `${global.location.pathname}${global.location.search}${global.location.hash}`;
+    }
+    function normalizeMode(value) {
+      const mode = String(value || "").trim().toLowerCase();
+      if (mode !== "push" && mode !== "replace")
+        throw new Error(`Unsupported Heimdall history mode '${mode || "(empty)"}'.`);
+      return mode;
+    }
+    function normalizeUrl(value) {
+      const raw = String(value || "").trim();
+      if (!raw)
+        throw new Error("Heimdall history URL is required.");
+      if (raw.includes("\\"))
+        throw new Error("Heimdall history URLs cannot contain backslashes.");
+      if (raw.startsWith("//"))
+        throw new Error("Protocol-relative Heimdall history URLs are not allowed.");
+      let candidate;
+      if (raw.startsWith("?") || raw.startsWith("#")) {
+        candidate = new URL(raw, global.location.href);
+      } else if (/^[a-z][a-z\d+.-]*:/i.test(raw)) {
+        candidate = new URL(raw);
+      } else {
+        candidate = new URL(raw.startsWith("/") ? raw : `/${raw}`, global.location.origin);
+      }
+      if (candidate.origin !== global.location.origin)
+        throw new Error("Heimdall history URLs must be same-origin.");
+      return `${candidate.pathname}${candidate.search}${candidate.hash}`;
+    }
+    function markState(value) {
+      if (value && typeof value === "object" && value[HISTORY_STATE_KEY] === true)
+        return value;
+      if (value && Object.prototype.toString.call(value) === "[object Object]") {
+        return Object.assign({}, value, { [HISTORY_STATE_KEY]: true });
+      }
+      return {
+        [HISTORY_STATE_KEY]: true,
+        previousState: value == null ? null : value
+      };
+    }
+    function emitError(command, sourceElement, context, error) {
+      const detail = {
+        mode: command && command.mode != null ? String(command.mode) : null,
+        url: command && command.url != null ? String(command.url) : null,
+        error,
+        sourceElement: sourceElement || null,
+        requestContext: context && context.requestContext ? context.requestContext : null
+      };
+      emitLifecycle(sourceElement, "heimdall:history-error", detail);
+      dbg("history directive ignored", detail);
+    }
+    function apply(command, sourceElement, context) {
+      if (!command)
+        return { applied: false, cancelled: false, mode: null, url: null, error: null };
+      if (command.error) {
+        const error = new Error(command.error);
+        emitError(command, sourceElement, context, error);
+        return { applied: false, cancelled: false, mode: null, url: null, error };
+      }
+      const detail = {
+        mode: command.mode,
+        url: command.url,
+        sourceElement: sourceElement || null,
+        requestContext: context && context.requestContext ? context.requestContext : null
+      };
+      if (!emitLifecycle(sourceElement, "heimdall:history-before", detail, { cancelable: true }))
+        return { applied: false, cancelled: true, mode: detail.mode, url: detail.url, error: null };
+      try {
+        const mode = normalizeMode(detail.mode);
+        const url = normalizeUrl(detail.url);
+        if (mode === "push") {
+          global.history.replaceState(markState(global.history.state), "", currentUrl());
+          global.history.pushState(markState(null), "", url);
+        } else {
+          global.history.replaceState(markState(global.history.state), "", url);
+        }
+        const afterDetail = Object.assign({}, detail, { mode, url });
+        emitLifecycle(sourceElement, "heimdall:history-after", afterDetail);
+        return { applied: true, cancelled: false, mode, url, error: null };
+      } catch (error) {
+        emitError(detail, sourceElement, context, error);
+        return { applied: false, cancelled: false, mode: null, url: null, error };
+      }
+    }
+    global.addEventListener("popstate", (event) => {
+      if (!event.state || event.state[HISTORY_STATE_KEY] !== true)
+        return;
+      const detail = { url: currentUrl(), state: event.state };
+      if (!emitLifecycle(global.document, "heimdall:history-pop", detail, { cancelable: true }))
+        return;
+      global.location.reload();
+    });
+    return { apply, normalizeUrl };
   }
 
   // core/js-invoke-void.js
@@ -2340,6 +2489,44 @@
       apply,
       reconcile
     };
+  }
+
+  // core/page-lifecycle.js
+  function createPageLifecycleRuntime({
+    global,
+    runActionFromElement,
+    emit
+  }) {
+    function invokeMatching(attr, triggerName) {
+      const elements = document.querySelectorAll(`[${attr}]`);
+      for (const el of elements) {
+        const actionId = (getAttr(el, attr) || "").trim();
+        if (!actionId)
+          continue;
+        runActionFromElement(el, actionId, triggerName).catch(() => {
+        });
+      }
+    }
+    function handleVisibilityChange() {
+      if (document.visibilityState !== "visible")
+        return;
+      invokeMatching("heimdall-content-document-visible", "document-visible");
+    }
+    function handleOnline() {
+      invokeMatching("heimdall-content-online", "online");
+    }
+    function handleOffline() {
+      emit("heimdall:offline", { online: false });
+    }
+    function install() {
+      if (document.__heimdallPageLifecycleInstalled)
+        return;
+      document.__heimdallPageLifecycleInstalled = true;
+      document.addEventListener("visibilitychange", handleVisibilityChange, false);
+      global.addEventListener("online", handleOnline, false);
+      global.addEventListener("offline", handleOffline, false);
+    }
+    return { install };
   }
 
   // core/payloads.js
@@ -2965,6 +3152,7 @@
     sseDisconnect,
     sseDisconnectAll,
     handlers,
+    installPageLifecycle,
     installSseSweeper,
     dbg,
     onRuntimeCreated
@@ -3097,6 +3285,7 @@
       }
       boot(document);
       installObserver();
+      installPageLifecycle();
       installSseSweeper();
       if (global.Blazor && typeof global.Blazor.addEventListener === "function") {
         global.Blazor.addEventListener("enhancedload", () => {
@@ -3636,6 +3825,7 @@ ${topic}`;
         dom.stripInvocationsFromFragment(mainTpl.content);
         dom.stripAbortsFromFragment(mainTpl.content);
         dom.stripRedirectsFromFragment(mainTpl.content);
+        dom.stripHistoryFromFragment(mainTpl.content);
         dom.stripJsInvokeVoidFromFragment(mainTpl.content);
         dom.stripMutationsFromFragment(mainTpl.content);
         const swapResult = dom.applySwap(targetEl, mainTpl.content, swapMode, {
@@ -4311,6 +4501,11 @@ ${topic}`;
       emitLifecycle,
       dbg
     });
+    const historyRuntime = createHistoryRuntime({
+      global,
+      emitLifecycle,
+      dbg
+    });
     const mutations = createMutationRuntime({
       global,
       emitLifecycle,
@@ -4357,6 +4552,7 @@ ${topic}`;
       payloadBindingFromElement,
       boot: (root) => boot(root),
       dom,
+      historyRuntime,
       coordinator,
       busyState,
       resolveRequestHeaders: requestHeaders.resolve,
@@ -4389,6 +4585,11 @@ ${topic}`;
       global,
       getConfig: getRuntimeConfig,
       runActionFromElement
+    });
+    const pageLifecycle = createPageLifecycleRuntime({
+      global,
+      runActionFromElement,
+      emit
     });
     const {
       bootSse,
@@ -4441,6 +4642,7 @@ ${topic}`;
         handleMouseOver,
         handleSubmit
       },
+      installPageLifecycle: pageLifecycle.install,
       installSseSweeper,
       dbg,
       onRuntimeCreated: (runtime) => {

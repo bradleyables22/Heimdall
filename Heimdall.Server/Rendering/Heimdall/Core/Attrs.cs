@@ -52,6 +52,14 @@ namespace Heimdall.Server.Rendering
 			/// </summary>
 			public const string Visible = "heimdall-content-visible";
 			/// <summary>
+			/// DocumentVisible invokes an action when the document transitions from hidden to visible.
+			/// </summary>
+			public const string DocumentVisible = "heimdall-content-document-visible";
+			/// <summary>
+			/// Online invokes an action when the browser reports that network connectivity has returned.
+			/// </summary>
+			public const string Online = "heimdall-content-online";
+			/// <summary>
 			/// Scroll is used for scroll interactions. It specifies that a content update should occur when the user scrolls the element. This can be useful for infinite scrolling, dynamic content loading, or any scenario where you want to update the content based on the user's scroll behavior. While Load can be used for any event, Scroll is specifically designed for scroll interactions, making it more suitable for scenarios that require handling user scroll behavior and dynamic content loading.
 			/// </summary>
 			public const string Scroll = "heimdall-content-scroll";

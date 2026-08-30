@@ -5,8 +5,10 @@ import { createClientInfoRuntime } from "./core/client-info.js";
 import { createDiagnostics } from "./core/diagnostics.js";
 import { createDomPipeline } from "./core/dom.js";
 import { createEventDelegates } from "./core/event-delegates.js";
+import { createHistoryRuntime } from "./core/history.js";
 import { createJsInvokeVoidRuntime } from "./core/js-invoke-void.js";
 import { createMutationRuntime } from "./core/mutations.js";
+import { createPageLifecycleRuntime } from "./core/page-lifecycle.js";
 import { createPayloadResolver } from "./core/payloads.js";
 import { createRequestCoordinator } from "./core/request-coordinator.js";
 import { createRequestHeadersRuntime } from "./core/request-headers.js";
@@ -58,7 +60,14 @@ import {
     //   - heimdall-content-blur="Action.Id"
     //   - heimdall-content-hover="Action.Id"
     //   - heimdall-content-visible="Action.Id"
+    //   - heimdall-content-document-visible="Action.Id"
+    //   - heimdall-content-online="Action.Id"
     //   - heimdall-content-scroll="Action.Id"
+    //
+    // Page Lifecycle:
+    //   - document-visible fires on hidden -> visible transitions, not initial boot
+    //   - online attempts a normal action when browser connectivity returns
+    //   - offline emits document event "heimdall:offline" and makes no request
     //
     // Common Options:
     //   - heimdall-content-target="#selector"
@@ -116,7 +125,7 @@ import {
     //   Useful for modal backdrops, overlays, and dismiss regions.
     //
     // ---------------------------------------------------------------------------
-    // Response Directives (<invocation>, <abort>, <redirect>)
+    // Response Directives (<invocation>, <mutation>, <abort>, <redirect>, <history>)
     // ---------------------------------------------------------------------------
     // Any <invocation> element returned by the server is treated as an instruction
     // and is never rendered directly into the response output.
@@ -143,6 +152,11 @@ import {
     //   - Acts as a hard-stop directive
     //   - Prevents OOB processing, abort handling, and main target swap
     //   - First redirect wins
+    //
+    // <history>:
+    //   - Successful content actions may push or replace one same-origin URL
+    //   - Plain paths are origin-rooted, with or without a leading slash
+    //   - Back and Forward perform a full load of the canonical page route
     //
     // ---------------------------------------------------------------------------
     // Bifrost (SSE) Attributes
@@ -194,6 +208,8 @@ import {
     //   - heimdall-content-blur="Action.Id"
     //   - heimdall-content-hover="Action.Id"
     //   - heimdall-content-visible="Action.Id"
+    //   - heimdall-content-document-visible="Action.Id"
+    //   - heimdall-content-online="Action.Id"
     //   - heimdall-content-scroll="Action.Id"
     //
     // ---------------------------------------------------------------------------
@@ -351,6 +367,11 @@ import {
         emitLifecycle,
         dbg
     });
+    const historyRuntime = createHistoryRuntime({
+        global,
+        emitLifecycle,
+        dbg
+    });
     const mutations = createMutationRuntime({
         global,
         emitLifecycle,
@@ -397,6 +418,7 @@ import {
         payloadBindingFromElement,
         boot: root => boot(root),
         dom,
+        historyRuntime,
         coordinator,
         busyState,
         resolveRequestHeaders: requestHeaders.resolve,
@@ -429,6 +451,11 @@ import {
         global,
         getConfig: getRuntimeConfig,
         runActionFromElement
+    });
+    const pageLifecycle = createPageLifecycleRuntime({
+        global,
+        runActionFromElement,
+        emit
     });
     const {
         bootSse,
@@ -483,6 +510,7 @@ import {
             handleMouseOver,
             handleSubmit
         },
+        installPageLifecycle: pageLifecycle.install,
         installSseSweeper,
         dbg,
         onRuntimeCreated: runtime => {

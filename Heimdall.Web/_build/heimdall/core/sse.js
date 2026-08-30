@@ -684,6 +684,7 @@ export function createSseRuntime({
             dom.stripInvocationsFromFragment(mainTpl.content);
             dom.stripAbortsFromFragment(mainTpl.content);
             dom.stripRedirectsFromFragment(mainTpl.content);
+            dom.stripHistoryFromFragment(mainTpl.content);
             dom.stripJsInvokeVoidFromFragment(mainTpl.content);
             dom.stripMutationsFromFragment(mainTpl.content);
 

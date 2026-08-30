@@ -27,6 +27,8 @@ namespace Heimdall.Server.Rendering
 			Trigger.Blur => Attrs.Blur,
 			Trigger.Hover => Attrs.Hover,
 			Trigger.Visible => Attrs.Visible,
+			Trigger.DocumentVisible => Attrs.DocumentVisible,
+			Trigger.Online => Attrs.Online,
 			Trigger.Scroll => Attrs.Scroll,
 			_ => throw new ArgumentOutOfRangeException(nameof(trigger))
 		};
@@ -91,6 +93,14 @@ namespace Heimdall.Server.Rendering
 		/// <param name="action"></param>
 		/// <returns></returns>
 		public static Html.HtmlAttr OnVisible(ActionId action) => Html.Attr(Attrs.Visible, action.Value);
+		/// <summary>
+		/// Invokes the action whenever the document transitions from hidden to visible.
+		/// </summary>
+		public static Html.HtmlAttr OnDocumentVisible(ActionId action) => Html.Attr(Attrs.DocumentVisible, action.Value);
+		/// <summary>
+		/// Invokes the action when the browser reports that network connectivity has returned.
+		/// </summary>
+		public static Html.HtmlAttr OnOnline(ActionId action) => Html.Attr(Attrs.Online, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>

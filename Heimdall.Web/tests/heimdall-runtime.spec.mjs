@@ -13,6 +13,8 @@ import { tests as queuedStateSnapshots } from "./runtime/queued-state-snapshots.
 import { tests as queuedStateRebinding } from "./runtime/queued-state-rebinding.spec.mjs";
 import { tests as queuedTargets } from "./runtime/queued-targets.spec.mjs";
 import { tests as events } from "./runtime/events.spec.mjs";
+import { tests as pageLifecycle } from "./runtime/page-lifecycle.spec.mjs";
+import { tests as history } from "./runtime/history.spec.mjs";
 import { tests as payloads } from "./runtime/payloads.spec.mjs";
 import { tests as swaps } from "./runtime/swaps.spec.mjs";
 import { tests as mutations } from "./runtime/mutations.spec.mjs";
@@ -42,6 +44,8 @@ const tests = [
   ...queuedStateRebinding,
   ...queuedTargets,
   ...events,
+  ...pageLifecycle,
+  ...history,
   ...payloads,
   ...swaps,
   ...mutations,

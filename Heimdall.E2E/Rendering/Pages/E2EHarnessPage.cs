@@ -26,6 +26,8 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_Oob = "e2e.oob";
 		public const string Action_Abort = "e2e.abort";
 		public const string Action_Redirect = "e2e.redirect";
+		public const string Action_HistoryPush = "e2e.history.push";
+		public const string Action_HistoryReplace = "e2e.history.replace";
 		public const string Action_Js = "e2e.js";
 		public const string Action_Form = "e2e.form";
 		public const string Action_Upload = "e2e.upload";
@@ -46,6 +48,8 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_Keydown = "e2e.keydown";
 		public const string Action_Blur = "e2e.blur";
 		public const string Action_Hover = "e2e.hover";
+		public const string Action_DocumentVisible = "e2e.document-visible";
+		public const string Action_Online = "e2e.online";
 		public const string Action_Marker = "e2e.marker";
 		public const string Action_SlowDisable = "e2e.slow-disable";
 		public const string Action_Sync = "e2e.sync";
@@ -68,6 +72,7 @@ namespace Heimdall.E2E.Rendering.Pages
 window.HeimdallE2E = {
   calls: [],
   sseCalls: [],
+  offlineEvents: [],
   payload: { message: "global payload initial" },
   setPayload: function(message) {
     this.payload = { message: message };
@@ -101,6 +106,13 @@ window.HeimdallE2E = {
     return "discarded-sse-result";
   }
 };
+document.addEventListener("heimdall:offline", function(event) {
+  window.HeimdallE2E.offlineEvents.push(event.detail);
+  var target = document.querySelector("#e2e-offline-result");
+  if (target) {
+    target.textContent = "Offline events: " + window.HeimdallE2E.offlineEvents.length;
+  }
+});
 """;
 
 		public sealed class CounterState
@@ -169,6 +181,7 @@ window.HeimdallE2E = {
 					RenderPayloadRefSection(),
 					RenderSelfPayloadSection(),
 					RenderDelegatedEventsSection(),
+					RenderPageLifecycleSection(),
 					RenderBehaviorSection(),
 					RenderNativeCommandSection(),
 					RenderRequestSyncSection(),
@@ -181,6 +194,7 @@ window.HeimdallE2E = {
 					RenderClientInfoSection(),
 					RenderAuthSection(),
 					RenderErrorSection(),
+					RenderHistorySection(),
 					RenderRedirectSection());
 			});
 

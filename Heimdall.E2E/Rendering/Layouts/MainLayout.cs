@@ -25,17 +25,17 @@ namespace Heimdall.E2E.Rendering.Layouts
 						.Link(l =>
 						{
 							l.Attr("rel", "stylesheet")
-							.Href("css/app.css");
+							.Href("/css/app.css");
 						})
 						.Link(l =>
 						{
 							l.Attr("rel", "stylesheet")
-							.Href("css/bootstrap.css");
+							.Href("/css/bootstrap.css");
 						})
 						.Script(s => s.Src("/_content/HeimdallFramework.Web/heimdall-bundle.min.js"));
 
 						if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")?.ToLowerInvariant() == "development")
-							head.Script(s => s.Src("js/heimdall.debug.js"));
+							head.Script(s => s.Src("/js/heimdall.debug.js"));
 					})
 					.Body(body =>
 					{

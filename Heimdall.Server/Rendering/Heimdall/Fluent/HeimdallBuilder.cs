@@ -102,6 +102,20 @@ namespace Heimdall.Server.Rendering
 			public HeimdallBuilder OnVisible(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnVisible(action)); return this; }
 
 			/// <summary>
+			/// Adds a document-visible trigger to the element.
+			/// </summary>
+			/// <param name="action">The action identifier to emit.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder OnDocumentVisible(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnDocumentVisible(action)); return this; }
+
+			/// <summary>
+			/// Adds an online trigger to the element.
+			/// </summary>
+			/// <param name="action">The action identifier to emit.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder OnOnline(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnOnline(action)); return this; }
+
+			/// <summary>
 			/// Adds a scroll trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
@@ -170,6 +184,20 @@ namespace Heimdall.Server.Rendering
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
 			public HeimdallBuilder Visible(HeimdallHtml.ActionId action) => OnVisible(action);
+
+			/// <summary>
+			/// Adds a document-visible trigger to the element.
+			/// </summary>
+			/// <param name="action">The action identifier to emit.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder DocumentVisible(HeimdallHtml.ActionId action) => OnDocumentVisible(action);
+
+			/// <summary>
+			/// Adds an online trigger to the element.
+			/// </summary>
+			/// <param name="action">The action identifier to emit.</param>
+			/// <returns>The current builder instance.</returns>
+			public HeimdallBuilder Online(HeimdallHtml.ActionId action) => OnOnline(action);
 
 			/// <summary>
 			/// Adds a scroll trigger to the element.

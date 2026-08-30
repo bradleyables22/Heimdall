@@ -9,6 +9,8 @@ public sealed partial class RenderingHelperTests
     public void StaticHelpers_ValidateRequiredDirectiveArguments()
     {
         Assert.Throws<ArgumentException>(() => HeimdallHtml.Redirect(" "));
+        Assert.Throws<ArgumentException>(() => HeimdallHtml.HistoryPush(" "));
+        Assert.Throws<ArgumentOutOfRangeException>(() => HeimdallHtml.History((HeimdallHtml.HistoryMode)999, "/next"));
         Assert.Throws<ArgumentException>(() => HeimdallHtml.Invocation(" "));
         Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid(" "));
         Assert.Throws<ArgumentException>(() => HeimdallHtml.JsInvokeVoid("App.toast"));
@@ -43,6 +45,8 @@ public sealed partial class RenderingHelperTests
             f.Heimdall()
                 .Abort()
                 .Redirect("/next")
+                .HistoryPush("orders/42")
+                .HistoryReplace("/orders/43")
                 .Invocation("#status", payload: Html.Span("Done"))
                 .JsInvokeVoid("window.App.done", "ok");
         }));
@@ -58,6 +62,8 @@ public sealed partial class RenderingHelperTests
         Assert.Contains("heimdall-sse-target=\"#feed\"", button);
         Assert.Contains("<abort></abort>", fragment);
         Assert.Contains("<redirect url=\"/next\"></redirect>", fragment);
+        Assert.Contains("<history mode=\"push\" url=\"orders/42\"></history>", fragment);
+        Assert.Contains("<history mode=\"replace\" url=\"/orders/43\"></history>", fragment);
         Assert.Contains("<invocation", fragment);
         Assert.Contains("<span>Done</span>", fragment);
         Assert.Contains("function=\"window.App.done\"", fragment);

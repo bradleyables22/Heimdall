@@ -6,6 +6,8 @@ import { tests as actions_and_swaps } from "./specs/actions-and-swaps.spec.mjs";
 import { tests as mutations } from "./specs/mutations.spec.mjs";
 import { tests as payloads_and_uploads } from "./specs/payloads-and-uploads.spec.mjs";
 import { tests as events } from "./specs/events.spec.mjs";
+import { tests as page_lifecycle } from "./specs/page-lifecycle.spec.mjs";
+import { tests as history } from "./specs/history.spec.mjs";
 import { tests as request_sync } from "./specs/request-sync.spec.mjs";
 import { tests as lifecycle } from "./specs/lifecycle.spec.mjs";
 import { tests as sse } from "./specs/sse.spec.mjs";
@@ -21,6 +23,8 @@ const tests = [
   ...mutations,
   ...payloads_and_uploads,
   ...events,
+  ...page_lifecycle,
+  ...history,
   ...request_sync,
   ...lifecycle,
   ...sse,
