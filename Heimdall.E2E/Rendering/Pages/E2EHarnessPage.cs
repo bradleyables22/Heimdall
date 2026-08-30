@@ -62,51 +62,7 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_Unauthorized = "e2e.unauthorized";
 
 		private const string SseTopic = "e2e-harness";
-		private const string LocalTimeSseTopic = "e2e-local-time";
 		public const string SseTopic_AuthRequired = "e2e-auth-required";
-		private static readonly DateTimeOffset LocalTimeSample =
-			new(2026, 8, 6, 8, 5, 7, 123, TimeSpan.Zero);
-		private static readonly (string Suffix, string Format)[] LocalTimeFormats =
-		[
-			("standard-d", "d"),
-			("standard-D", "D"),
-			("standard-t", "t"),
-			("standard-T", "T"),
-			("standard-g", "g"),
-			("standard-G", "G"),
-			("day-1", "%d"),
-			("day-2", "dd"),
-			("day-3", "ddd"),
-			("day-4", "dddd"),
-			("month-1", "%M"),
-			("month-2", "MM"),
-			("month-3", "MMM"),
-			("month-4", "MMMM"),
-			("year-1", "%y"),
-			("year-2", "yy"),
-			("year-3", "yyy"),
-			("year-4", "yyyy"),
-			("hour12-1", "%h"),
-			("hour12-2", "hh"),
-			("hour24-1", "%H"),
-			("hour24-2", "HH"),
-			("minute-1", "%m"),
-			("minute-2", "mm"),
-			("second-1", "%s"),
-			("second-2", "ss"),
-			("period-1", "%t"),
-			("period-2", "tt"),
-			("fraction-1", "%f"),
-			("fraction-2", "ff"),
-			("fraction-3", "fff"),
-			("offset-1", "%z"),
-			("offset-2", "zz"),
-			("offset-3", "zzz"),
-			("single-quote", "'literal' yyyy"),
-			("double-quote", "\"double literal\" yyyy"),
-			("escaped", "yyyy \\y"),
-			("composite", "dddd, MMMM d, yyyy 'at' h:mm:ss.fff tt zzz")
-		];
 
 		private const string ClientHarnessScript = """
 window.HeimdallE2E = {
@@ -269,14 +225,14 @@ window.HeimdallE2E = {
 			=> FluentHtml.Button(button =>
 			{
 				button.Id(id)
-				.Type("button")
-				.Class(Bs.Btn.OutlinePrimary, Bs.Spacing.Mt(2))
-				.Text(label);
-				button.Heimdall()
-					.Click(action)
-					.PayloadEmptyObject()
-					.Target(targetSelector)
-					.Swap(swap);
+					.Type("button")
+					.Heimdall(heimdall => heimdall
+						.Click(action)
+						.PayloadEmptyObject()
+						.Target(targetSelector)
+						.Swap(swap))
+					.Class(Bs.Btn.OutlinePrimary, Bs.Spacing.Mt(2))
+					.Text(label);
 			});
 
 		private static IHtmlContent SyncActionButton(
@@ -330,23 +286,6 @@ window.HeimdallE2E = {
 			=> FluentHtml.Span(span =>
 			{
 				span.Id(id).Text(text);
-			});
-
-		private static IHtmlContent LocalTimeValue(string id, string format)
-			=> FluentHtml.Span(time => time
-				.Id(id)
-				.LocalizeTime(LocalTimeSample, format));
-
-		private static IHtmlContent RenderLocalTimeMatrix(string idPrefix)
-			=> FluentHtml.Div(matrix =>
-			{
-				matrix.Id($"{idPrefix}-matrix");
-				foreach (var (suffix, format) in LocalTimeFormats)
-				{
-					matrix.Span(time => time
-						.Id($"{idPrefix}-{suffix}")
-						.LocalizeTime(LocalTimeSample, format));
-				}
 			});
 
 		private static string Normalize(string? value)

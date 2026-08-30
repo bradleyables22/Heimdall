@@ -44,6 +44,13 @@ namespace Heimdall.Server.Rendering
 		public static Html.HtmlAttr Id(string id) => Html.Id(id);
 
 		/// <summary>
+		/// Creates a native HTML <c>lang</c> attribute.
+		/// </summary>
+		/// <param name="languageTag">The language tag, such as <c>en</c> or <c>fr-FR</c>.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr Lang(string languageTag) => Html.Lang(languageTag);
+
+		/// <summary>
 		/// Creates an <c>href</c> attribute.
 		/// </summary>
 		/// <param name="href">The target URL.</param>

@@ -91,6 +91,11 @@ namespace Heimdall.Server.Rendering
 			public FragmentBuilder Id(string id) { _parts.Add(Html.Id(id)); return this; }
 
 			/// <summary>
+			/// Adds a native HTML <c>lang</c> attribute.
+			/// </summary>
+			public FragmentBuilder Lang(string languageTag) { _parts.Add(Html.Lang(languageTag)); return this; }
+
+			/// <summary>
 			/// Adds a <c>name</c> attribute.
 			/// </summary>
 			public FragmentBuilder Name(string name) { _parts.Add(Html.Name(name)); return this; }

@@ -12,7 +12,7 @@ namespace Heimdall.E2E.Rendering.Layouts
 				f.Raw("<!DOCTYPE html>")
 				.HtmlTag(html =>
 				{
-					html.Attr("lang", "en")
+					html.Lang("en")
 					.Head(head =>
 					{
 						head.Meta(m => m.Attr("charset", "utf-8"))

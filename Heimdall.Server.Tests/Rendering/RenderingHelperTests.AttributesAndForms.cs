@@ -6,6 +6,22 @@ namespace Heimdall.Server.Tests;
 public sealed partial class RenderingHelperTests
 {
     [Fact]
+    public void HtmlHelpers_RenderNativeLanguageAttributeAcrossStaticAndFluentApis()
+    {
+        var coreHtml = Render(Html.Div(Html.Lang("fr-FR"), "Bonjour"));
+        var fluentAttributeHtml = Render(Html.Div(FluentHtml.Lang("en-US"), "Hello"));
+        var elementBuilderHtml = Render(FluentHtml.Div(div => div
+            .Lang("de-DE")
+            .Text("Hallo")));
+        var encodedHtml = Render(Html.Div(Html.Lang("en-US\" data-bad=\"true"), "Safe"));
+
+        Assert.Equal("<div lang=\"fr-FR\">Bonjour</div>", coreHtml);
+        Assert.Equal("<div lang=\"en-US\">Hello</div>", fluentAttributeHtml);
+        Assert.Equal("<div lang=\"de-DE\">Hallo</div>", elementBuilderHtml);
+        Assert.Equal("<div lang=\"en-US&quot; data-bad=&quot;true\">Safe</div>", encodedHtml);
+    }
+
+    [Fact]
     public void StaticHelpers_RenderIgnoreAndScopeAttributes()
     {
         var html = Render(Html.Div(

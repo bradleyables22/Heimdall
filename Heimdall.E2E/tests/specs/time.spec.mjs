@@ -63,6 +63,44 @@ async function testFluentLocalTime(page, baseUrl) {
   await openHarness(page, baseUrl);
 
   await assertLocalTimeMatrix(page, "e2e-local-time-initial");
+  const initialMatrix = page.locator("#e2e-local-time-initial-matrix");
+  assert.deepEqual(
+    await initialMatrix.locator(":scope > div > h3").allTextContents(),
+    ["Standard formats", "Date tokens", "Time tokens", "Literals and composite"]
+  );
+  assert.equal(
+    await initialMatrix.locator("tbody tr").count(),
+    Object.keys(expectedLocalTimeFormats).length
+  );
+
+  const diagnosticRows = await page.evaluate(suffixes => Object.fromEntries(
+    suffixes.map(suffix => {
+      const value = document.getElementById(`e2e-local-time-initial-${suffix}`);
+      const row = value?.closest("tr");
+      return [suffix, {
+        rowCase: row?.dataset.localTimeCase ?? null,
+        valueCell: value?.parentElement?.tagName ?? null
+      }];
+    })
+  ), Object.keys(expectedLocalTimeFormats));
+  assert.deepEqual(
+    diagnosticRows,
+    Object.fromEntries(Object.keys(expectedLocalTimeFormats).map(suffix => [suffix, {
+      rowCase: suffix,
+      valueCell: "TD"
+    }]))
+  );
+  assert.deepEqual(
+    await initialMatrix
+      .locator('tr[data-local-time-case="escaped"] > *')
+      .allTextContents(),
+    ["Escaped character", "yyyy \\y", "2026 y"]
+  );
+  assert.deepEqual(
+    await page.locator("#e2e-local-time-section .card h4").allTextContents(),
+    ["Load trigger", "Action response", "Out-of-band response", "Server-sent event"]
+  );
+
   const initialComposite = page.locator("#e2e-local-time-initial-composite");
   assert.equal(await initialComposite.getAttribute("heimdall-time"), "2026-08-06T08:05:07.123Z");
   assert.equal(

@@ -118,6 +118,11 @@ namespace Heimdall.Server.Rendering
 			public ElementBuilder Id(string id) { _parts.Add(Html.Id(id)); return this; }
 
 			/// <summary>
+			/// Adds a native HTML <c>lang</c> attribute.
+			/// </summary>
+			public ElementBuilder Lang(string languageTag) { _parts.Add(Html.Lang(languageTag)); return this; }
+
+			/// <summary>
 			/// Adds an <c>href</c> attribute.
 			/// </summary>
 			public ElementBuilder Href(string href) { _parts.Add(Html.Href(href)); return this; }
