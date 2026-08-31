@@ -12,7 +12,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Web</PackageId>
-		<Version>3.0.8</Version>
+		<Version>3.0.9</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall JavaScript library.</Description>
