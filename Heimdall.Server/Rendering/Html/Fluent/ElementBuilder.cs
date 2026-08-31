@@ -11,7 +11,7 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Provides a pooled fluent builder for constructing a single HTML element.
 		/// </summary>
-		public sealed class ElementBuilder : IDisposable
+		public sealed partial class ElementBuilder : IDisposable
 		{
 			private PooledBuffer<object?> _parts;
 
@@ -118,6 +118,11 @@ namespace Heimdall.Server.Rendering
 			public ElementBuilder Id(string id) { _parts.Add(Html.Id(id)); return this; }
 
 			/// <summary>
+			/// Adds a native HTML <c>lang</c> attribute.
+			/// </summary>
+			public ElementBuilder Lang(string languageTag) { _parts.Add(Html.Lang(languageTag)); return this; }
+
+			/// <summary>
 			/// Adds an <c>href</c> attribute.
 			/// </summary>
 			public ElementBuilder Href(string href) { _parts.Add(Html.Href(href)); return this; }
@@ -146,6 +151,21 @@ namespace Heimdall.Server.Rendering
 			/// Adds a <c>name</c> attribute.
 			/// </summary>
 			public ElementBuilder Name(string name) { _parts.Add(Html.Name(name)); return this; }
+
+			/// <summary>
+			/// Adds an <c>accept</c> attribute from file extensions, MIME types, or media wildcards.
+			/// </summary>
+			public ElementBuilder Accept(params string?[] fileTypes) { _parts.Add(Html.Accept(fileTypes)); return this; }
+
+			/// <summary>
+			/// Adds a <c>capture</c> attribute from a raw current or future browser value.
+			/// </summary>
+			public ElementBuilder Capture(string value) { _parts.Add(Html.Capture(value)); return this; }
+
+			/// <summary>
+			/// Adds a <c>capture</c> attribute from a known camera direction hint.
+			/// </summary>
+			public ElementBuilder Capture(Html.CaptureMode capture) { _parts.Add(Html.Capture(capture)); return this; }
 
 			/// <summary>
 			/// Adds a <c>value</c> attribute.
@@ -261,6 +281,11 @@ namespace Heimdall.Server.Rendering
 			/// Adds an <c>enctype</c> attribute.
 			/// </summary>
 			public ElementBuilder EncType(string value) { _parts.Add(Html.EncType(value)); return this; }
+
+			/// <summary>
+			/// Adds <c>enctype="multipart/form-data"</c> for a form containing files.
+			/// </summary>
+			public ElementBuilder MultipartFormData() { _parts.Add(Html.MultipartFormData()); return this; }
 
 			/// <summary>
 			/// Adds a <c>rel</c> attribute.

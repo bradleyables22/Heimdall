@@ -2,17 +2,31 @@ import { readFile } from "node:fs/promises";
 
 const testOrigin = "http://heimdall.test";
 
-export async function createRuntimePage(browser, runtime) {
+export async function createRuntimePage(browser, runtime, options = {}) {
   const page = await browser.newPage();
   page.setDefaultTimeout(5000);
+
+  const language = String(options.language || "").trim();
+  const languageAttribute = language ? ` lang="${language}"` : "";
+  const initialBody = options.initialBody || "";
 
   await page.route(`${testOrigin}/**`, route => route.fulfill({
     status: 200,
     contentType: "text/html",
-    body: "<!doctype html><html><head></head><body></body></html>"
+    body: `<!doctype html><html${languageAttribute}><head></head><body>${initialBody}</body></html>`
   }));
 
   await page.goto(`${testOrigin}/`);
+
+  if (options.timezoneId) {
+    const session = await page.context().newCDPSession(page);
+    await session.send("Emulation.setTimezoneOverride", { timezoneId: options.timezoneId });
+    page.__heimdallTimezoneSession = session;
+  }
+
+  if (typeof options.beforeRuntime === "function")
+    await options.beforeRuntime(page);
+
   await page.addScriptTag({ content: await readFile(runtime.path, "utf8") });
   await page.waitForFunction(() => !!window.Heimdall);
 
@@ -27,6 +41,9 @@ export async function installFakeServer(page, options = {}) {
     const csrfTokens = Array.isArray(serverOptions.csrfTokens) && serverOptions.csrfTokens.length > 0
       ? [...serverOptions.csrfTokens]
       : ["csrf-token"];
+    const csrfTokenResponses = Array.isArray(serverOptions.csrfTokenResponses)
+      ? [...serverOptions.csrfTokenResponses]
+      : null;
     const bifrostTokens = Array.isArray(serverOptions.bifrostTokens) && serverOptions.bifrostTokens.length > 0
       ? [...serverOptions.bifrostTokens]
       : ["bifrost-token"];
@@ -68,7 +85,16 @@ export async function installFakeServer(page, options = {}) {
     window.fetch = async (input, init = {}) => {
       const url = typeof input === "string" ? input : input.url;
       const requestHeaders = Object.fromEntries(new Headers(init.headers || {}).entries());
-      const bodyText = init.body == null ? null : String(init.body);
+      const isFormData = init.body instanceof FormData;
+      const bodyText = init.body == null || isFormData ? null : String(init.body);
+      const formBody = isFormData
+        ? Array.from(init.body.entries(), ([name, value]) => ({
+            name,
+            value: value instanceof File
+              ? { fileName: value.name, size: value.size, type: value.type }
+              : value
+          }))
+        : null;
 
       let jsonBody = null;
       if (bodyText) {
@@ -85,6 +111,7 @@ export async function installFakeServer(page, options = {}) {
         headers: requestHeaders,
         bodyText,
         jsonBody,
+        formBody,
         aborted: false
       };
       window.__heimdallFetches.push(fetchRecord);
@@ -96,6 +123,32 @@ export async function installFakeServer(page, options = {}) {
       }
 
       if (url.includes("/__heimdall/v1/csrf")) {
+        if (csrfTokenResponses) {
+          const response = csrfTokenResponses.length > 1
+            ? csrfTokenResponses.shift()
+            : csrfTokenResponses[0];
+          const responseHeaders = {
+            "Content-Type": response.contentType || "application/json"
+          };
+          if (response.location)
+            responseHeaders.Location = response.location;
+          if (response.headers)
+            Object.assign(responseHeaders, response.headers);
+
+          const body = response.body != null
+            ? response.body
+            : JSON.stringify({ requestToken: response.token || "csrf-token" });
+          const result = new Response(body, {
+            status: response.status || 200,
+            headers: responseHeaders
+          });
+          if (typeof response.redirected === "boolean")
+            Object.defineProperty(result, "redirected", { value: response.redirected });
+          if (response.url)
+            Object.defineProperty(result, "url", { value: response.url });
+          return result;
+        }
+
         const token = csrfTokens.length > 1 ? csrfTokens.shift() : csrfTokens[0];
         return new Response(JSON.stringify({ requestToken: token }), {
           status: 200,

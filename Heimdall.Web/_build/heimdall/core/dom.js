@@ -4,7 +4,7 @@ import {
     resolveTarget
 } from "./utils.js";
 
-export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid }) {
+export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -68,6 +68,17 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
 
         stripScripts(fragment);
 
+        if (timeLocalization && typeof timeLocalization.localize === "function") {
+            const contextElement = mode === "outer"
+                ? targetEl.parentElement
+                : targetEl;
+            timeLocalization.localize(fragment, {
+                origin: detail.origin,
+                kind: detail.kind,
+                contextElement
+            });
+        }
+
         const nodes = fragmentToNodesArray(fragment);
         const firstElement = nodes.find(n => n && n.nodeType === 1) || null;
         const appliedRoot = firstElement || targetEl;
@@ -121,6 +132,14 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
             inv.remove();
     }
 
+    function stripMutationsFromFragment(fragment) {
+        if (!fragment || !fragment.querySelectorAll)
+            return;
+        const directives = fragment.querySelectorAll("mutation");
+        for (const directive of directives)
+            directive.remove();
+    }
+
     function stripAbortsFromFragment(fragment) {
         if (!fragment || !fragment.querySelectorAll)
             return;
@@ -135,6 +154,35 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         const redirects = fragment.querySelectorAll("redirect");
         for (const redirectEl of redirects)
             redirectEl.remove();
+    }
+
+    function stripHistoryFromFragment(fragment) {
+        if (!fragment || !fragment.querySelectorAll)
+            return;
+        const directives = fragment.querySelectorAll("history");
+        for (const directive of directives)
+            directive.remove();
+    }
+
+    function extractHistoryFromFragment(fragment) {
+        if (!fragment || !fragment.querySelectorAll)
+            return null;
+
+        const directives = Array.from(fragment.querySelectorAll("history"));
+        if (directives.length === 0)
+            return null;
+        if (directives.length > 1) {
+            stripHistoryFromFragment(fragment);
+            return { error: "A Heimdall response can contain only one history directive." };
+        }
+
+        const directive = directives[0];
+        const command = {
+            mode: getAttr(directive, "mode"),
+            url: getAttr(directive, "url") || (directive.textContent || "").trim()
+        };
+        directive.remove();
+        return command;
     }
 
     function normalizeJsInvokeTiming(value) {
@@ -243,8 +291,10 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         const hasAbort = containsTag(html, "abort");
         const hasRedirect = containsTag(html, "redirect");
         const hasJsInvokeVoid = containsTag(html, "javascript");
+        const hasMutation = containsTag(html, "mutation");
+        const hasHistory = containsTag(html, "history");
 
-        if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid)
+        if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory)
             return html;
 
         const tpl = parseHtmlToTemplate(html);
@@ -252,6 +302,8 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         stripAbortsFromFragment(tpl.content);
         stripRedirectsFromFragment(tpl.content);
         stripJsInvokeVoidFromFragment(tpl.content);
+        stripMutationsFromFragment(tpl.content);
+        stripHistoryFromFragment(tpl.content);
         return fragmentToHtml(tpl.content);
     }
 
@@ -261,15 +313,19 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         const hasAbort = containsTag(html, "abort");
         const hasRedirect = containsTag(html, "redirect");
         const hasJsInvokeVoid = containsTag(html, "javascript");
+        const hasMutation = containsTag(html, "mutation");
+        const hasHistory = containsTag(html, "history");
 
-        if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid) {
+        if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory) {
             return {
                 html: html || "",
                 applied: 0,
                 abortSwap: false,
                 abortReason: null,
                 redirectUrl: null,
-                jsAfter: []
+                jsAfter: [],
+                mutationTargets: [],
+                historyCommand: null
             };
         }
 
@@ -279,15 +335,20 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         const redirect = extractRedirectFromFragment(fragment);
         if (redirect && redirect.url) {
             stripRedirectsFromFragment(fragment);
+            stripHistoryFromFragment(fragment);
             return {
                 html: fragmentToHtml(fragment),
                 applied: 0,
                 abortSwap: true,
                 abortReason: "redirect",
                 redirectUrl: redirect.url,
-                jsAfter: []
+                jsAfter: [],
+                mutationTargets: [],
+                historyCommand: null
             };
         }
+
+        const historyCommand = extractHistoryFromFragment(fragment);
 
         const jsDirectives = collectJsInvokeVoidDirectives(fragment);
         const jsGroups = splitJsInvokeVoidDirectives(jsDirectives);
@@ -307,33 +368,50 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
             }
         }
 
-        const invocations = fragment.querySelectorAll("invocation");
-        if (!invocations || invocations.length === 0) {
+        const commands = fragment.querySelectorAll("invocation,mutation");
+        if (!commands || commands.length === 0) {
             return {
                 html: fragmentToHtml(fragment),
                 applied: 0,
                 abortSwap,
                 abortReason,
                 redirectUrl: null,
-                jsAfter: jsGroups.after
+                jsAfter: jsGroups.after,
+                mutationTargets: [],
+                historyCommand
             };
         }
 
         if (!getConfig().oobEnabled) {
             stripInvocationsFromFragment(fragment);
+            stripMutationsFromFragment(fragment);
             return {
                 html: fragmentToHtml(fragment),
                 applied: 0,
                 abortSwap,
                 abortReason,
                 redirectUrl: null,
-                jsAfter: jsGroups.after
+                jsAfter: jsGroups.after,
+                mutationTargets: [],
+                historyCommand
             };
         }
 
         let applied = 0;
+        const mutationTargets = [];
 
-        for (const invEl of Array.from(invocations)) {
+        for (const commandEl of Array.from(commands)) {
+            if (String(commandEl.localName || "").toLowerCase() === "mutation") {
+                const result = mutations.apply(commandEl, sourceEl, context || {});
+                if (result && result.applied) {
+                    applied++;
+                    mutationTargets.push(...(result.reconcileTargets || []));
+                }
+                commandEl.remove();
+                continue;
+            }
+
+            const invEl = commandEl;
             const targetSel = getAttr(invEl, "heimdall-content-target");
             if (!targetSel) {
                 dbg("Invocation missing heimdall-content-target; stripping", invEl);
@@ -361,6 +439,9 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
                 }
 
                 stripScripts(payloadFrag);
+                stripInvocationsFromFragment(payloadFrag);
+                stripMutationsFromFragment(payloadFrag);
+                stripHistoryFromFragment(payloadFrag);
 
                 const swapResult = applySwap(targetEl, payloadFrag, swap, Object.assign({}, context || {}, {
                     sourceEl,
@@ -387,19 +468,29 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
             abortSwap,
             abortReason,
             redirectUrl: null,
-            jsAfter: jsGroups.after
+            jsAfter: jsGroups.after,
+            mutationTargets,
+            historyCommand
         };
+    }
+
+    function reconcileMutations(targets) {
+        if (mutations && typeof mutations.reconcile === "function")
+            mutations.reconcile(targets);
     }
 
     return {
         applySwap,
         parseHtmlToTemplate,
         processOob,
+        reconcileMutations,
         sanitizeHtmlStringNoApply,
         invokeJsInvokeVoidDirectives,
         stripAbortsFromFragment,
         stripInvocationsFromFragment,
+        stripMutationsFromFragment,
         stripJsInvokeVoidFromFragment,
-        stripRedirectsFromFragment
+        stripRedirectsFromFragment,
+        stripHistoryFromFragment
     };
 }

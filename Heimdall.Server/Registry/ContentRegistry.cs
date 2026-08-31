@@ -1,4 +1,5 @@
 ﻿using Heimdall.Server.Registry;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
@@ -88,6 +89,22 @@ namespace Heimdall.Server
             var parameters = BuildParameterPlan(method, services);
             var timeoutMetadata = ResolveRequestTimeoutMetadata(method);
             var authorizationMetadata = ResolveAuthorizationMetadata(method);
+            var requestSizeLimit = ResolveNearestMetadata<IRequestSizeLimitMetadata>(
+                method,
+                "request-size limit");
+            var formOptions = ResolveNearestMetadata<IFormOptionsMetadata>(
+                method,
+                "request-form limits");
+            var antiforgery = ResolveNearestMetadata<IAntiforgeryMetadata>(
+                method,
+                "antiforgery");
+
+            if (requestSizeLimit?.MaxRequestBodySize < 0)
+            {
+                throw new InvalidOperationException(
+                    $"Request-size limit metadata on '{method.DeclaringType?.FullName}.{method.Name}' " +
+                    "cannot specify a negative maximum request body size.");
+            }
 
             return new ContentActionDescriptor(
                 actionId,
@@ -97,7 +114,10 @@ namespace Heimdall.Server
                 timeoutMetadata.RequestTimeout,
                 timeoutMetadata.DisableRequestTimeout,
                 authorizationMetadata.AuthorizeData,
-                authorizationMetadata.AllowAnonymous);
+                authorizationMetadata.AllowAnonymous,
+                requestSizeLimit,
+                formOptions,
+                antiforgery?.RequiresValidation ?? true);
         }
 
         private static void ValidateCallable(MethodInfo method)
@@ -178,6 +198,26 @@ namespace Heimdall.Server
                     continue;
                 }
 
+                if (pt == typeof(HeimdallClientInfo))
+                {
+                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.ClientInfo));
+                    continue;
+                }
+
+                if (IsFormFileParameterType(pt))
+                {
+                    if (IsExplicitServiceParameter(p) || IsExplicitPayloadParameter(p))
+                    {
+                        throw new InvalidOperationException(
+                            $"File parameter '{p.Name}' on method " +
+                            $"'{method.DeclaringType?.FullName}.{method.Name}' cannot be marked " +
+                            "[FromServices] or [ContentPayload].");
+                    }
+
+                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.FormFile));
+                    continue;
+                }
+
                 // unresolved for now
                 unresolved.Add(p);
             }
@@ -190,17 +230,26 @@ namespace Heimdall.Server
             {
                 var explicitlyService = IsExplicitServiceParameter(p);
                 var explicitlyPayload = IsExplicitPayloadParameter(p);
+                var explicitlyForm = IsExplicitFormParameter(p);
 
-                if (explicitlyService && explicitlyPayload)
+                if (explicitlyService && (explicitlyPayload || explicitlyForm))
                 {
                     throw new InvalidOperationException(
                         $"[ContentInvocation] parameter '{p.Name}' on method " +
                         $"'{method.DeclaringType?.FullName}.{method.Name}' cannot be both " +
-                        "[FromServices] and [ContentPayload].");
+                        "[FromServices] and a request payload binding attribute.");
+                }
+
+                if (explicitlyPayload && explicitlyForm)
+                {
+                    throw new InvalidOperationException(
+                        $"[ContentInvocation] parameter '{p.Name}' on method " +
+                        $"'{method.DeclaringType?.FullName}.{method.Name}' cannot be both " +
+                        "[ContentPayload] and [FromForm].");
                 }
 
                 if (explicitlyService ||
-                    (!explicitlyPayload && IsServiceType(serviceInspector, p.ParameterType)))
+                    (!explicitlyPayload && !explicitlyForm && IsServiceType(serviceInspector, p.ParameterType)))
                 {
                     serviceCandidates.Add(p);
                 }
@@ -228,7 +277,9 @@ namespace Heimdall.Server
                 // Already handled framework params
                 if (pt == typeof(HttpContext) ||
                     pt == typeof(CancellationToken) ||
-                    pt == typeof(System.Security.Claims.ClaimsPrincipal))
+                    pt == typeof(System.Security.Claims.ClaimsPrincipal) ||
+                    pt == typeof(HeimdallClientInfo) ||
+                    IsFormFileParameterType(pt))
                 {
                     continue;
                 }
@@ -239,7 +290,10 @@ namespace Heimdall.Server
                 }
                 else if (payloadParam == p)
                 {
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.Payload));
+                    var kind = IsExplicitFormParameter(p)
+                        ? ContentActionParameterKind.FormPayload
+                        : ContentActionParameterKind.Payload;
+                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, kind));
                 }
                 else
                 {
@@ -258,12 +312,77 @@ namespace Heimdall.Server
         private static bool IsExplicitPayloadParameter(ParameterInfo parameter)
             => parameter.GetCustomAttribute<ContentPayloadAttribute>(inherit: true) is not null;
 
+        private static bool IsExplicitFormParameter(ParameterInfo parameter)
+            => parameter.GetCustomAttributes(inherit: true).OfType<IFromFormMetadata>().Any();
+
+        private static bool IsFormFileParameterType(Type type)
+        {
+            if (type == typeof(IFormFile) || type == typeof(IFormFileCollection))
+                return true;
+
+            if (type.IsArray)
+                return type.GetElementType() == typeof(IFormFile);
+
+            if (!type.IsGenericType || type.GetGenericArguments() is not [var elementType] ||
+                elementType != typeof(IFormFile))
+            {
+                return false;
+            }
+
+            var genericType = type.GetGenericTypeDefinition();
+            return genericType == typeof(IEnumerable<>) ||
+                genericType == typeof(IReadOnlyCollection<>) ||
+                genericType == typeof(IReadOnlyList<>) ||
+                genericType == typeof(ICollection<>) ||
+                genericType == typeof(IList<>) ||
+                genericType == typeof(List<>);
+        }
+
         private static bool IsServiceType(IServiceProviderIsService? serviceInspector, Type type)
         {
             if (type == typeof(IServiceProvider))
                 return true;
 
             return serviceInspector?.IsService(type) == true;
+        }
+
+        private static TMetadata? ResolveNearestMetadata<TMetadata>(
+            MethodInfo method,
+            string description)
+            where TMetadata : class
+        {
+            var methodMetadata = method
+                .GetCustomAttributes(inherit: true)
+                .OfType<TMetadata>()
+                .ToArray();
+
+            if (methodMetadata.Length > 1)
+            {
+                throw new InvalidOperationException(
+                    $"[ContentInvocation] cannot combine multiple {description} attributes on " +
+                    $"{method.DeclaringType?.FullName}.{method.Name}.");
+            }
+
+            if (methodMetadata.Length == 1)
+                return methodMetadata[0];
+
+            var declaringType = method.DeclaringType;
+            if (declaringType is null)
+                return null;
+
+            var typeMetadata = declaringType
+                .GetCustomAttributes(inherit: true)
+                .OfType<TMetadata>()
+                .ToArray();
+
+            if (typeMetadata.Length > 1)
+            {
+                throw new InvalidOperationException(
+                    $"[ContentInvocation] cannot combine multiple {description} attributes on " +
+                    $"{declaringType.FullName}.");
+            }
+
+            return typeMetadata.FirstOrDefault();
         }
 
         private static RequestTimeoutMetadata ResolveRequestTimeoutMetadata(MethodInfo method)

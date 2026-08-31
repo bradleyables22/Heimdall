@@ -12,7 +12,7 @@ namespace Heimdall.E2E.Rendering.Layouts
 				f.Raw("<!DOCTYPE html>")
 				.HtmlTag(html =>
 				{
-					html.Attr("lang", "en")
+					html.Lang("en")
 					.Head(head =>
 					{
 						head.Meta(m => m.Attr("charset", "utf-8"))
@@ -25,17 +25,17 @@ namespace Heimdall.E2E.Rendering.Layouts
 						.Link(l =>
 						{
 							l.Attr("rel", "stylesheet")
-							.Href("css/app.css");
+							.Href("/css/app.css");
 						})
 						.Link(l =>
 						{
 							l.Attr("rel", "stylesheet")
-							.Href("css/bootstrap.css");
+							.Href("/css/bootstrap.css");
 						})
 						.Script(s => s.Src("/_content/HeimdallFramework.Web/heimdall-bundle.min.js"));
 
 						if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")?.ToLowerInvariant() == "development")
-							head.Script(s => s.Src("js/heimdall.debug.js"));
+							head.Script(s => s.Src("/js/heimdall.debug.js"));
 					})
 					.Body(body =>
 					{

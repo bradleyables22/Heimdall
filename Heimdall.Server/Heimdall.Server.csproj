@@ -8,7 +8,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Server</PackageId>
-		<Version>3.0.8</Version>
+		<Version>3.0.9</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall server-side middleware, endpoints, and action pipeline for HTML-first server invocations.</Description>
@@ -36,6 +36,7 @@
 		<None Include="Favicon.png" Pack="true" PackagePath="favicon.png" />
 		<None Include="..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
 		<None Include="readme.md" Pack="true" PackagePath="\" />
+		<None Include="CHANGELOG.md" Pack="true" PackagePath="\" />
 		<None Include="buildTransitive\HeimdallFramework.Server.targets" Pack="true" PackagePath="buildTransitive\HeimdallFramework.Server.targets" />
 	</ItemGroup>
 

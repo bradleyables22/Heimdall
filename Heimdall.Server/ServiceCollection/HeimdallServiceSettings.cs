@@ -9,6 +9,16 @@ namespace Heimdall.Server
 	public sealed class HeimdallServiceSettings
 	{
 		/// <summary>
+		/// Whether Heimdall validates antiforgery tokens for content actions and Bifrost subscribe-token requests.
+		/// Defaults to <see langword="true"/>.
+		/// </summary>
+		/// <remarks>
+		/// Disabling this removes CSRF protection from every Heimdall action. Prefer applying
+		/// <c>[RequireAntiforgeryToken(false)]</c> to narrowly scoped actions when possible.
+		/// </remarks>
+		public bool EnableAntiforgery { get; set; } = true;
+
+		/// <summary>
 		/// Whether to enable detailed error messages in responses. Defaults to false.
 		/// </summary>
 		public bool EnableDetailedErrors { get; set; } = false;

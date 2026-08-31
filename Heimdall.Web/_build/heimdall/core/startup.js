@@ -14,6 +14,7 @@ export function createHeimdallRuntime({
     sseDisconnect,
     sseDisconnectAll,
     handlers,
+    installPageLifecycle,
     installSseSweeper,
     dbg,
     onRuntimeCreated
@@ -44,12 +45,20 @@ export function createHeimdallRuntime({
         }
 
         const attributeFilter = [
+            "heimdall-content-load",
+            "heimdall-content-visible",
+            "heimdall-content-scroll",
+            "heimdall-poll",
+            "heimdall-visible-once",
             "heimdall-sse",
             "heimdall-sse-topic",
             "heimdall-sse-target",
             "heimdall-sse-swap",
             "heimdall-sse-event",
-            "heimdall-sse-disable"
+            "heimdall-sse-disable",
+            "heimdall-time",
+            "heimdall-time-format",
+            "lang"
         ];
 
         const obs = new MutationObserver((mutations) => {
@@ -70,6 +79,12 @@ export function createHeimdallRuntime({
         });
 
         obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter });
+        if (document.documentElement && document.documentElement !== document.body) {
+            obs.observe(document.documentElement, {
+                attributes: true,
+                attributeFilter: ["lang"]
+            });
+        }
         Heimdall._observer = obs;
 
         dbg("MutationObserver installed");
@@ -105,6 +120,10 @@ export function createHeimdallRuntime({
             observeDom: true,
             debug: false,
             authReturnUrlParameter: "ReturnUrl",
+            requestHeaders: null,
+            antiforgery: true,
+            clientInfo: false,
+            clientInfoMaxAgeMs: 60000,
 
             inputDebounceMs: 250,
             hoverDelayMs: 150,
@@ -152,6 +171,7 @@ export function createHeimdallRuntime({
 
         boot(document);
         installObserver();
+        installPageLifecycle();
         installSseSweeper();
 
         if (global.Blazor && typeof global.Blazor.addEventListener === "function") {

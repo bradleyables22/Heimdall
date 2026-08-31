@@ -37,6 +37,28 @@ namespace Heimdall.Server
                 onEmpty: () => _subsByTopic.TryRemove(topic, out _)
             );
         }
+
+        /// <summary>
+        /// Determines whether the current application instance has at least one active subscriber for a topic.
+        /// </summary>
+        /// <param name="topic">The topic to inspect. Cannot be null, empty, or consist only of white-space characters.</param>
+        /// <returns><see langword="true"/> when at least one local subscriber is currently registered for the topic;
+        /// otherwise, <see langword="false"/>.</returns>
+        /// <remarks>
+        /// This method reports an instantaneous, in-memory snapshot for this application instance only. A subscriber
+        /// can connect or disconnect immediately after the method returns, so callers should use the result as an
+        /// optimization hint rather than a delivery guarantee.
+        /// </remarks>
+        /// <exception cref="ArgumentException">Thrown if <paramref name="topic"/> is null, empty, or consists only
+        /// of white-space characters.</exception>
+        public bool HasSubscribers(string topic)
+        {
+            if (string.IsNullOrWhiteSpace(topic))
+                throw new ArgumentException("Topic is required.", nameof(topic));
+
+            return _subsByTopic.TryGetValue(topic, out var bucket) && !bucket.IsEmpty;
+        }
+
         /// <summary>
         /// Publishes an HTML message to the specified topic with a given time-to-live (TTL) duration.
         /// </summary>
@@ -73,6 +95,7 @@ namespace Heimdall.Server
                 throw new ArgumentException("Topic is required.", nameof(topic));
 
             eventName = NormalizeEventName(eventName);
+            using var activity = HeimdallTelemetry.StartBifrostPublish(eventName);
 
             if (content is null)
                 throw new ArgumentNullException(nameof(content));
@@ -92,10 +115,19 @@ namespace Heimdall.Server
                 ExpiresUtc: now.Add(ttl)
             );
 
+            HeimdallTelemetry.RecordBifrostPublished(eventName);
+
             if (!_subsByTopic.TryGetValue(topic, out var bucket) || bucket.IsEmpty)
+            {
+                HeimdallTelemetry.RecordBifrostDropped(eventName, "no_subscribers");
+                activity?.SetTag(HeimdallDiagnostics.OutcomeTagName, "no_subscribers");
+                activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Ok);
                 return ValueTask.CompletedTask;
+            }
 
             bucket.Publish(msg);
+            activity?.SetTag(HeimdallDiagnostics.OutcomeTagName, "published");
+            activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Ok);
 
             return ValueTask.CompletedTask;
         }

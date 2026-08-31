@@ -10,45 +10,58 @@ export function createBootTriggers({
     getConfig,
     runActionFromElement
 }) {
-    // ============================================================
-    // Boot helpers
-    // ------------------------------------------------------------
-    // FIX (all boot functions): querySelectorAll only matches DESCENDANTS.
-    // When a swapped-in element IS the trigger element (not a container),
-    // boot(thatElement) would silently skip it. We now check the root
-    // element itself before descending into its subtree.
-    // ============================================================
-
     function matchesTriggerAttr(el, attr) {
         return isElement(el) && el.hasAttribute(attr);
     }
 
-    function bootLoads(root) {
+    function candidates(root, selector) {
+        const result = [];
+        const seen = new Set();
+        const add = el => {
+            if (!isElement(el) || seen.has(el))
+                return;
+            seen.add(el);
+            result.push(el);
+        };
+
+        // Always reconcile the exact root. This tears behavior down when a
+        // mutation removes its controlling attribute.
+        add(root);
+
         const scope = isElement(root) ? root : document;
-        const candidates = [];
+        for (const el of scope.querySelectorAll(selector))
+            add(el);
 
-        // Check root itself
-        if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-load"))
-            candidates.push(root);
+        return result;
+    }
 
-        // Descendants
-        for (const el of scope.querySelectorAll("[heimdall-content-load]"))
-            candidates.push(el);
+    const _loadActions = new WeakMap();
 
-        for (const el of candidates) {
-            if (el.__heimdallLoaded)
-                continue;
-            el.__heimdallLoaded = true;
+    function reconcileLoad(el) {
+        const actionId = (getAttr(el, "heimdall-content-load") || "").trim();
+        const previous = _loadActions.get(el) || null;
 
-            const actionId = getAttr(el, "heimdall-content-load");
-            if (!actionId)
-                continue;
-
-            runActionFromElement(el, actionId, "load").catch(() => { /* logged */ });
+        if (!actionId) {
+            _loadActions.delete(el);
+            el.__heimdallLoaded = false;
+            return;
         }
+
+        if (previous === actionId)
+            return;
+
+        _loadActions.set(el, actionId);
+        el.__heimdallLoaded = true;
+        runActionFromElement(el, actionId, "load").catch(() => { /* logged */ });
+    }
+
+    function bootLoads(root) {
+        for (const el of candidates(root, "[heimdall-content-load]"))
+            reconcileLoad(el);
     }
 
     let _visibleObserver = null;
+    const _visibleStates = new WeakMap();
 
     function ensureVisibleObserver() {
         if (_visibleObserver)
@@ -76,6 +89,10 @@ export function createBootTriggers({
                         _visibleObserver.unobserve(el);
                     }
                     catch { /* ignore */ }
+
+                    const state = _visibleStates.get(el);
+                    if (state)
+                        state.observed = false;
                 }
 
                 runActionFromElement(el, actionId, "visible").catch(() => { /* logged */ });
@@ -89,32 +106,47 @@ export function createBootTriggers({
         return _visibleObserver;
     }
 
-    function bootVisible(root) {
-        const scope = isElement(root) ? root : document;
-        const obs = ensureVisibleObserver();
-        const candidates = [];
-
-        // FIX: check root element itself - querySelectorAll misses it
-        if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-visible"))
-            candidates.push(root);
-
-        // Descendants
-        for (const el of scope.querySelectorAll("[heimdall-content-visible]"))
-            candidates.push(el);
-
-        for (const el of candidates) {
-            if (el.__heimdallVisibleBound)
-                continue;
-            el.__heimdallVisibleBound = true;
-
-            try {
-                obs.observe(el);
-            }
-            catch { /* ignore */ }
+    function stopVisible(el) {
+        const state = _visibleStates.get(el);
+        if (!state)
+            return;
+        try {
+            ensureVisibleObserver().unobserve(el);
         }
+        catch { /* ignore */ }
+        _visibleStates.delete(el);
+        el.__heimdallVisibleBound = false;
     }
 
-    const _scrollState = new WeakMap();
+    function reconcileVisible(el) {
+        const actionId = (getAttr(el, "heimdall-content-visible") || "").trim();
+        if (!actionId) {
+            stopVisible(el);
+            return;
+        }
+
+        const once = truthyAttr(el, "heimdall-visible-once", true);
+        const previous = _visibleStates.get(el);
+        if (previous && previous.actionId === actionId && previous.once === once)
+            return;
+
+        if (previous)
+            stopVisible(el);
+
+        _visibleStates.set(el, { actionId, once, observed: true });
+        el.__heimdallVisibleBound = true;
+        try {
+            ensureVisibleObserver().observe(el);
+        }
+        catch { /* ignore */ }
+    }
+
+    function bootVisible(root) {
+        for (const el of candidates(root, "[heimdall-content-visible]"))
+            reconcileVisible(el);
+    }
+
+    const _scrollStates = new WeakMap();
 
     function isNearScrollEnd(el, thresholdPx) {
         const target = (el === document.body || el === document.documentElement)
@@ -124,33 +156,50 @@ export function createBootTriggers({
         if (!target)
             return false;
 
-        const scrollTop = target.scrollTop;
-        const clientHeight = target.clientHeight;
-        const scrollHeight = target.scrollHeight;
-
-        return (scrollTop + clientHeight) >= (scrollHeight - thresholdPx);
+        return (target.scrollTop + target.clientHeight) >= (target.scrollHeight - thresholdPx);
     }
 
-    function attachScroll(el) {
-        if (el.__heimdallScrollBound)
+    function stopScroll(el) {
+        const state = _scrollStates.get(el);
+        if (!state)
             return;
-        el.__heimdallScrollBound = true;
+        try {
+            el.removeEventListener("scroll", state.handler);
+        }
+        catch { /* ignore */ }
+        _scrollStates.delete(el);
+        el.__heimdallScrollBound = false;
+    }
 
-        const handler = () => {
-            const state = _scrollState.get(el) || { ticking: false, lastFire: 0 };
+    function reconcileScroll(el) {
+        const actionId = (getAttr(el, "heimdall-content-scroll") || "").trim();
+        if (!actionId) {
+            stopScroll(el);
+            return;
+        }
+
+        const previous = _scrollStates.get(el);
+        if (previous && previous.actionId === actionId)
+            return;
+        if (previous)
+            stopScroll(el);
+
+        const state = { actionId, ticking: false, lastFire: 0, handler: null };
+        state.handler = () => {
             if (state.ticking)
                 return;
 
             state.ticking = true;
-            _scrollState.set(el, state);
-
             requestAnimationFrame(() => {
                 state.ticking = false;
+
+                const currentActionId = getAttr(el, "heimdall-content-scroll");
+                if (!currentActionId)
+                    return;
 
                 const config = getConfig();
                 const threshold = intAttr(el, "heimdall-scroll-threshold", config.scrollThresholdPx || 120);
                 const minInterval = config.scrollMinIntervalMs || 250;
-
                 if (!isNearScrollEnd(el, threshold))
                     return;
 
@@ -159,63 +208,47 @@ export function createBootTriggers({
                     return;
                 state.lastFire = now;
 
-                const actionId = getAttr(el, "heimdall-content-scroll");
-                if (!actionId)
-                    return;
-
-                runActionFromElement(el, actionId, "scroll").catch(() => { /* logged */ });
+                runActionFromElement(el, currentActionId, "scroll").catch(() => { /* logged */ });
             });
         };
 
-        el.addEventListener("scroll", handler, { passive: true });
+        _scrollStates.set(el, state);
+        el.__heimdallScrollBound = true;
+        el.addEventListener("scroll", state.handler, { passive: true });
     }
 
     function bootScroll(root) {
-        const scope = isElement(root) ? root : document;
-
-        // FIX: check root element itself
-        if (isElement(root) && matchesTriggerAttr(root, "heimdall-content-scroll"))
-            attachScroll(root);
-
-        for (const el of scope.querySelectorAll("[heimdall-content-scroll]"))
-            attachScroll(el);
+        for (const el of candidates(root, "[heimdall-content-scroll]"))
+            reconcileScroll(el);
     }
 
-    const _pollState = new WeakMap();
+    const _pollStates = new WeakMap();
 
-    function attachPoll(el) {
-        if (el.__heimdallPollBound)
+    function stopPoll(el) {
+        const state = _pollStates.get(el);
+        if (!state)
             return;
+        clearTimeout(state.timerId);
+        _pollStates.delete(el);
+        el.__heimdallPollBound = false;
+    }
+
+    function startPoll(el, actionId, intervalMs) {
+        const state = { actionId, intervalMs, timerId: null, inFlight: false };
+        _pollStates.set(el, state);
         el.__heimdallPollBound = true;
-
-        const intervalMs = intAttr(el, "heimdall-poll", 0);
-        if (!intervalMs || intervalMs <= 0)
-            return;
-
-        const actionId = getAttr(el, "heimdall-content-load");
-        if (!actionId) {
-            // Always warn - misconfigured polling is a silent no-op and hard to debug.
-            // eslint-disable-next-line no-console
-            console.warn(`[Heimdall] heimdall-poll set but no heimdall-content-load found on element.`, el);
-            return;
-        }
-
-        const state = { timerId: null, inFlight: false };
-        _pollState.set(el, state);
 
         const tick = async () => {
             if (!el.isConnected) {
                 stopPoll(el);
                 return;
             }
-            if (document.hidden)
-                return;
-            if (state.inFlight)
+            if (document.hidden || state.inFlight)
                 return;
 
             state.inFlight = true;
             try {
-                await runActionFromElement(el, actionId, "load", { reason: "poll" });
+                await runActionFromElement(el, state.actionId, "load", { reason: "poll" });
             }
             finally {
                 state.inFlight = false;
@@ -223,48 +256,52 @@ export function createBootTriggers({
         };
 
         const schedule = () => {
-            if (!el.isConnected) {
+            if (!el.isConnected || _pollStates.get(el) !== state) {
                 stopPoll(el);
                 return;
             }
 
-            const st = _pollState.get(el);
-            if (!st)
-                return;
-
-            clearTimeout(st.timerId);
-            st.timerId = setTimeout(async () => {
+            clearTimeout(state.timerId);
+            state.timerId = setTimeout(async () => {
                 try {
                     await tick();
                 }
                 catch { /* runActionFromElement logs */ }
                 finally {
-                    schedule();
+                    if (_pollStates.get(el) === state)
+                        schedule();
                 }
-            }, intervalMs);
+            }, state.intervalMs);
         };
 
         schedule();
     }
 
-    function stopPoll(el) {
-        const st = _pollState.get(el);
-        if (!st)
+    function reconcilePoll(el) {
+        const intervalMs = intAttr(el, "heimdall-poll", 0);
+        const actionId = (getAttr(el, "heimdall-content-load") || "").trim();
+        const previous = _pollStates.get(el);
+
+        if (!intervalMs || intervalMs <= 0 || !actionId) {
+            if (intervalMs > 0 && !actionId) {
+                // eslint-disable-next-line no-console
+                console.warn(`[Heimdall] heimdall-poll set but no heimdall-content-load found on element.`, el);
+            }
+            stopPoll(el);
             return;
-        clearTimeout(st.timerId);
-        _pollState.delete(el);
-        el.__heimdallPollBound = false;
+        }
+
+        if (previous && previous.intervalMs === intervalMs && previous.actionId === actionId)
+            return;
+
+        if (previous)
+            stopPoll(el);
+        startPoll(el, actionId, intervalMs);
     }
 
     function bootPoll(root) {
-        const scope = isElement(root) ? root : document;
-
-        // FIX: check root element itself
-        if (isElement(root) && matchesTriggerAttr(root, "heimdall-poll"))
-            attachPoll(root);
-
-        for (const el of scope.querySelectorAll("[heimdall-poll]"))
-            attachPoll(el);
+        for (const el of candidates(root, "[heimdall-poll]"))
+            reconcilePoll(el);
     }
 
     return {

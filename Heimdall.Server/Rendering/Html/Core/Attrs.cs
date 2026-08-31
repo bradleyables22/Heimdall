@@ -66,6 +66,12 @@ namespace Heimdall.Server.Rendering
 		public static HtmlAttr Id(string id) => Attr("id", id);
 
 		/// <summary>
+		/// Creates a native HTML <c>lang</c> attribute.
+		/// </summary>
+		/// <param name="languageTag">The language tag, such as <c>en</c> or <c>fr-FR</c>.</param>
+		public static HtmlAttr Lang(string languageTag) => Attr("lang", languageTag);
+
+		/// <summary>
 		/// Creates an <c>href</c> attribute.
 		/// </summary>
 		public static HtmlAttr Href(string href) => Attr("href", href);
@@ -94,6 +100,26 @@ namespace Heimdall.Server.Rendering
 		/// Creates a <c>name</c> attribute.
 		/// </summary>
 		public static HtmlAttr Name(string name) => Attr("name", name);
+
+		/// <summary>
+		/// Creates an <c>accept</c> attribute from file extensions, MIME types, or media wildcards.
+		/// </summary>
+		public static HtmlAttr Accept(params string?[] fileTypes)
+			=> Attr(
+				"accept",
+				string.Join(",", (fileTypes ?? Array.Empty<string?>())
+					.Where(value => !string.IsNullOrWhiteSpace(value))
+					.Select(value => value!.Trim())));
+
+		/// <summary>
+		/// Creates a <c>capture</c> attribute from a raw current or future browser value.
+		/// </summary>
+		public static HtmlAttr Capture(string value) => Attr("capture", value);
+
+		/// <summary>
+		/// Creates a <c>capture</c> attribute from a known camera direction hint.
+		/// </summary>
+		public static HtmlAttr Capture(CaptureMode capture) => Attr("capture", ToCaptureModeString(capture));
 
 		/// <summary>
 		/// Creates a <c>value</c> attribute.
@@ -228,6 +254,11 @@ namespace Heimdall.Server.Rendering
 		/// Creates an <c>enctype</c> attribute.
 		/// </summary>
 		public static HtmlAttr EncType(string value) => Attr("enctype", value);
+
+		/// <summary>
+		/// Creates an <c>enctype="multipart/form-data"</c> attribute for forms containing files.
+		/// </summary>
+		public static HtmlAttr MultipartFormData() => EncType("multipart/form-data");
 
 		/// <summary>
 		/// Creates a <c>rel</c> attribute.

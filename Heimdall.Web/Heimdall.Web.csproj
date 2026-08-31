@@ -12,7 +12,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Web</PackageId>
-		<Version>3.0.8</Version>
+		<Version>3.0.9</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall JavaScript library.</Description>
@@ -40,6 +40,7 @@
 		<None Include="Favicon.png" Pack="true" PackagePath="favicon.png" />
 		<None Include="..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
 		<None Include="readme.md" Pack="true" PackagePath="\" />
+		<None Include="CHANGELOG.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
 
 	<ItemGroup>

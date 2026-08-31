@@ -24,7 +24,6 @@ namespace Heimdall.Server
 
             app.MapGet("__heimdall/v1/bifrost/token", async (
 				HttpContext ctx,
-				[FromServices] IAntiforgery antiforgery,
 				[FromServices] BifrostSubscribeToken tokenSvc,
 				[FromServices] IOptions<HeimdallServiceSettings> options) =>
             {
@@ -33,29 +32,33 @@ namespace Heimdall.Server
                 if (string.IsNullOrWhiteSpace(topic))
                     return Results.BadRequest("Querystring 'topic' is required.");
 
-                try
+                if (options.Value.EnableAntiforgery)
                 {
-                    await antiforgery.ValidateRequestAsync(ctx);
-                }
-                catch (AntiforgeryValidationException ex)
-                {
-                    logger?.LogWarning(
-                        ex,
-                        "Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        topic,
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        ctx.TraceIdentifier);
-
-                    if (options.Value.EnableDetailedErrors)
+                    var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+                    try
                     {
-                        return Results.Problem(
-                            detail: ex.ToString(),
-                            title: "Invalid Heimdall antiforgery token",
-                            statusCode: StatusCodes.Status400BadRequest);
+                        await antiforgery.ValidateRequestAsync(ctx);
                     }
+                    catch (AntiforgeryValidationException ex)
+                    {
+                        logger?.LogWarning(
+                            ex,
+                            "Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                            topic,
+                            ctx.Request.Method,
+                            ctx.Request.Path,
+                            ctx.TraceIdentifier);
 
-                    return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                        if (options.Value.EnableDetailedErrors)
+                        {
+                            return Results.Problem(
+                                detail: ex.ToString(),
+                                title: "Invalid Heimdall antiforgery token",
+                                statusCode: StatusCodes.Status400BadRequest);
+                        }
+
+                        return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                    }
                 }
 
 				var authorizationResult = await AuthorizeBifrostTopicAsync(ctx, topic, options.Value);
@@ -93,10 +96,8 @@ namespace Heimdall.Server
 
 				// Subscribe to topic
 				var (id, reader, unsubscribe) = bifrost.Subscribe(topic);
-				abort.Register(unsubscribe);
-
-				// Optional initial event (helps with debugging / client readiness)
-				await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
+				using var abortRegistration = abort.Register(unsubscribe);
+				using var connectionTelemetry = HeimdallTelemetry.OpenBifrostConnection();
 
 				var heartbeatInterval = options.Value.BifrostHeartbeatInterval;
 				if (heartbeatInterval <= TimeSpan.Zero)
@@ -104,6 +105,9 @@ namespace Heimdall.Server
 
 				try
 				{
+					// Optional initial event (helps with debugging / client readiness)
+					await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
+
 					while (!abort.IsCancellationRequested)
 					{
 						// Wait for messages, but wake on idle so proxies don't close quiet streams.
@@ -125,7 +129,10 @@ namespace Heimdall.Server
 						{
 							// Drop expired messages
 							if (msg.ExpiresUtc <= DateTimeOffset.UtcNow)
+							{
+								HeimdallTelemetry.RecordBifrostExpired(msg.EventName);
 								continue;
+							}
 
 							await WriteEventAsync(
 								ctx,
@@ -140,6 +147,12 @@ namespace Heimdall.Server
 				catch (OperationCanceledException)
 				{
 					// Expected on disconnect
+					connectionTelemetry.Complete("cancelled");
+				}
+				catch (Exception ex)
+				{
+					connectionTelemetry.RecordException(ex);
+					throw;
 				}
 				finally
 				{

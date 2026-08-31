@@ -1,4 +1,5 @@
 ﻿using Heimdall.Server.Registry;
+using Microsoft.AspNetCore.Http.Metadata;
 using System.Reflection;
 
 namespace Heimdall.Server
@@ -13,6 +14,8 @@ namespace Heimdall.Server
 
         public ContentActionParameterKind Kind { get; }
 
+        public string BindingName { get; }
+
         public ContentActionParameterDescriptor(
             int index,
             ParameterInfo parameter,
@@ -23,6 +26,13 @@ namespace Heimdall.Server
             Parameter = parameter;
             ParameterType = parameterType;
             Kind = kind;
+            BindingName = parameter
+                .GetCustomAttributes(inherit: true)
+                .OfType<IFromFormMetadata>()
+                .Select(metadata => metadata.Name)
+                .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name))
+                ?? parameter.Name
+                ?? $"arg{index}";
         }
     }
 }

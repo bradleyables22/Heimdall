@@ -70,13 +70,21 @@ namespace Heimdall.Server.Rendering
 			/// </summary>
 			Hover,
 			/// <summary>
-			/// The "Focus" trigger is activated when an element receives focus, either through user interaction (e.g., clicking on an input field) or programmatically (e.g., using JavaScript to set focus). This is useful for highlighting form fields, displaying additional information, or triggering actions that should occur when an element becomes active.
+			/// The "Visible" trigger is activated when an element intersects the viewport. This is useful for lazy loading and continuation boundaries.
 			/// </summary>
 			Visible,
 			/// <summary>
 			/// The "Scroll" trigger is activated when a user scrolls within an element or the page. This can be used to implement features like infinite scrolling, lazy loading of content, or triggering animations and interactions based on the user's scroll position.
 			/// </summary>
-			Scroll
+			Scroll,
+			/// <summary>
+			/// The "DocumentVisible" trigger is activated when the document transitions from hidden to visible, such as when a user returns to the browser tab. It does not run during initial page load.
+			/// </summary>
+			DocumentVisible,
+			/// <summary>
+			/// The "Online" trigger is activated when the browser reports that network connectivity has returned.
+			/// </summary>
+			Online
 		}
 
 		/// <summary>
@@ -115,6 +123,17 @@ namespace Heimdall.Server.Rendering
 			/// Keeps only the latest pending request and runs it after the active request completes.
 			/// </summary>
 			QueueLatest
+		}
+
+		/// <summary>
+		/// Defines how a successful Heimdall response updates browser history.
+		/// </summary>
+		public enum HistoryMode
+		{
+			/// <summary>Adds a new browser history entry.</summary>
+			Push,
+			/// <summary>Replaces the browser's current history entry.</summary>
+			Replace
 		}
 
 		/// <summary>

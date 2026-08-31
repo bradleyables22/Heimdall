@@ -6,7 +6,10 @@ namespace Heimdall.Server.Registry
         HttpContext,
         CancellationToken,
         ClaimsPrincipal,
+        ClientInfo,
         Service,
-        Payload
+        Payload,
+        FormPayload,
+        FormFile
     }
 }

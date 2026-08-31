@@ -1,14 +1,21 @@
 import { createActionInvoker } from "./core/actions.js";
 import { createBootTriggers } from "./core/boot-triggers.js";
+import { createBusyStateManager } from "./core/busy-state.js";
+import { createClientInfoRuntime } from "./core/client-info.js";
 import { createDiagnostics } from "./core/diagnostics.js";
 import { createDomPipeline } from "./core/dom.js";
 import { createEventDelegates } from "./core/event-delegates.js";
+import { createHistoryRuntime } from "./core/history.js";
 import { createJsInvokeVoidRuntime } from "./core/js-invoke-void.js";
+import { createMutationRuntime } from "./core/mutations.js";
+import { createPageLifecycleRuntime } from "./core/page-lifecycle.js";
 import { createPayloadResolver } from "./core/payloads.js";
 import { createRequestCoordinator } from "./core/request-coordinator.js";
+import { createRequestHeadersRuntime } from "./core/request-headers.js";
 import { createSecurityTokens } from "./core/security-tokens.js";
 import { createHeimdallRuntime } from "./core/startup.js";
 import { createSseRuntime } from "./core/sse.js";
+import { createTimeLocalization } from "./core/time-localization.js";
 import {
     onReady,
     safeText
@@ -53,7 +60,14 @@ import {
     //   - heimdall-content-blur="Action.Id"
     //   - heimdall-content-hover="Action.Id"
     //   - heimdall-content-visible="Action.Id"
+    //   - heimdall-content-document-visible="Action.Id"
+    //   - heimdall-content-online="Action.Id"
     //   - heimdall-content-scroll="Action.Id"
+    //
+    // Page Lifecycle:
+    //   - document-visible fires on hidden -> visible transitions, not initial boot
+    //   - online attempts a normal action when browser connectivity returns
+    //   - offline emits document event "heimdall:offline" and makes no request
     //
     // Common Options:
     //   - heimdall-content-target="#selector"
@@ -111,7 +125,7 @@ import {
     //   Useful for modal backdrops, overlays, and dismiss regions.
     //
     // ---------------------------------------------------------------------------
-    // Response Directives (<invocation>, <abort>, <redirect>)
+    // Response Directives (<invocation>, <mutation>, <abort>, <redirect>, <history>)
     // ---------------------------------------------------------------------------
     // Any <invocation> element returned by the server is treated as an instruction
     // and is never rendered directly into the response output.
@@ -138,6 +152,11 @@ import {
     //   - Acts as a hard-stop directive
     //   - Prevents OOB processing, abort handling, and main target swap
     //   - First redirect wins
+    //
+    // <history>:
+    //   - Successful content actions may push or replace one same-origin URL
+    //   - Plain paths are origin-rooted, with or without a leading slash
+    //   - Back and Forward perform a full load of the canonical page route
     //
     // ---------------------------------------------------------------------------
     // Bifrost (SSE) Attributes
@@ -189,6 +208,8 @@ import {
     //   - heimdall-content-blur="Action.Id"
     //   - heimdall-content-hover="Action.Id"
     //   - heimdall-content-visible="Action.Id"
+    //   - heimdall-content-document-visible="Action.Id"
+    //   - heimdall-content-online="Action.Id"
     //   - heimdall-content-scroll="Action.Id"
     //
     // ---------------------------------------------------------------------------
@@ -237,6 +258,10 @@ import {
     //   - heimdall-payload='{"json":1}'
     //   - heimdall-payload-from="closest-form|self|#form|ref:path|closest-state[:key]"
     //   - heimdall-payload-ref="Path.To.Object"
+    //
+    // Capture timing:
+    //   - closest-state is refreshed when a coordinated request actually starts
+    //   - forms, files, inline payloads, and element datasets are event snapshots
     //
     // ---------------------------------------------------------------------------
     // Trigger Modifiers
@@ -311,13 +336,18 @@ import {
 
     const ACTION_HEADER = "X-Heimdall-Content-Action";
     const CSRF_HEADER = "RequestVerificationToken";
+    const CLIENT_INFO_HEADER = "X-Heimdall-Client-Info";
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
-    const { payloadFromElement } = createPayloadResolver(global);
+    const { payloadBindingFromElement } = createPayloadResolver(global);
     const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
     const coordinator = createRequestCoordinator({
         global,
         dbg
+    });
+    const requestHeaders = createRequestHeadersRuntime({
+        global,
+        getConfig: getRuntimeConfig
     });
     const jsInvokeVoid = createJsInvokeVoidRuntime({
         global,
@@ -325,12 +355,38 @@ import {
         dbg,
         getConfig: getRuntimeConfig
     });
+    const timeLocalization = createTimeLocalization({
+        global,
+        emitLifecycle,
+        dbg
+    });
+    const busyState = createBusyStateManager();
+    const clientInfo = createClientInfoRuntime({
+        global,
+        getConfig: getRuntimeConfig,
+        emitLifecycle,
+        dbg
+    });
+    const historyRuntime = createHistoryRuntime({
+        global,
+        emitLifecycle,
+        dbg
+    });
+    const mutations = createMutationRuntime({
+        global,
+        emitLifecycle,
+        dbg,
+        boot: root => boot(root),
+        busyState
+    });
     const dom = createDomPipeline({
         getConfig: getRuntimeConfig,
         boot: root => boot(root),
         dbg,
         emitLifecycle,
-        jsInvokeVoid
+        jsInvokeVoid,
+        timeLocalization,
+        mutations
     });
     const {
         clearBifrostSubscribeToken,
@@ -341,8 +397,10 @@ import {
         global,
         getConfig: getRuntimeConfig,
         emit,
+        emitLifecycle,
         dbg,
         safeText,
+        resolveRequestHeaders: requestHeaders.resolve,
         csrfHeader: CSRF_HEADER,
         defaultBifrostTokenEndpoint: DEFAULT_BIFROST_TOKEN_ENDPOINT
     });
@@ -357,12 +415,18 @@ import {
         emit,
         emitLifecycle,
         dbg,
-        payloadFromElement,
+        payloadBindingFromElement,
         boot: root => boot(root),
         dom,
+        historyRuntime,
         coordinator,
+        busyState,
+        resolveRequestHeaders: requestHeaders.resolve,
+        mergeRequestHeaders: requestHeaders.merge,
+        getClientInfoHeader: clientInfo.getHeaderValue,
         actionHeader: ACTION_HEADER,
-        csrfHeader: CSRF_HEADER
+        csrfHeader: CSRF_HEADER,
+        clientInfoHeader: CLIENT_INFO_HEADER
     });
     const {
         handleChange,
@@ -388,6 +452,11 @@ import {
         getConfig: getRuntimeConfig,
         runActionFromElement
     });
+    const pageLifecycle = createPageLifecycleRuntime({
+        global,
+        runActionFromElement,
+        emit
+    });
     const {
         bootSse,
         installSseSweeper,
@@ -408,6 +477,7 @@ import {
     });
 
     function boot(root) {
+        timeLocalization.localize(root, { origin: "boot" });
         bootLoads(root);
         bootVisible(root);
         bootScroll(root);
@@ -440,6 +510,7 @@ import {
             handleMouseOver,
             handleSubmit
         },
+        installPageLifecycle: pageLifecycle.install,
         installSseSweeper,
         dbg,
         onRuntimeCreated: runtime => {

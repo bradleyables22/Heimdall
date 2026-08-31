@@ -44,6 +44,13 @@ namespace Heimdall.Server.Rendering
 		public static Html.HtmlAttr Id(string id) => Html.Id(id);
 
 		/// <summary>
+		/// Creates a native HTML <c>lang</c> attribute.
+		/// </summary>
+		/// <param name="languageTag">The language tag, such as <c>en</c> or <c>fr-FR</c>.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr Lang(string languageTag) => Html.Lang(languageTag);
+
+		/// <summary>
 		/// Creates an <c>href</c> attribute.
 		/// </summary>
 		/// <param name="href">The target URL.</param>
@@ -84,6 +91,27 @@ namespace Heimdall.Server.Rendering
 		/// <param name="name">The form field name.</param>
 		/// <returns>An attribute descriptor.</returns>
 		public static Html.HtmlAttr Name(string name) => Html.Name(name);
+
+		/// <summary>
+		/// Creates an <c>accept</c> attribute from file extensions, MIME types, or media wildcards.
+		/// </summary>
+		/// <param name="fileTypes">The accepted file extensions, MIME types, or media wildcards.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr Accept(params string?[] fileTypes) => Html.Accept(fileTypes);
+
+		/// <summary>
+		/// Creates a <c>capture</c> attribute from a raw current or future browser value.
+		/// </summary>
+		/// <param name="value">The capture hint.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr Capture(string value) => Html.Capture(value);
+
+		/// <summary>
+		/// Creates a <c>capture</c> attribute from a known camera direction hint.
+		/// </summary>
+		/// <param name="capture">The capture direction hint.</param>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr Capture(Html.CaptureMode capture) => Html.Capture(capture);
 
 		/// <summary>
 		/// Creates a <c>value</c> attribute.
@@ -247,6 +275,12 @@ namespace Heimdall.Server.Rendering
 		/// <param name="value">The encoding type value.</param>
 		/// <returns>An attribute descriptor.</returns>
 		public static Html.HtmlAttr EncType(string value) => Html.EncType(value);
+
+		/// <summary>
+		/// Creates an <c>enctype="multipart/form-data"</c> attribute.
+		/// </summary>
+		/// <returns>An attribute descriptor.</returns>
+		public static Html.HtmlAttr MultipartFormData() => Html.MultipartFormData();
 
 		/// <summary>
 		/// Creates a <c>rel</c> attribute.

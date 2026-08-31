@@ -119,6 +119,18 @@ namespace Heimdall.Server.Rendering
 		}
 
 		/// <summary>
+		/// Represents the standard camera direction hints for a file input's
+		/// <c>capture</c> attribute.
+		/// </summary>
+		public enum CaptureMode
+		{
+			/// <summary>Prefer the camera or microphone facing the user.</summary>
+			user,
+			/// <summary>Prefer the outward-facing camera or microphone.</summary>
+			environment
+		}
+
+		/// <summary>
 		/// Represents the built-in values supported by the native HTML <c>command</c> attribute.
 		/// </summary>
 		/// <remarks>
@@ -151,6 +163,16 @@ namespace Heimdall.Server.Rendering
 		/// </remarks>
 		private static string ToInputTypeString(InputType type)
 			=> type.ToString().Replace("_", "-");
+
+		/// <summary>
+		/// Converts a <see cref="CaptureMode"/> value to its native HTML keyword.
+		/// </summary>
+		private static string ToCaptureModeString(CaptureMode capture) => capture switch
+		{
+			CaptureMode.user => "user",
+			CaptureMode.environment => "environment",
+			_ => throw new ArgumentOutOfRangeException(nameof(capture), capture, null)
+		};
 
 		/// <summary>
 		/// Converts a <see cref="CommandType"/> value to its native HTML keyword.
