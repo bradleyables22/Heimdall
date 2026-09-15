@@ -195,6 +195,97 @@ async function testSseErrorReconnectFreshToken(page) {
   assert.equal(tokenFetches.length, 2);
 }
 
+async function testSseServerDisconnectDoesNotReconnect(page) {
+  await installFakeServer(page, {
+    csrfTokens: ["csrf-sse-disconnect"],
+    bifrostTokens: ["st-sse-disconnect"]
+  });
+
+  const state = await page.evaluate(async () => {
+    document.body.innerHTML = '<div id="sse-host"></div>';
+    window.Heimdall.config.sseReconnectDelayMs = 10;
+    window.Heimdall.config.sseReconnectMaxDelayMs = 10;
+
+    window.__eventSources = [];
+    window.EventSource = class {
+      constructor(url) {
+        this.url = url;
+        this.listeners = {};
+        this.closed = false;
+        window.__eventSources.push(this);
+      }
+
+      addEventListener(name, handler) {
+        this.listeners[name] = handler;
+      }
+
+      removeEventListener(name, handler) {
+        if (this.listeners[name] === handler)
+          delete this.listeners[name];
+      }
+
+      close() {
+        this.closed = true;
+      }
+    };
+
+    const scheduled = [];
+    const closeEvents = [];
+    document.addEventListener("heimdall:sse-reconnect-scheduled", ev => {
+      scheduled.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason
+      });
+    });
+    document.addEventListener("heimdall:sse-close", ev => {
+      closeEvents.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason
+      });
+    });
+
+    window.Heimdall.sse.connect("topic:server-disconnect", {
+      element: document.querySelector("#sse-host"),
+      event: "message"
+    });
+
+    await new Promise((resolve, reject) => {
+      const started = Date.now();
+      const timer = setInterval(() => {
+        const es = window.__eventSources[0];
+        if (es && typeof es.listeners["heimdall:disconnect"] === "function") {
+          clearInterval(timer);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - started > 3000) {
+          clearInterval(timer);
+          reject(new Error("Timed out waiting for server disconnect handler"));
+        }
+      }, 10);
+    });
+
+    const es = window.__eventSources[0];
+    es.listeners["heimdall:disconnect"]({ data: "operator-kick" });
+    await new Promise(resolve => setTimeout(resolve, 50));
+
+    return {
+      eventSourceCount: window.__eventSources.length,
+      closed: es.closed,
+      scheduled,
+      closeEvents
+    };
+  });
+
+  assert.equal(state.eventSourceCount, 1);
+  assert.equal(state.closed, true);
+  assert.deepEqual(state.scheduled, []);
+  assert.deepEqual(state.closeEvents, [
+    { topic: "topic:server-disconnect", reason: "operator-kick" }
+  ]);
+}
+
 async function testSseOfflinePauseResume(page) {
   await installFakeServer(page, {
     csrfTokens: ["csrf-sse-offline"],
@@ -350,5 +441,6 @@ async function testSseOfflinePauseResume(page) {
 export const tests = [
   ["retries SSE token failures with backoff", testSseTokenFailureRetry],
   ["reconnects SSE errors with a fresh token", testSseErrorReconnectFreshToken],
+  ["does not reconnect after a server disconnect", testSseServerDisconnectDoesNotReconnect],
   ["pauses SSE reconnects while offline", testSseOfflinePauseResume]
 ];

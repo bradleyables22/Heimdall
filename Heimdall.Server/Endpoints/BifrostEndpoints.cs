@@ -95,13 +95,24 @@ namespace Heimdall.Server
 				var abort = ctx.RequestAborted;
 
 				// Subscribe to topic
-				var (id, reader, unsubscribe) = bifrost.Subscribe(topic);
-				using var abortRegistration = abort.Register(unsubscribe);
+				var subscription = bifrost.Subscribe(topic);
+				var reader = subscription.Reader;
+				using var abortRegistration = abort.Register(subscription.Unsubscribe);
 				using var connectionTelemetry = HeimdallTelemetry.OpenBifrostConnection();
 
 				var heartbeatInterval = options.Value.BifrostHeartbeatInterval;
 				if (heartbeatInterval <= TimeSpan.Zero)
 					heartbeatInterval = TimeSpan.FromSeconds(15);
+
+				async Task<bool> WriteDisconnectIfRequestedAsync()
+				{
+					if (!subscription.DisconnectRequested.IsCompleted)
+						return false;
+
+					var reason = await subscription.DisconnectRequested;
+					await WriteEventAsync(ctx, Bifrost.DisconnectEventName, reason, null, abort);
+					return true;
+				}
 
 				try
 				{
@@ -110,23 +121,46 @@ namespace Heimdall.Server
 
 					while (!abort.IsCancellationRequested)
 					{
+						if (await WriteDisconnectIfRequestedAsync())
+							break;
+
 						// Wait for messages, but wake on idle so proxies don't close quiet streams.
 						using var idle = CancellationTokenSource.CreateLinkedTokenSource(abort);
 						idle.CancelAfter(heartbeatInterval);
+						var waitForMessages = reader.WaitToReadAsync(idle.Token).AsTask();
+						var completed = await Task.WhenAny(
+							waitForMessages,
+							subscription.DisconnectRequested);
+
+						if (completed == subscription.DisconnectRequested)
+						{
+							await WriteDisconnectIfRequestedAsync();
+							break;
+						}
 
 						try
 						{
-							if (!await reader.WaitToReadAsync(idle.Token))
+							if (!await waitForMessages)
 								break;
 						}
 						catch (OperationCanceledException) when (!abort.IsCancellationRequested)
 						{
+							if (await WriteDisconnectIfRequestedAsync())
+								break;
+
 							await WriteCommentAsync(ctx, "ping", abort);
 							continue;
 						}
 
+						var disconnected = false;
 						while (reader.TryRead(out var msg))
 						{
+							if (await WriteDisconnectIfRequestedAsync())
+							{
+								disconnected = true;
+								break;
+							}
+
 							// Drop expired messages
 							if (msg.ExpiresUtc <= DateTimeOffset.UtcNow)
 							{
@@ -142,6 +176,9 @@ namespace Heimdall.Server
 								ct: abort
 							);
 						}
+
+						if (disconnected)
+							break;
 					}
 				}
 				catch (OperationCanceledException)
@@ -156,7 +193,7 @@ namespace Heimdall.Server
 				}
 				finally
 				{
-					unsubscribe();
+					subscription.Unsubscribe();
 				}
 
 				return Results.Empty;
@@ -176,6 +213,24 @@ namespace Heimdall.Server
 				var policyResult = await AuthorizeBifrostTopicPolicyAsync(ctx, topic, settings.BifrostTopicPolicy);
 				if (policyResult is not null)
 					return policyResult;
+			}
+
+			var handlers = ctx.RequestServices
+				.GetServices<IBifrostTopicAuthHandler>()
+				.ToArray();
+
+			if (handlers.Length > 0)
+			{
+				var matchingHandlers = handlers
+					.Where(handler => handler.CanHandle(topic))
+					.ToArray();
+
+				if (matchingHandlers.Length != 1)
+					return CreateDeniedTopicResult(ctx);
+
+				var authorizationContext = new BifrostTopicAuthorizationContext(ctx, topic);
+				if (!await matchingHandlers[0].AuthorizeAsync(authorizationContext))
+					return CreateDeniedTopicResult(ctx);
 			}
 
 			if (settings.AuthorizeBifrostTopic is not null &&

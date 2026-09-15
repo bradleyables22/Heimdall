@@ -3297,6 +3297,7 @@
   }
 
   // core/sse.js
+  var SERVER_DISCONNECT_EVENT = "heimdall:disconnect";
   function createSseRuntime({
     global,
     getConfig,
@@ -3439,6 +3440,12 @@ ${topic}`;
         closeSseState(state, reason);
       }
       closeSseConnection(connection, reason);
+    }
+    function handleServerDisconnect(connection, ev) {
+      if (!connection || connection.closed)
+        return;
+      const reason = ev && ev.data != null ? String(ev.data).trim() : "";
+      closeSseConnectionSubscribers(connection, reason || "server-disconnected");
     }
     function getReconnectDelayMs(connection) {
       const config = getConfig();
@@ -3691,6 +3698,9 @@ ${topic}`;
         es.onmessage = (ev) => {
           dispatchSsePayload(connection, "message", ev, ev && ev.data != null ? ev.data : "");
         };
+        es.addEventListener(SERVER_DISCONNECT_EVENT, (ev) => {
+          handleServerDisconnect(connection, ev);
+        });
         syncConnectionEventListeners(connection);
         es.onerror = (e) => {
           if (connection.closed)
@@ -3720,6 +3730,8 @@ ${topic}`;
     }
     function ensureConnectionEventListener(connection, eventName) {
       if (!connection || !connection.es || !eventName || eventName === "message")
+        return;
+      if (eventName === SERVER_DISCONNECT_EVENT)
         return;
       if (connection.eventHandlers.has(eventName))
         return;

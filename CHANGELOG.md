@@ -16,6 +16,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added global, declaring-type, and per-action antiforgery policy controls, including a complete client opt-out for non-cookie security models.
 - Added bounded `HeimdallClientInfo` action binding, asynchronous request-header providers, and cancellable unauthorized-response handling.
 - Added content-action and Bifrost diagnostics through `ActivitySource` and `System.Diagnostics.Metrics`, plus the local advisory `Bifrost.HasSubscribers` check.
+- Added the read-only `Bifrost.SubscribedTopics` snapshot for active local subscriber topics.
+- Added terminal Bifrost subscriber disconnects that close local SSE connections without browser reconnects.
+- Added DI-backed `AddBifrostTopicAuthHandler<THandler>()` registration for fail-closed, per-topic-family Bifrost authorization.
 - Added the native `Lang` fluent helper and transitions between normal FluentHtml and Heimdall-specific builders.
 
 ### Fixed

@@ -18,6 +18,7 @@ namespace Heimdall.Server
 	public sealed class Bifrost
 	{
         private const string DefaultEventName = "heimdall";
+        internal const string DisconnectEventName = "heimdall:disconnect";
 
         private readonly ConcurrentDictionary<string, TopicSubscriptions> _subsByTopic
             = new(StringComparer.OrdinalIgnoreCase);
@@ -57,6 +58,49 @@ namespace Heimdall.Server
                 throw new ArgumentException("Topic is required.", nameof(topic));
 
             return _subsByTopic.TryGetValue(topic, out var bucket) && !bucket.IsEmpty;
+        }
+
+        /// <summary>
+        /// Gets a read-only snapshot of topics with at least one active subscriber on the current application instance.
+        /// </summary>
+        /// <remarks>
+        /// The returned list is independent of Bifrost and will not change as subscriptions connect or disconnect.
+        /// Topic comparison is case-insensitive, and the casing in the list is the casing used when the topic bucket
+        /// was first created. A subscriber can connect or disconnect while the snapshot is being created, so callers
+        /// should treat it as an instantaneous diagnostic or optimization view rather than a delivery guarantee.
+        /// </remarks>
+        public IReadOnlyList<string> SubscribedTopics
+            => _subsByTopic
+                .Where(static pair => !pair.Value.IsEmpty)
+                .Select(static pair => pair.Key)
+                .ToArray();
+
+        /// <summary>
+        /// Requests a terminal disconnect for every active subscriber on a topic on the current application instance.
+        /// </summary>
+        /// <param name="topic">The topic whose subscribers should be disconnected. Cannot be null, empty, or consist
+        /// only of white-space characters.</param>
+        /// <param name="reason">An optional reason sent to the browser and included in the SSE close event. Newline
+        /// characters are not allowed.</param>
+        /// <returns>The number of active subscribers that accepted the disconnect request. A subscriber can disconnect
+        /// before the request is delivered, so this is not a delivery guarantee.</returns>
+        /// <remarks>
+        /// This operation only affects subscribers connected to the current application instance. The browser treats
+        /// the request as intentional and does not automatically reconnect. A later DOM or programmatic subscription
+        /// can create a new connection.
+        /// </remarks>
+        /// <exception cref="ArgumentException">Thrown if <paramref name="topic"/> is null, empty, or consists only
+        /// of white-space characters, or if <paramref name="reason"/> contains newline characters.</exception>
+        public int DisconnectSubscribers(string topic, string? reason = null)
+        {
+            if (string.IsNullOrWhiteSpace(topic))
+                throw new ArgumentException("Topic is required.", nameof(topic));
+
+            reason = NormalizeDisconnectReason(reason);
+
+            return _subsByTopic.TryGetValue(topic, out var bucket) && !bucket.IsEmpty
+                ? bucket.Disconnect(reason)
+                : 0;
         }
 
         /// <summary>
@@ -142,7 +186,27 @@ namespace Heimdall.Server
             if (eventName.Contains('\r') || eventName.Contains('\n'))
                 throw new ArgumentException("SSE event names cannot contain newline characters.", nameof(eventName));
 
+            if (string.Equals(eventName, DisconnectEventName, StringComparison.Ordinal))
+                throw new ArgumentException(
+                    $"The SSE event name '{DisconnectEventName}' is reserved for subscriber disconnects.",
+                    nameof(eventName));
+
             return eventName;
+        }
+
+        private static string NormalizeDisconnectReason(string? reason)
+        {
+            if (string.IsNullOrWhiteSpace(reason))
+                return "server-disconnected";
+
+            reason = reason.Trim();
+
+            if (reason.Contains('\r') || reason.Contains('\n'))
+                throw new ArgumentException(
+                    "Subscriber disconnect reasons cannot contain newline characters.",
+                    nameof(reason));
+
+            return reason;
         }
     }
 }

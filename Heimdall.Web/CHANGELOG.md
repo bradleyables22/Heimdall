@@ -13,6 +13,7 @@
 - Added opt-in browser capability snapshots through `Heimdall.config.clientInfo` and the mutable/cancellable `heimdall:client-info-before` event.
 - Added synchronous or asynchronous `Heimdall.config.requestHeaders` resolution for content, CSRF, and Bifrost token requests, including cancellation and fail-closed behavior.
 - Added the cancellable `heimdall:unauthorized` event for raw `401` responses.
+- Added terminal Bifrost disconnect handling so intentional server disconnects do not trigger automatic SSE reconnects.
 
 ### Fixed
 

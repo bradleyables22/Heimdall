@@ -25,6 +25,44 @@ Continue with the current guide and examples at [heimdall-framework.org](https:/
 
 Background services can call `Bifrost.HasSubscribers(topic)` before performing expensive work for a live update. The result is an instantaneous view of subscribers connected to the current application instance, so it is an optimization hint rather than a delivery guarantee.
 
+`Bifrost.SubscribedTopics` returns a read-only snapshot of all topics with active local subscribers at the time it is read. The snapshot does not update as connections change, and it only reflects the current application instance.
+
+`Bifrost.DisconnectSubscribers(topic, reason)` requests a terminal disconnect for every active local subscriber on a topic. The browser closes the SSE connection without automatically reconnecting; a later DOM or programmatic subscription can connect again.
+
+## Bifrost topic authorization handlers
+
+Applications with several topic families can register focused authorization handlers instead of putting every rule in one callback. Handlers are resolved as scoped services, so they can inject application services, database contexts, and other request-scoped dependencies:
+
+```csharp
+builder.Services.AddBifrostTopicAuthHandler<UserNotificationsTopicAuthHandler>();
+builder.Services.AddBifrostTopicAuthHandler<TenantOrdersTopicAuthHandler>();
+
+public sealed class TenantOrdersTopicAuthHandler(
+    ITenantAccessService tenantAccess)
+    : IBifrostTopicAuthHandler
+{
+    public bool CanHandle(string topic)
+    {
+        var parts = topic.Split(':');
+        return parts.Length == 3 &&
+            parts[0] == "tenant" &&
+            parts[2] == "orders";
+    }
+
+    public async ValueTask<bool> AuthorizeAsync(
+        BifrostTopicAuthorizationContext context)
+    {
+        var tenantId = context.Topic.Split(':')[1];
+        return await tenantAccess.CanReadOrdersAsync(
+            context.User,
+            tenantId,
+            context.RequestAborted);
+    }
+}
+```
+
+When one or more handlers are registered, a topic must match exactly one handler. Unknown and ambiguously matched topics are denied. The existing `BifrostTopicPolicy` is evaluated first, and the existing `AuthorizeBifrostTopic` callback remains an additional authorization gate.
+
 ## Diagnostics
 
 The server runtime emits dependency-free `ActivitySource` traces and `System.Diagnostics.Metrics` instruments for content actions and Bifrost. Register `HeimdallDiagnostics.ActivitySourceName` and `HeimdallDiagnostics.MeterName` with your OpenTelemetry providers. Public activity, metric, and tag names are available as constants on `HeimdallDiagnostics`.

@@ -111,4 +111,74 @@ public sealed partial class ServerIntegrationTests
             return Task.CompletedTask;
         }
     }
+
+    private sealed class TestBifrostTopicAccessStore
+    {
+        public HashSet<string> AllowedTopics { get; } = new(StringComparer.Ordinal);
+
+        public List<string> AuthorizationCalls { get; } = new();
+
+        public bool CanRead(ClaimsPrincipal user, string topic)
+        {
+            AuthorizationCalls.Add(topic);
+
+            return user.Identity?.IsAuthenticated == true &&
+                AllowedTopics.Contains(topic);
+        }
+    }
+
+    private sealed class UserNotificationsTopicAuthHandler(
+        TestBifrostTopicAccessStore access)
+        : IBifrostTopicAuthHandler
+    {
+        public bool CanHandle(string topic)
+        {
+            var parts = topic.Split(':');
+            return parts.Length == 3 &&
+                parts[0] == "user" &&
+                parts[2] == "notifications";
+        }
+
+        public ValueTask<bool> AuthorizeAsync(BifrostTopicAuthorizationContext context)
+        {
+            var parts = context.Topic.Split(':');
+            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+            return ValueTask.FromResult(
+                string.Equals(userId, parts[1], StringComparison.Ordinal) &&
+                access.CanRead(context.User, context.Topic));
+        }
+    }
+
+    private sealed class TenantOrdersTopicAuthHandler(
+        TestBifrostTopicAccessStore access)
+        : IBifrostTopicAuthHandler
+    {
+        public bool CanHandle(string topic)
+        {
+            var parts = topic.Split(':');
+            return parts.Length == 3 &&
+                parts[0] == "tenant" &&
+                parts[2] == "orders";
+        }
+
+        public ValueTask<bool> AuthorizeAsync(BifrostTopicAuthorizationContext context)
+            => ValueTask.FromResult(access.CanRead(context.User, context.Topic));
+    }
+
+    private sealed class FirstAmbiguousTopicAuthHandler : IBifrostTopicAuthHandler
+    {
+        public bool CanHandle(string topic) => topic == "ambiguous";
+
+        public ValueTask<bool> AuthorizeAsync(BifrostTopicAuthorizationContext context)
+            => ValueTask.FromResult(true);
+    }
+
+    private sealed class SecondAmbiguousTopicAuthHandler : IBifrostTopicAuthHandler
+    {
+        public bool CanHandle(string topic) => topic == "ambiguous";
+
+        public ValueTask<bool> AuthorizeAsync(BifrostTopicAuthorizationContext context)
+            => ValueTask.FromResult(true);
+    }
 }
