@@ -39,7 +39,8 @@ namespace Heimdall.Server
                 id,
                 channel.Reader,
                 Unsubscribe,
-                subscriber.DisconnectRequested);
+                subscriber.DisconnectRequested,
+                subscriber.RequestDisconnect);
         }
 
         public void Publish(BifrostMessage message)

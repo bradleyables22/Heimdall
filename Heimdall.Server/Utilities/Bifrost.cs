@@ -22,6 +22,25 @@ namespace Heimdall.Server
 
         private readonly ConcurrentDictionary<string, TopicSubscriptions> _subsByTopic
             = new(StringComparer.OrdinalIgnoreCase);
+        private readonly BifrostConnectionStore _connectionStore;
+
+        /// <summary>
+        /// Creates a Bifrost instance with a private in-memory connection store.
+        /// </summary>
+        public Bifrost()
+            : this(new BifrostConnectionStore())
+        {
+        }
+
+        internal Bifrost(BifrostConnectionStore connectionStore)
+        {
+            _connectionStore = connectionStore;
+        }
+
+        /// <summary>
+        /// Gets the thread-safe store for active connections on this application instance.
+        /// </summary>
+        public IBifrostConnectionStore Connections => _connectionStore;
 
 
         // Subscribe returns (subscriptionId, reader, unsubscribe)
@@ -102,6 +121,17 @@ namespace Heimdall.Server
                 ? bucket.Disconnect(reason)
                 : 0;
         }
+
+        /// <summary>
+        /// Requests a terminal disconnect for active connections matching a selector.
+        /// </summary>
+        /// <param name="selector">The connection fields or application metadata to match.</param>
+        /// <param name="reason">An optional reason sent to the browser and lifecycle handlers.</param>
+        /// <returns>The number of matching connections that accepted the disconnect request.</returns>
+        public int DisconnectSubscribers(
+            BifrostConnectionSelector selector,
+            string? reason = null)
+            => _connectionStore.Disconnect(selector, reason);
 
         /// <summary>
         /// Publishes an HTML message to the specified topic with a given time-to-live (TTL) duration.
@@ -208,5 +238,13 @@ namespace Heimdall.Server
 
             return reason;
         }
+
+        internal void RegisterConnection(
+            BifrostConnectionInfo connection,
+            Func<string, bool> requestDisconnect)
+            => _connectionStore.Register(connection, requestDisconnect);
+
+        internal BifrostConnectionInfo? RemoveConnection(Guid connectionId)
+            => _connectionStore.Remove(connectionId);
     }
 }

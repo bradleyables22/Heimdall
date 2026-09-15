@@ -72,7 +72,7 @@ namespace Heimdall.Server
 
 
 
-            app.MapGet("__heimdall/v1/bifrost", async (
+			app.MapGet("__heimdall/v1/bifrost", async (
 				HttpContext ctx,
 				[FromServices] Bifrost bifrost,
 				[FromServices] BifrostSubscribeToken tokenSvc,
@@ -96,9 +96,12 @@ namespace Heimdall.Server
 
 				// Subscribe to topic
 				var subscription = bifrost.Subscribe(topic);
+				var connection = BifrostConnectionInfo.Create(subscription.Id, topic, ctx.User);
+				bifrost.RegisterConnection(connection, subscription.RequestDisconnect);
 				var reader = subscription.Reader;
 				using var abortRegistration = abort.Register(subscription.Unsubscribe);
 				using var connectionTelemetry = HeimdallTelemetry.OpenBifrostConnection();
+				var disconnectReason = "client-disconnected";
 
 				var heartbeatInterval = options.Value.BifrostHeartbeatInterval;
 				if (heartbeatInterval <= TimeSpan.Zero)
@@ -110,12 +113,22 @@ namespace Heimdall.Server
 						return false;
 
 					var reason = await subscription.DisconnectRequested;
+					disconnectReason = reason;
 					await WriteEventAsync(ctx, Bifrost.DisconnectEventName, reason, null, abort);
 					return true;
 				}
 
 				try
 				{
+					await InvokeBifrostAuthenticatedHandlersAsync(
+						ctx,
+						connection,
+						bifrost.Connections,
+						options.Value);
+
+					if (await WriteDisconnectIfRequestedAsync())
+						return Results.Empty;
+
 					// Optional initial event (helps with debugging / client readiness)
 					await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
 
@@ -188,12 +201,20 @@ namespace Heimdall.Server
 				}
 				catch (Exception ex)
 				{
+					disconnectReason = "server-error";
 					connectionTelemetry.RecordException(ex);
 					throw;
 				}
 				finally
 				{
+					var disconnectedConnection = bifrost.RemoveConnection(connection.ConnectionId) ?? connection;
 					subscription.Unsubscribe();
+					await InvokeBifrostDisconnectedHandlersAsync(
+						ctx,
+						disconnectedConnection,
+						disconnectReason,
+						options.Value,
+						logger);
 				}
 
 				return Results.Empty;
@@ -201,6 +222,82 @@ namespace Heimdall.Server
 			.ExcludeFromDescription();
 
 			return app;
+		}
+
+		private static async Task InvokeBifrostAuthenticatedHandlersAsync(
+			HttpContext ctx,
+			BifrostConnectionInfo connection,
+			IBifrostConnectionStore connections,
+			HeimdallServiceSettings settings)
+		{
+			await using var scope = ctx.RequestServices.CreateAsyncScope();
+			var context = new BifrostAuthenticatedContext(
+				ctx,
+				connection,
+				connections,
+				scope.ServiceProvider);
+
+			foreach (var handler in scope.ServiceProvider.GetServices<IBifrostConnectionHandler>())
+				await handler.OnBifrostAuthenticatedAsync(context);
+
+			if (settings.OnBifrostAuthenticated is not null)
+				await settings.OnBifrostAuthenticated(context);
+		}
+
+		private static async Task InvokeBifrostDisconnectedHandlersAsync(
+			HttpContext ctx,
+			BifrostConnectionInfo connection,
+			string reason,
+			HeimdallServiceSettings settings,
+			ILogger? logger)
+		{
+			try
+			{
+				await using var scope = ctx.RequestServices.CreateAsyncScope();
+				var context = new BifrostDisconnectedContext(
+					ctx,
+					connection,
+					reason,
+					scope.ServiceProvider);
+
+				foreach (var handler in scope.ServiceProvider.GetServices<IBifrostConnectionHandler>())
+				{
+					try
+					{
+						await handler.OnBifrostDisconnectedAsync(context);
+					}
+					catch (Exception ex)
+					{
+						logger?.LogError(
+							ex,
+							"Bifrost connection handler {HandlerType} failed during disconnect cleanup for connection {ConnectionId}.",
+							handler.GetType().FullName,
+							connection.ConnectionId);
+					}
+				}
+
+				if (settings.OnBifrostDisconnected is not null)
+				{
+					try
+					{
+						await settings.OnBifrostDisconnected(context);
+					}
+					catch (Exception ex)
+					{
+						logger?.LogError(
+							ex,
+							"Inline Bifrost disconnect handler failed during cleanup for connection {ConnectionId}.",
+							connection.ConnectionId);
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				logger?.LogError(
+					ex,
+					"Bifrost disconnect cleanup scope failed for connection {ConnectionId}.",
+					connection.ConnectionId);
+			}
 		}
 
 		private static async Task<IResult?> AuthorizeBifrostTopicAsync(

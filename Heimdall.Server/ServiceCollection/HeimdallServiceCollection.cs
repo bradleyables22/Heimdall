@@ -70,6 +70,27 @@ namespace Heimdall.Server
         }
 
         /// <summary>
+        /// Registers a scoped handler for authenticated and disconnected Bifrost SSE connection lifecycle events.
+        /// </summary>
+        /// <typeparam name="THandler">The connection handler type.</typeparam>
+        /// <param name="services">The application's service collection.</param>
+        /// <returns>The same service collection.</returns>
+        /// <remarks>
+        /// Handlers run in a short-lived callback scope after a connection is registered and when it is removed, so
+        /// they can inject scoped services such as a database context. Use the handler to enrich the connection store
+        /// or synchronize application presence state; use <see cref="IBifrostTopicAuthHandler"/> for authorization.
+        /// </remarks>
+        public static IServiceCollection AddBifrostConnectionHandler<THandler>(
+            this IServiceCollection services)
+            where THandler : class, IBifrostConnectionHandler
+        {
+            services.TryAddEnumerable(
+                ServiceDescriptor.Scoped<IBifrostConnectionHandler, THandler>());
+
+            return services;
+        }
+
+        /// <summary>
         /// Registers MVC view rendering support for Heimdall content actions.
         /// </summary>
         /// <remarks>
@@ -188,7 +209,11 @@ namespace Heimdall.Server
             });
 
             services.AddSingleton<BifrostSubscribeToken>();
-            services.AddSingleton<Bifrost>();
+            services.AddSingleton<BifrostConnectionStore>();
+            services.AddSingleton<IBifrostConnectionStore>(sp =>
+                sp.GetRequiredService<BifrostConnectionStore>());
+            services.AddSingleton<Bifrost>(sp =>
+                new Bifrost(sp.GetRequiredService<BifrostConnectionStore>()));
 
             return services;
         }

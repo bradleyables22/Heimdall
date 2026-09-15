@@ -6,5 +6,6 @@ namespace Heimdall.Server.Utilities
         Guid Id,
         ChannelReader<BifrostMessage> Reader,
         Action Unsubscribe,
-        Task<string> DisconnectRequested);
+        Task<string> DisconnectRequested,
+        Func<string, bool> RequestDisconnect);
 }

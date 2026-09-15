@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -44,6 +45,69 @@ public sealed partial class ServerIntegrationTests
     {
         public string? Token { get; set; }
     }
+
+    private sealed class TestBifrostConnectionProbe
+    {
+        public ConcurrentQueue<BifrostConnectionSnapshot> Authenticated { get; } = new();
+
+        public ConcurrentQueue<BifrostConnectionSnapshot> Disconnected { get; } = new();
+
+        public ConcurrentQueue<string> InlineAuthenticatedServices { get; } = new();
+
+        public ConcurrentQueue<string> InlineDisconnectedServices { get; } = new();
+    }
+
+    private sealed class TestBifrostScopedMarker
+    {
+        public string Value => "scope";
+    }
+
+    private sealed record BifrostConnectionSnapshot(
+        Guid ConnectionId,
+        string Topic,
+        string? Subject,
+        string Reason,
+        IReadOnlyDictionary<string, string> Metadata);
+
+    private sealed class TestBifrostConnectionHandler(
+        TestBifrostConnectionProbe probe)
+        : IBifrostConnectionHandler
+    {
+        public ValueTask OnBifrostAuthenticatedAsync(BifrostAuthenticatedContext context)
+        {
+            Assert.True(context.TrySetMetadata("tenant", "acme"));
+            Assert.True(context.Connections.TryGet(context.Connection.ConnectionId, out var connection));
+
+            probe.Authenticated.Enqueue(CreateSnapshot(
+                connection ?? context.Connection,
+                reason: "authenticated"));
+
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask OnBifrostDisconnectedAsync(BifrostDisconnectedContext context)
+        {
+            probe.Disconnected.Enqueue(CreateSnapshot(context.Connection, context.Reason));
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class ThrowingBifrostDisconnectHandler : IBifrostConnectionHandler
+    {
+        public ValueTask OnBifrostDisconnectedAsync(BifrostDisconnectedContext context)
+            => ValueTask.FromException(
+                new InvalidOperationException("Test disconnect cleanup failure."));
+    }
+
+    private static BifrostConnectionSnapshot CreateSnapshot(
+        BifrostConnectionInfo connection,
+        string reason)
+        => new(
+            connection.ConnectionId,
+            connection.Topic,
+            connection.Subject,
+            reason,
+            new Dictionary<string, string>(connection.Metadata, StringComparer.Ordinal));
 
     private sealed class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {

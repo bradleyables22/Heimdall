@@ -19,6 +19,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added the read-only `Bifrost.SubscribedTopics` snapshot for active local subscriber topics.
 - Added terminal Bifrost subscriber disconnects that close local SSE connections without browser reconnects.
 - Added DI-backed `AddBifrostTopicAuthHandler<THandler>()` registration for fail-closed, per-topic-family Bifrost authorization.
+- Added the local Bifrost connection registry with selectable connection snapshots, mutable application metadata, and targeted disconnects.
+- Added fluent DI and inline lifecycle handlers for authenticated and disconnected Bifrost connections with short-lived scoped callback services.
 - Added the native `Lang` fluent helper and transitions between normal FluentHtml and Heimdall-specific builders.
 
 ### Fixed
