@@ -57,6 +57,8 @@ document.addEventListener("heimdall:unauthorized", event => {
 
 Preventing the event's default does not turn the failed request into a success or suppress normal error reporting. It only prevents Heimdall's automatic redirect for a `Location` challenge. The event is intentionally limited to `401`; a `403 Forbidden` response represents an authenticated caller without permission. Fetch-followed cookie login redirects continue through the existing `heimdall:redirect` or `heimdall:sse-redirect` behavior.
 
+For Bifrost token requests, a bare `401 Unauthorized` closes the affected SSE subscription with reason `auth-required` and does not automatically retry. Reconnect after authentication is restored by reattaching or resuming the subscription.
+
 Content actions can optionally include a compact browser-capability snapshot for binding to the Server package's `HeimdallClientInfo` parameter:
 
 ```js

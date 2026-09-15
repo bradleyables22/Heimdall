@@ -16,6 +16,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Added global, declaring-type, and per-action antiforgery policy controls, including a complete client opt-out for non-cookie security models.
 - Added bounded `HeimdallClientInfo` action binding, asynchronous request-header providers, and cancellable unauthorized-response handling.
 - Added content-action and Bifrost diagnostics through `ActivitySource` and `System.Diagnostics.Metrics`, plus the local advisory `Bifrost.HasSubscribers` check.
+- Added the read-only `Bifrost.SubscribedTopics` snapshot for active local subscriber topics.
+- Added terminal Bifrost subscriber disconnects that close local SSE connections without browser reconnects.
+- Added DI-backed `AddBifrostTopicAuthHandler<THandler>()` registration for fail-closed, per-topic-family Bifrost authorization.
+- Added the local Bifrost connection registry with selectable connection snapshots, mutable application metadata, and targeted disconnects.
+- Added fluent DI and inline lifecycle handlers for authenticated and disconnected Bifrost connections with short-lived scoped callback services.
 - Added the native `Lang` fluent helper and transitions between normal FluentHtml and Heimdall-specific builders.
 
 ### Fixed
@@ -24,6 +29,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Corrected queue-latest payload behavior so form fields and files keep their submission snapshot while closest-state bindings refresh safely when execution begins and remain stable across antiforgery retries.
 - Re-resolved selector targets after queued or OOB DOM replacement, cancelled requests whose direct target or state source disappeared, and preserved lifecycle target overrides.
 - Kept disabled/busy UI state active until the current replacement request actually finishes.
+- Stopped Bifrost token `401` responses from automatically retrying SSE authentication requests; the affected subscription now closes with reason `auth-required`.
 
 ## Published package baseline
 

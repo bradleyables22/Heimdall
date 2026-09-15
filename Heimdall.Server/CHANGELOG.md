@@ -14,6 +14,11 @@
 - Added the bounded `HeimdallClientInfo` framework parameter alongside normal payload and `HttpContext` binding.
 - Added public OpenTelemetry-compatible activity and metric names for content actions and Bifrost.
 - Added `Bifrost.HasSubscribers(topic)` as an instantaneous local-instance optimization hint.
+- Added `Bifrost.SubscribedTopics` as a read-only snapshot of topics with active local subscribers.
+- Added `Bifrost.DisconnectSubscribers(topic, reason)` for terminal local subscriber disconnects without browser reconnect.
+- Added `AddBifrostTopicAuthHandler<THandler>()` and `IBifrostTopicAuthHandler` for DI-backed, async authorization across multiple topic families.
+- Added the local `IBifrostConnectionStore`, `BifrostConnectionSelector`, and `BifrostConnectionInfo` APIs for inspecting, enriching, and selectively disconnecting active Bifrost connections.
+- Added `AddBifrostConnectionHandler<THandler>()` plus inline authenticated/disconnected callbacks for scoped Bifrost connection lifecycle integration.
 
 ### Fixed
 

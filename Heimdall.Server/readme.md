@@ -25,6 +25,122 @@ Continue with the current guide and examples at [heimdall-framework.org](https:/
 
 Background services can call `Bifrost.HasSubscribers(topic)` before performing expensive work for a live update. The result is an instantaneous view of subscribers connected to the current application instance, so it is an optimization hint rather than a delivery guarantee.
 
+`Bifrost.SubscribedTopics` returns a read-only snapshot of all topics with active local subscribers at the time it is read. The snapshot does not update as connections change, and it only reflects the current application instance.
+
+`Bifrost.DisconnectSubscribers(topic, reason)` requests a terminal disconnect for every active local subscriber on a topic. The browser closes the SSE connection without automatically reconnecting; a later DOM or programmatic subscription can connect again.
+
+## Bifrost topic authorization handlers
+
+Applications with several topic families can register focused authorization handlers instead of putting every rule in one callback. Handlers are resolved as scoped services, so they can inject application services, database contexts, and other request-scoped dependencies:
+
+```csharp
+builder.Services.AddBifrostTopicAuthHandler<UserNotificationsTopicAuthHandler>();
+builder.Services.AddBifrostTopicAuthHandler<TenantOrdersTopicAuthHandler>();
+
+public sealed class TenantOrdersTopicAuthHandler(
+    ITenantAccessService tenantAccess)
+    : IBifrostTopicAuthHandler
+{
+    public bool CanHandle(string topic)
+    {
+        var parts = topic.Split(':');
+        return parts.Length == 3 &&
+            parts[0] == "tenant" &&
+            parts[2] == "orders";
+    }
+
+    public async ValueTask<bool> AuthorizeAsync(
+        BifrostTopicAuthorizationContext context)
+    {
+        var tenantId = context.Topic.Split(':')[1];
+        return await tenantAccess.CanReadOrdersAsync(
+            context.User,
+            tenantId,
+            context.RequestAborted);
+    }
+}
+```
+
+When one or more handlers are registered, a topic must match exactly one handler. Unknown and ambiguously matched topics are denied. The existing `BifrostTopicPolicy` is evaluated first, and the existing `AuthorizeBifrostTopic` callback remains an additional authorization gate.
+
+## Bifrost connection registry and lifecycle handlers
+
+Heimdall keeps a read-only snapshot of every active local Bifrost SSE connection in the singleton `IBifrostConnectionStore`. Each record has the server-generated `ConnectionId`, topic, authenticated subject, connection time, and application-owned metadata. The subject comes from the `NameIdentifier` or `sub` claim when present. The registry is local to one application process and is intended for presence, diagnostics, and operational control—not as an authorization source or a distributed connection directory.
+
+Register one or more scoped lifecycle handlers after `AddHeimdall` when the behavior is reusable and needs dependency injection:
+
+```csharp
+builder.Services
+    .AddHeimdall()
+    .AddBifrostConnectionHandler<BifrostPresenceHandler>();
+
+public sealed class BifrostPresenceHandler(
+    ITenantResolver tenantResolver,
+    IConnectionPresenceStore presence)
+    : IBifrostConnectionHandler
+{
+    public async ValueTask OnBifrostAuthenticatedAsync(
+        BifrostAuthenticatedContext context)
+    {
+        var tenantId = await tenantResolver.ResolveAsync(context.User);
+        context.TrySetMetadata("tenant", tenantId);
+        await presence.ConnectedAsync(
+            context.Connection.ConnectionId,
+            tenantId,
+            context.Connection.Topic);
+    }
+
+    public ValueTask OnBifrostDisconnectedAsync(
+        BifrostDisconnectedContext context)
+    {
+        presence.Disconnected(
+            context.Connection.ConnectionId,
+            context.Reason);
+        return ValueTask.CompletedTask;
+    }
+}
+```
+
+Handlers are created in a short-lived callback scope, so a handler can use a scoped `DbContext` or other request-scoped service without keeping it alive for the duration of the SSE stream. The authenticated callback runs after the subscribe token is validated and the connection is registered, but before the initial `heimdall:connected` event. The disconnect callback runs after the connection is removed and receives its final metadata snapshot. Disconnect-handler exceptions are logged and do not block cleanup.
+
+For a one-off integration, use the inline escape hatch on `HeimdallServiceSettings`. Its `context.Services` property is the same short-lived callback scope used for resolving handlers:
+
+```csharp
+builder.Services.AddHeimdall(options =>
+{
+    options.OnBifrostAuthenticated = context =>
+    {
+        var audit = context.Services.GetRequiredService<IAuditWriter>();
+        context.TrySetMetadata("source", "dashboard");
+        return audit.ConnectionOpenedAsync(context.Connection);
+    };
+
+    options.OnBifrostDisconnected = context =>
+        context.Services
+            .GetRequiredService<IAuditWriter>()
+            .ConnectionClosedAsync(context.Connection, context.Reason);
+});
+```
+
+The store can be injected anywhere, or accessed through `Bifrost.Connections`:
+
+```csharp
+var active = connections.GetConnections(
+    new BifrostConnectionSelector
+    {
+        Topic = "orders",
+        Subject = userId,
+        Metadata = new Dictionary<string, string> { ["tenant"] = tenantId }
+    });
+
+connections.TrySetMetadata(connectionId, "region", "east");
+connections.Disconnect(
+    BifrostConnectionSelector.ForSubject(userId),
+    "authorization-revoked");
+```
+
+Disconnecting through the store or `Bifrost.DisconnectSubscribers(selector, reason)` sends the terminal `heimdall:disconnect` event and closes the browser connection without automatic reconnect. Selectors are conjunctive: every populated field, including every metadata entry, must match. An empty selector is allowed for inspection but rejected for disconnect operations.
+
 ## Diagnostics
 
 The server runtime emits dependency-free `ActivitySource` traces and `System.Diagnostics.Metrics` instruments for content actions and Bifrost. Register `HeimdallDiagnostics.ActivitySourceName` and `HeimdallDiagnostics.MeterName` with your OpenTelemetry providers. Public activity, metric, and tag names are available as constants on `HeimdallDiagnostics`.

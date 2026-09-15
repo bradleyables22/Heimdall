@@ -34,6 +34,25 @@ namespace Heimdall.Server
 		public Func<HttpContext, string, ValueTask<bool>>? AuthorizeBifrostTopic { get; set; }
 
 		/// <summary>
+		/// Optional inline callback invoked after a Bifrost SSE connection is authenticated and registered.
+		/// </summary>
+		/// <remarks>
+		/// The callback can use <see cref="BifrostAuthenticatedContext.Connections"/> to attach application metadata.
+		/// Registered <see cref="IBifrostConnectionHandler"/> instances run before this callback. Exceptions abort the
+		/// connection setup and are not treated as authorization decisions.
+		/// </remarks>
+		public Func<BifrostAuthenticatedContext, ValueTask>? OnBifrostAuthenticated { get; set; }
+
+		/// <summary>
+		/// Optional inline callback invoked when a Bifrost SSE connection is removed from the connection store.
+		/// </summary>
+		/// <remarks>
+		/// Registered <see cref="IBifrostConnectionHandler"/> instances run before this callback. Exceptions from this
+		/// cleanup callback are logged and do not prevent the connection from being removed.
+		/// </remarks>
+		public Func<BifrostDisconnectedContext, ValueTask>? OnBifrostDisconnected { get; set; }
+
+		/// <summary>
 		/// Interval used to send idle SSE heartbeat comments for Bifrost streams. Defaults to 15 seconds.
 		/// </summary>
 		public TimeSpan BifrostHeartbeatInterval { get; set; } = TimeSpan.FromSeconds(15);
