@@ -6,12 +6,12 @@ import {
   installFakeServer
 } from "../helpers/runtime-page.mjs";
 
-async function testSseTokenFailureRetry(page) {
+async function testSseTokenUnauthorizedStopsWithoutRetry(page) {
   await installFakeServer(page, {
-    csrfTokens: ["csrf-sse-retry"],
+    csrfTokens: ["csrf-sse-auth-required"],
     bifrostTokenResponses: [
-      { status: 401, body: "try again" },
-      { token: "st-retry" }
+      { status: 401, body: "authentication required" },
+      { token: "st-should-not-be-used" }
     ]
   });
 
@@ -37,6 +37,8 @@ async function testSseTokenFailureRetry(page) {
     };
 
     const scheduled = [];
+    const closed = [];
+    const unauthorized = [];
     document.addEventListener("heimdall:sse-reconnect-scheduled", ev => {
       scheduled.push({
         topic: ev.detail.topic,
@@ -46,7 +48,21 @@ async function testSseTokenFailureRetry(page) {
       });
     });
 
-    window.Heimdall.sse.connect("topic:retry", {
+    document.addEventListener("heimdall:sse-close", ev => {
+      closed.push({
+        topic: ev.detail.topic,
+        reason: ev.detail.reason
+      });
+    });
+    document.addEventListener("heimdall:unauthorized", ev => {
+      unauthorized.push({
+        kind: ev.detail.kind,
+        topic: ev.detail.topic,
+        status: ev.detail.status
+      });
+    });
+
+    window.Heimdall.sse.connect("topic:auth-required", {
       element: document.querySelector("#sse-host"),
       event: "message"
     });
@@ -54,7 +70,7 @@ async function testSseTokenFailureRetry(page) {
     await new Promise((resolve, reject) => {
       const started = Date.now();
       const timer = setInterval(() => {
-        if (window.__eventSources.length > 0) {
+        if (closed.length > 0) {
           clearInterval(timer);
           resolve();
           return;
@@ -62,31 +78,36 @@ async function testSseTokenFailureRetry(page) {
 
         if (Date.now() - started > 3000) {
           clearInterval(timer);
-          reject(new Error("Timed out waiting for retry EventSource"));
+          reject(new Error("Timed out waiting for terminal SSE close"));
         }
       }, 10);
     });
 
+    await new Promise(resolve => setTimeout(resolve, 50));
+
     return {
-      eventSourceUrl: window.__eventSources[0].url,
-      scheduled
+      eventSourceCount: window.__eventSources.length,
+      scheduled,
+      closed,
+      unauthorized
     };
   });
 
-  const eventSourceUrl = new URL(state.eventSourceUrl);
-  assert.equal(eventSourceUrl.searchParams.get("topic"), "topic:retry");
-  assert.equal(eventSourceUrl.searchParams.get("st"), "st-retry");
-  assert.equal(state.scheduled.length, 1);
-  assert.deepEqual(state.scheduled[0], {
-    topic: "topic:retry",
-    reason: "token-failed",
-    status: 401,
-    delayMs: 10
-  });
+  assert.equal(state.eventSourceCount, 0);
+  assert.deepEqual(state.scheduled, []);
+  assert.deepEqual(state.closed, [{
+    topic: "topic:auth-required",
+    reason: "auth-required"
+  }]);
+  assert.deepEqual(state.unauthorized, [{
+    kind: "bifrost-token",
+    topic: "topic:auth-required",
+    status: 401
+  }]);
 
   const fetches = await getFetches(page);
   const tokenFetches = fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/bifrost/token"));
-  assert.equal(tokenFetches.length, 2);
+  assert.equal(tokenFetches.length, 1);
 }
 
 async function testSseErrorReconnectFreshToken(page) {
@@ -439,7 +460,7 @@ async function testSseOfflinePauseResume(page) {
 }
 
 export const tests = [
-  ["retries SSE token failures with backoff", testSseTokenFailureRetry],
+  ["stops SSE after an unauthorized token response", testSseTokenUnauthorizedStopsWithoutRetry],
   ["reconnects SSE errors with a fresh token", testSseErrorReconnectFreshToken],
   ["does not reconnect after a server disconnect", testSseServerDisconnectDoesNotReconnect],
   ["pauses SSE reconnects while offline", testSseOfflinePauseResume]

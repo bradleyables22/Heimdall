@@ -23,6 +23,7 @@
 - Preserved the refreshed payload across antiforgery retries instead of silently reading newer DOM state.
 - Re-resolved selector targets after queued or OOB replacement, cancelled disconnected direct targets or removed state sources, and retained request-before target overrides.
 - Kept disabled/busy state active across replacement handoff until the current request completes.
+- Stopped Bifrost token `401` responses from automatically retrying SSE authentication requests; the affected subscription now closes with reason `auth-required`.
 
 ## [3.0.8] - 2026-08-01
 

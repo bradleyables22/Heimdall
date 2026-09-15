@@ -27,6 +27,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Corrected queue-latest payload behavior so form fields and files keep their submission snapshot while closest-state bindings refresh safely when execution begins and remain stable across antiforgery retries.
 - Re-resolved selector targets after queued or OOB DOM replacement, cancelled requests whose direct target or state source disappeared, and preserved lifecycle target overrides.
 - Kept disabled/busy UI state active until the current replacement request actually finishes.
+- Stopped Bifrost token `401` responses from automatically retrying SSE authentication requests; the affected subscription now closes with reason `auth-required`.
 
 ## Published package baseline
 
