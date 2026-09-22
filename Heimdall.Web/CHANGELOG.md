@@ -1,5 +1,15 @@
 # HeimdallFramework.Web changelog
 
+## [3.1.0] - Unreleased
+
+### Added
+
+- Added terminal Bifrost disconnect handling so intentional server disconnects do not trigger automatic SSE reconnects.
+
+### Fixed
+
+- Stopped Bifrost token `401` responses from automatically retrying SSE authentication requests; the affected subscription now closes with reason `auth-required`.
+
 ## [3.0.9] - 2026-08-30
 
 ### Added
@@ -13,7 +23,6 @@
 - Added opt-in browser capability snapshots through `Heimdall.config.clientInfo` and the mutable/cancellable `heimdall:client-info-before` event.
 - Added synchronous or asynchronous `Heimdall.config.requestHeaders` resolution for content, CSRF, and Bifrost token requests, including cancellation and fail-closed behavior.
 - Added the cancellable `heimdall:unauthorized` event for raw `401` responses.
-- Added terminal Bifrost disconnect handling so intentional server disconnects do not trigger automatic SSE reconnects.
 
 ### Fixed
 
@@ -23,7 +32,6 @@
 - Preserved the refreshed payload across antiforgery retries instead of silently reading newer DOM state.
 - Re-resolved selector targets after queued or OOB replacement, cancelled disconnected direct targets or removed state sources, and retained request-before target overrides.
 - Kept disabled/busy state active across replacement handoff until the current request completes.
-- Stopped Bifrost token `401` responses from automatically retrying SSE authentication requests; the affected subscription now closes with reason `auth-required`.
 
 ## [3.0.8] - 2026-08-01
 
