@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -16,6 +16,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Rendering\Heimdall.Rendering.csproj"
+                      SkipGetTargetFrameworkProperties="true" />
     <ProjectReference Include="..\Heimdall.Server\Heimdall.Server.csproj" />
   </ItemGroup>
 

@@ -7,6 +7,12 @@ namespace Heimdall.Server.Helpers
     {
 		internal static string RenderHtml(this IHtmlContent content, HtmlEncoder? encoder = null)
 			=> Rendering.HtmlContentExtensions.ToHtmlString(content, encoder);
+
+		internal static ValueTask<string> RenderHtmlAsync(
+			this IHtmlContent content,
+			CancellationToken cancellationToken = default)
+			=> Rendering.HtmlContentExtensions.ToHtmlStringAsync(content, cancellationToken);
+
 		internal static string NormalizeWebRootPath(string path)
         {
             var p = path.Replace('\\', '/').TrimStart('/');

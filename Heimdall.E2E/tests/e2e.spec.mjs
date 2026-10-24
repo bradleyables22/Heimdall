@@ -15,6 +15,7 @@ import { tests as antiforgery } from "./specs/antiforgery.spec.mjs";
 import { tests as client_info } from "./specs/client-info.spec.mjs";
 import { tests as request_headers } from "./specs/request-headers.spec.mjs";
 import { tests as auth_and_errors } from "./specs/auth-and-errors.spec.mjs";
+import { tests as blazor_rendering } from "./specs/blazor-rendering.spec.mjs";
 
 const tests = [
   ...static_site,
@@ -31,7 +32,8 @@ const tests = [
   ...antiforgery,
   ...client_info,
   ...request_headers,
-  ...auth_and_errors
+  ...auth_and_errors,
+  ...blazor_rendering
 ];
 
 async function runTests() {

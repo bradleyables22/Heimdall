@@ -181,7 +181,7 @@ namespace Heimdall.Server
                         return Results.NoContent();
                     }
 
-                    var html = raw.RenderHtml();
+                    var html = await raw.RenderHtmlAsync(ctx.RequestAborted).ConfigureAwait(false);
                     long? responseBodySize = telemetry.ShouldMeasureResponseBodySize
                         ? Encoding.UTF8.GetByteCount(html)
                         : null;

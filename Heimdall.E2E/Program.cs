@@ -1,3 +1,4 @@
+using Heimdall.E2E.Rendering.Components;
 using Heimdall.E2E.Rendering.Layouts;
 using Heimdall.E2E.Rendering.Pages;
 using Heimdall.Server;
@@ -16,6 +17,7 @@ builder.Services
 		options.AccessDeniedPath = "/e2e-denied";
 	});
 builder.Services.AddAuthorization();
+builder.Services.AddHeimdallBlazor();
 builder.Services.AddHeimdall(options =>
 {
 	options.EnableDetailedErrors = true;
@@ -62,21 +64,29 @@ app.UseStaticFiles();
 
 app.UseHeimdall();
 
-app.MapHeimdallPage("/", (_, ctx) =>
+app.MapHeimdallPage("/", async (services, ctx) =>
 {
-	return MainLayout.Render(E2EHarnessPage.Render(), "E2E Harness");
+	var renderer = services.GetRequiredService<IHeimdallBlazorRenderer>();
+	var component = await renderer.RenderAsync<StaticBlazorComponent>(cancellationToken: ctx.RequestAborted);
+	return MainLayout.Render(E2EHarnessPage.Render(component), "E2E Harness");
 });
-app.MapHeimdallPage("/e2e", (_, ctx) =>
+app.MapHeimdallPage("/e2e", async (services, ctx) =>
 {
-	return MainLayout.Render(E2EHarnessPage.Render(), "E2E Harness");
+	var renderer = services.GetRequiredService<IHeimdallBlazorRenderer>();
+	var component = await renderer.RenderAsync<StaticBlazorComponent>(cancellationToken: ctx.RequestAborted);
+	return MainLayout.Render(E2EHarnessPage.Render(component), "E2E Harness");
 });
-app.MapHeimdallPage("/history/pushed", (_, ctx) =>
+app.MapHeimdallPage("/history/pushed", async (services, ctx) =>
 {
-	return MainLayout.Render(E2EHarnessPage.Render(), "History Push");
+	var renderer = services.GetRequiredService<IHeimdallBlazorRenderer>();
+	var component = await renderer.RenderAsync<StaticBlazorComponent>(cancellationToken: ctx.RequestAborted);
+	return MainLayout.Render(E2EHarnessPage.Render(component), "History Push");
 });
-app.MapHeimdallPage("/history/replaced", (_, ctx) =>
+app.MapHeimdallPage("/history/replaced", async (services, ctx) =>
 {
-	return MainLayout.Render(E2EHarnessPage.Render(), "History Replace");
+	var renderer = services.GetRequiredService<IHeimdallBlazorRenderer>();
+	var component = await renderer.RenderAsync<StaticBlazorComponent>(cancellationToken: ctx.RequestAborted);
+	return MainLayout.Render(E2EHarnessPage.Render(component), "History Replace");
 });
 
 app.MapGet("/e2e-signin", () =>

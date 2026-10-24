@@ -1,0 +1,27 @@
+@namespace Heimdall.E2E.Rendering.Components
+
+<div data-blazor-name="@Name">
+    <span data-blazor-message>@Name</span>
+    @if (_initialized)
+    {
+        <strong data-blazor-initialized>initialized</strong>
+    }
+    <button type="button" @onclick="NoOp">Static component button</button>
+</div>
+
+@code {
+    [Parameter]
+    public string? Name { get; set; }
+
+    private bool _initialized;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Yield();
+        _initialized = true;
+    }
+
+    private static void NoOp()
+    {
+    }
+}

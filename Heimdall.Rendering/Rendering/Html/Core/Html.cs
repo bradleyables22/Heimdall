@@ -475,6 +475,44 @@ namespace Heimdall.Server.Rendering
 			}
 		}
 
+		/// <summary>
+		/// Renders a part asynchronously, preserving async HTML content nested inside
+		/// elements, fragments, or enumerable part collections.
+		/// </summary>
+		private static async ValueTask RenderPartAsync(TextWriter writer, object? part)
+		{
+			if (part is null || part is HtmlAttr)
+				return;
+
+			if (part is IHtmlAsyncContent asyncHtml)
+			{
+				await asyncHtml.WriteToAsync(writer).ConfigureAwait(false);
+				return;
+			}
+
+			if (part is IHtmlContent html)
+			{
+				html.WriteTo(writer, HtmlEncoder.Default);
+				return;
+			}
+
+			if (part is string text)
+			{
+				HtmlEncoder.Default.Encode(writer, text);
+				return;
+			}
+
+			if (part is IEnumerable sequence)
+			{
+				foreach (var item in sequence)
+					await RenderPartAsync(writer, item).ConfigureAwait(false);
+
+				return;
+			}
+
+			HtmlEncoder.Default.Encode(writer, part.ToString() ?? string.Empty);
+		}
+
 	}
 }
 #pragma warning restore CS7022

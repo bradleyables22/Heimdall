@@ -281,17 +281,21 @@ public sealed partial class ServerIntegrationTests
             HttpCompletionOption.ResponseHeadersRead,
             streamCts.Token);
         var stream = await response.Content.ReadAsStreamAsync(streamCts.Token);
-        var readTask = ReadUntilAsync(stream, "data: <span>fresh</span>", streamCts.Token);
+        var readTask = ReadUntilAsync(stream, "data: <span>fresh-async</span>", streamCts.Token);
 
         await app.Services.GetRequiredService<Bifrost>()
-            .PublishAsync("news", Html.Span("fresh"), TimeSpan.FromSeconds(5), streamCts.Token);
+            .PublishAsync(
+                "news",
+                new AsyncTestHtmlContent("<span>fresh-sync</span>", "<span>fresh-async</span>"),
+                TimeSpan.FromSeconds(5),
+                streamCts.Token);
         var body = await readTask;
         await streamCts.CancelAsync();
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("text/event-stream", response.Content.Headers.ContentType?.MediaType);
         Assert.Contains("event: heimdall:connected", body);
-        Assert.Contains("data: <span>fresh</span>", body);
+        Assert.Contains("data: <span>fresh-async</span>", body);
     }
 
     [Fact]

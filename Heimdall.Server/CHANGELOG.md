@@ -1,9 +1,13 @@
 # HeimdallFramework.Server changelog
 
-## [3.1.0] - Unreleased
+## [4.0.0] - Unreleased
 
 ### Added
 
+- Moved the `Html` core and `FluentHtml` builder APIs to the transitive `HeimdallFramework.Rendering` package.
+- Added support for concrete `IHtmlContent` return types, `Task<THtml>` and `ValueTask<THtml>` content actions, `IHtmlAsyncContent` rendering, async HTML materialization, and async-aware Bifrost/static-page output.
+- Added async callback overloads across the FluentHtml element, fragment, and nested builder helpers, with recursive async rendering for nested HTML content.
+- Added opt-in static Razor component rendering through `AddHeimdallBlazor()` and `IHeimdallBlazorRenderer`, including component parameters, dependency injection, and asynchronous component initialization without creating a Blazor circuit.
 - Added `Bifrost.SubscribedTopics` as a read-only snapshot of topics with active local subscribers.
 - Added `Bifrost.DisconnectSubscribers(topic, reason)` for terminal local subscriber disconnects without browser reconnect.
 - Added `AddBifrostTopicAuthHandler<THandler>()` and `IBifrostTopicAuthHandler` for DI-backed, async authorization across multiple topic families.

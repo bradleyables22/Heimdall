@@ -16,7 +16,7 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Represents a rendered HTML element with attributes and child content.
 		/// </summary>
-		private sealed class ElementNode : IHtmlContent
+		private sealed class ElementNode : IHtmlAsyncContent
 		{
 			private readonly string _name;
 			private readonly bool _isVoid;
@@ -145,6 +145,33 @@ namespace Heimdall.Server.Rendering
 
 				foreach (var child in _children)
 					RenderPart(writer, encoder, child);
+
+				writer.Write("</");
+				writer.Write(_name);
+				writer.Write('>');
+			}
+
+			/// <summary>
+			/// Writes the complete element asynchronously, including async descendants.
+			/// </summary>
+			public async ValueTask WriteToAsync(TextWriter writer)
+			{
+				writer.Write('<');
+				writer.Write(_name);
+
+				foreach (var attr in _attrs)
+					attr.WriteTo(writer, HtmlEncoder.Default);
+
+				if (_isVoid)
+				{
+					writer.Write(" />");
+					return;
+				}
+
+				writer.Write('>');
+
+				foreach (var child in _children)
+					await RenderPartAsync(writer, child).ConfigureAwait(false);
 
 				writer.Write("</");
 				writer.Write(_name);

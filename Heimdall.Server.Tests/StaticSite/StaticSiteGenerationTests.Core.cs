@@ -2,6 +2,7 @@ using System.Text.Json;
 using Heimdall.Server.Rendering;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Html;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -54,6 +55,49 @@ public sealed partial class StaticSiteGenerationTests
         {
             DeleteTempDirectory(outputPath);
         }
+    }
+
+    [Fact]
+    public async Task GenerateAsync_AcceptsConcreteAndAsyncHtmlContentResults()
+    {
+        var outputPath = CreateTempDirectory();
+
+        try
+        {
+            var services = new ServiceCollection();
+            services
+                .AddHeimdallStaticSiteGeneration(options =>
+                {
+                    options.OutputPath = outputPath;
+                })
+                .WithStaticPage("/task", _ =>
+                    Task.FromResult(new HtmlString("<span>task</span>")))
+                .WithStaticPage("/value-task", _ =>
+                    ValueTask.FromResult<HtmlContentBuilder>(CreateBuilder("<span>value-task</span>")))
+                .WithStaticPage("/async", _ =>
+                    ValueTask.FromResult<IHtmlAsyncContent>(new AsyncTestHtmlContent(
+                        "<span>sync</span>",
+                        "<span>async</span>")));
+
+            await using var provider = services.BuildServiceProvider();
+
+            await provider.GenerateHeimdallStaticSiteAsync();
+
+            Assert.Equal("<span>task</span>", await File.ReadAllTextAsync(Path.Combine(outputPath, "task", "index.html")));
+            Assert.Equal("<span>value-task</span>", await File.ReadAllTextAsync(Path.Combine(outputPath, "value-task", "index.html")));
+            Assert.Equal("<span>async</span>", await File.ReadAllTextAsync(Path.Combine(outputPath, "async", "index.html")));
+        }
+        finally
+        {
+            DeleteTempDirectory(outputPath);
+        }
+    }
+
+    private static HtmlContentBuilder CreateBuilder(string markup)
+    {
+        var content = new HtmlContentBuilder();
+        content.AppendHtml(markup);
+        return content;
     }
 
     [Fact]

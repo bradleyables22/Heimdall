@@ -27,7 +27,7 @@ namespace Heimdall.Server
         /// Maps a Heimdall HTML-first page endpoint.
         /// 
         /// Core primitive:
-        /// Pattern → (IServiceProvider, HttpContext) → IHtmlContent → HTML response.
+        /// Pattern → (IServiceProvider, HttpContext) → IHtmlContent implementation → HTML response.
         /// 
         /// Layouts, partials, and composition are handled by user code.
         /// </summary>
@@ -58,7 +58,7 @@ namespace Heimdall.Server
                     var html = await renderAsync(sp, ctx).ConfigureAwait(false);
                     html ??= HtmlString.Empty;
 
-                    var rendered = html.RenderHtml();
+                    var rendered = await html.RenderHtmlAsync(ctx.RequestAborted).ConfigureAwait(false);
                     return Results.Text(rendered, DefaultContentType, Encoding.UTF8);
                 }
                 catch (OperationCanceledException) when (ctx.RequestAborted.IsCancellationRequested)
@@ -85,6 +85,42 @@ namespace Heimdall.Server
 
             builder.ExcludeFromDescription();
             return builder;
+        }
+
+        /// <summary>
+        /// Maps an asynchronous page whose concrete HTML content type is preserved by the caller.
+        /// </summary>
+        public static RouteHandlerBuilder MapHeimdallPage<THtml>(
+            this IEndpointRouteBuilder app,
+            [StringSyntax("Route")] string pattern,
+            Func<IServiceProvider, HttpContext, Task<THtml>> renderAsync)
+            where THtml : IHtmlContent
+        {
+            if (renderAsync is null)
+                throw new ArgumentNullException(nameof(renderAsync));
+
+            Func<IServiceProvider, HttpContext, Task<IHtmlContent>> adapted = async (sp, ctx) =>
+                await renderAsync(sp, ctx).ConfigureAwait(false);
+
+            return app.MapHeimdallPage(pattern, adapted);
+        }
+
+        /// <summary>
+        /// Maps a value-task-based page whose concrete HTML content type is preserved by the caller.
+        /// </summary>
+        public static RouteHandlerBuilder MapHeimdallPage<THtml>(
+            this IEndpointRouteBuilder app,
+            [StringSyntax("Route")] string pattern,
+            Func<IServiceProvider, HttpContext, ValueTask<THtml>> renderAsync)
+            where THtml : IHtmlContent
+        {
+            if (renderAsync is null)
+                throw new ArgumentNullException(nameof(renderAsync));
+
+            Func<IServiceProvider, HttpContext, Task<IHtmlContent>> adapted = async (sp, ctx) =>
+                await renderAsync(sp, ctx).ConfigureAwait(false);
+
+            return app.MapHeimdallPage(pattern, adapted);
         }
 
         /// <summary>
@@ -116,6 +152,42 @@ namespace Heimdall.Server
         }
 
         /// <summary>
+        /// Convenience overload for an asynchronous page with a concrete HTML content type.
+        /// </summary>
+        public static RouteHandlerBuilder MapHeimdallPage<THtml>(
+            this IEndpointRouteBuilder app,
+            [StringSyntax("Route")] string pattern,
+            Func<HttpContext, Task<THtml>> renderAsync)
+            where THtml : IHtmlContent
+        {
+            if (renderAsync is null)
+                throw new ArgumentNullException(nameof(renderAsync));
+
+            Func<IServiceProvider, HttpContext, Task<IHtmlContent>> adapted = async (_, ctx) =>
+                await renderAsync(ctx).ConfigureAwait(false);
+
+            return app.MapHeimdallPage(pattern, adapted);
+        }
+
+        /// <summary>
+        /// Convenience overload for a value-task-based page with a concrete HTML content type.
+        /// </summary>
+        public static RouteHandlerBuilder MapHeimdallPage<THtml>(
+            this IEndpointRouteBuilder app,
+            [StringSyntax("Route")] string pattern,
+            Func<HttpContext, ValueTask<THtml>> renderAsync)
+            where THtml : IHtmlContent
+        {
+            if (renderAsync is null)
+                throw new ArgumentNullException(nameof(renderAsync));
+
+            Func<IServiceProvider, HttpContext, Task<IHtmlContent>> adapted = async (_, ctx) =>
+                await renderAsync(ctx).ConfigureAwait(false);
+
+            return app.MapHeimdallPage(pattern, adapted);
+        }
+
+        /// <summary>
         /// Convenience overload when only HttpContext is needed (sync).
         /// </summary>
         public static RouteHandlerBuilder MapHeimdallPage(
@@ -141,6 +213,42 @@ namespace Heimdall.Server
                 throw new ArgumentNullException(nameof(render));
 
             return app.MapHeimdallPage(pattern, (_, __) => render());
+        }
+
+        /// <summary>
+        /// Convenience overload for an asynchronous page with a concrete HTML content type.
+        /// </summary>
+        public static RouteHandlerBuilder MapHeimdallPage<THtml>(
+            this IEndpointRouteBuilder app,
+            [StringSyntax("Route")] string pattern,
+            Func<Task<THtml>> renderAsync)
+            where THtml : IHtmlContent
+        {
+            if (renderAsync is null)
+                throw new ArgumentNullException(nameof(renderAsync));
+
+            Func<IServiceProvider, HttpContext, Task<IHtmlContent>> adapted = async (_, __) =>
+                await renderAsync().ConfigureAwait(false);
+
+            return app.MapHeimdallPage(pattern, adapted);
+        }
+
+        /// <summary>
+        /// Convenience overload for a value-task-based page with a concrete HTML content type.
+        /// </summary>
+        public static RouteHandlerBuilder MapHeimdallPage<THtml>(
+            this IEndpointRouteBuilder app,
+            [StringSyntax("Route")] string pattern,
+            Func<ValueTask<THtml>> renderAsync)
+            where THtml : IHtmlContent
+        {
+            if (renderAsync is null)
+                throw new ArgumentNullException(nameof(renderAsync));
+
+            Func<IServiceProvider, HttpContext, Task<IHtmlContent>> adapted = async (_, __) =>
+                await renderAsync().ConfigureAwait(false);
+
+            return app.MapHeimdallPage(pattern, adapted);
         }
     }
 }

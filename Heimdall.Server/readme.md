@@ -2,7 +2,7 @@
 
 `HeimdallFramework.Server` is the ASP.NET Core server runtime for [Heimdall](https://heimdall-framework.org), an HTML-first framework for server-driven applications.
 
-The package provides the server-side building blocks for Heimdall applications, including request handling, HTML rendering, content actions, real-time updates, MVC integration, and static site generation. Interactive applications normally pair it with `HeimdallFramework.Web`, which supplies the browser runtime.
+The package provides the server-side building blocks for Heimdall applications, including request handling, content actions, real-time updates, MVC and static Razor component integration, and static site generation. Its HTML rendering foundation is provided by the transitive `HeimdallFramework.Rendering` dependency. Interactive applications normally pair it with `HeimdallFramework.Web`, which supplies the browser runtime.
 
 > [heimdall-framework.org](https://heimdall-framework.org) is the source of truth for installation, setup, features, APIs, configuration, security, and deployment. This package README intentionally avoids duplicating details that change as the framework evolves.
 
@@ -13,6 +13,8 @@ dotnet add package HeimdallFramework.Server
 dotnet add package HeimdallFramework.Web
 ```
 
+If you only need server-side HTML composition, install `HeimdallFramework.Rendering` directly instead.
+
 Optional strongly typed Bootstrap helpers are available separately:
 
 ```bash
@@ -20,6 +22,48 @@ dotnet add package HeimdallFramework.Bootstrap
 ```
 
 Continue with the current guide and examples at [heimdall-framework.org](https://heimdall-framework.org).
+
+## HTML return types
+
+Content actions, pages, static-site pages, and Bifrost accept any ASP.NET Core `IHtmlContent` implementation, not only methods declared with the interface return type. That includes concrete types such as `HtmlString` and `HtmlContentBuilder`, as well as `IHtmlAsyncContent` implementations.
+
+Asynchronous actions can return `Task<THtml>` or `ValueTask<THtml>` when `THtml` implements `IHtmlContent`. Heimdall detects `IHtmlAsyncContent` and awaits its `WriteToAsync` method before sending the HTML response, generating a static page, or publishing a Bifrost message. Use `ToHtmlStringAsync()` when application code needs to materialize HTML explicitly.
+
+`FluentHtml` also provides async callback overloads for its element, fragment, and nested builder helpers. Await the returned content and use an async lambda when a builder needs to await application work:
+
+```csharp
+var content = await FluentHtml.Div(async div =>
+{
+    var label = await labels.GetLabelAsync();
+    div.Text(label);
+});
+```
+
+Async HTML content nested inside fluent elements and fragments is preserved when the result is materialized with `ToHtmlStringAsync()`.
+
+ASP.NET Core does not provide a general public `HtmlContent` class; use an `IHtmlContent` implementation such as `HtmlString`, `HtmlContentBuilder`, or a custom implementation instead.
+
+## Static Razor component rendering
+
+Register the optional server-side adapter when an application needs to render a `.razor` component tree as HTML from a Heimdall action:
+
+```csharp
+builder.Services.AddHeimdallBlazor();
+
+[ContentInvocation("orders.refresh")]
+public static async Task<IHtmlContent> RefreshAsync(
+    [FromServices] IHeimdallBlazorRenderer components,
+    OrderService orders,
+    CancellationToken ct)
+{
+    var model = await orders.GetRecentAsync(ct);
+    return await components.RenderAsync<OrderSummary>(
+        new { Model = model },
+        ct);
+}
+```
+
+The adapter supports component parameters, dependency injection, and asynchronous component initialization. It performs non-interactive rendering only: it does not create a Blazor circuit, hydrate the component, or make `@onclick`, `@bind`, `EventCallback`, `@ref`, or JavaScript interop active. Keep interactive Blazor trees in Blazor-owned DOM islands and use Heimdall around them or in separate targets.
 
 ## Bifrost subscriber hints
 

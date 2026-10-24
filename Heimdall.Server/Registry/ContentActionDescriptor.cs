@@ -12,6 +12,7 @@ namespace Heimdall.Server
     internal sealed class ContentActionDescriptor
     {
         private readonly Func<object?, object?[], object?> _invoker;
+        private readonly Func<object, ValueTask<IHtmlContent?>>? _asyncResultAwaiter;
         private readonly ObjectFactory? _instanceFactory;
         private readonly Type? _instanceType;
 
@@ -72,6 +73,17 @@ namespace Heimdall.Server
             PayloadParameter = parameters.FirstOrDefault(x =>
                 x.Kind is ContentActionParameterKind.Payload or ContentActionParameterKind.FormPayload);
             _invoker = CompileInvoker(method);
+            _asyncResultAwaiter = returnKind switch
+            {
+                ContentActionReturnKind.TaskHtml => CreateAsyncResultAwaiter(
+                    method.ReturnType.GetGenericArguments()[0],
+                    valueTask: false),
+                ContentActionReturnKind.ValueTaskHtml => CreateAsyncResultAwaiter(
+                    method.ReturnType.GetGenericArguments()[0],
+                    valueTask: true),
+                _ => null
+            };
+
             if (!method.IsStatic)
             {
                 _instanceType = method.DeclaringType
@@ -89,15 +101,54 @@ namespace Heimdall.Server
             if (result is null)
                 return null;
 
-            return ReturnKind switch
-            {
-                ContentActionReturnKind.Html => (IHtmlContent)result,
-                ContentActionReturnKind.TaskHtml => await (Task<IHtmlContent>)result,
-                ContentActionReturnKind.ValueTaskHtml => await (ValueTask<IHtmlContent>)result,
-                _ => throw new InvalidOperationException(
-                    $"Unsupported Heimdall return kind '{ReturnKind}' for '{Method.DeclaringType?.FullName}.{Method.Name}'.")
-            };
+            if (ReturnKind == ContentActionReturnKind.Html)
+                return (IHtmlContent)result;
+
+            if (_asyncResultAwaiter is not null)
+                return await _asyncResultAwaiter(result).ConfigureAwait(false);
+
+            throw new InvalidOperationException(
+                $"Unsupported Heimdall return kind '{ReturnKind}' for '{Method.DeclaringType?.FullName}.{Method.Name}'.");
         }
+
+        private static Func<object, ValueTask<IHtmlContent?>> CreateAsyncResultAwaiter(
+            Type resultType,
+            bool valueTask)
+        {
+            if (!typeof(IHtmlContent).IsAssignableFrom(resultType))
+            {
+                throw new InvalidOperationException(
+                    $"Heimdall asynchronous HTML result type '{resultType.FullName}' does not implement IHtmlContent.");
+            }
+
+            var factoryName = valueTask
+                ? nameof(CreateValueTaskAwaiter)
+                : nameof(CreateTaskAwaiter);
+            var factory = typeof(ContentActionDescriptor).GetMethod(
+                factoryName,
+                BindingFlags.Static | BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException($"Unable to resolve the '{factoryName}' method.");
+
+            return (Func<object, ValueTask<IHtmlContent?>>)factory
+                .MakeGenericMethod(resultType)
+                .Invoke(null, null)!;
+        }
+
+        private static Func<object, ValueTask<IHtmlContent?>> CreateTaskAwaiter<T>()
+            where T : IHtmlContent
+            => value => AwaitTaskAsync((Task<T>)value);
+
+        private static Func<object, ValueTask<IHtmlContent?>> CreateValueTaskAwaiter<T>()
+            where T : IHtmlContent
+            => value => AwaitValueTaskAsync((ValueTask<T>)value);
+
+        private static async ValueTask<IHtmlContent?> AwaitTaskAsync<T>(Task<T> value)
+            where T : IHtmlContent
+            => await value.ConfigureAwait(false);
+
+        private static async ValueTask<IHtmlContent?> AwaitValueTaskAsync<T>(ValueTask<T> value)
+            where T : IHtmlContent
+            => await value.ConfigureAwait(false);
 
         private object? CreateTarget(IServiceProvider services)
         {

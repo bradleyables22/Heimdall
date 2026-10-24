@@ -1,0 +1,22 @@
+@namespace Heimdall.Server.Tests
+
+<section data-name="@Name">
+    <TestRazorChild Label="@Name" />
+    @if (_initialized)
+    {
+        <strong>initialized</strong>
+    }
+</section>
+
+@code {
+    [Parameter]
+    public string? Name { get; set; }
+
+    private bool _initialized;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Yield();
+        _initialized = true;
+    }
+}

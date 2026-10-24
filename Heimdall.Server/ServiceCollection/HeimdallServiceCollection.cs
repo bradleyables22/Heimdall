@@ -109,6 +109,23 @@ namespace Heimdall.Server
         }
 
         /// <summary>
+        /// Registers non-interactive Blazor component rendering support for Heimdall content actions.
+        /// </summary>
+        /// <remarks>
+        /// This method registers the ASP.NET Core Razor component services and
+        /// <see cref="IHeimdallBlazorRenderer"/>. It renders components to static HTML;
+        /// it does not map Razor component endpoints or enable interactive Blazor render modes.
+        /// </remarks>
+        public static IServiceCollection AddHeimdallBlazor(this IServiceCollection services)
+        {
+            services.AddHttpContextAccessor();
+            services.AddRazorComponents();
+            services.TryAddScoped<IHeimdallBlazorRenderer, HeimdallBlazorRenderer>();
+
+            return services;
+        }
+
+        /// <summary>
         /// Enables Heimdall within the ASP.NET request pipeline.
         /// 
         /// This method finalizes Heimdall setup by registering its middleware,

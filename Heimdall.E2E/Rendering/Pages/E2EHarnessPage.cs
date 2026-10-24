@@ -155,7 +155,7 @@ document.addEventListener("heimdall:offline", function(event) {
 			public int DelayMs { get; set; }
 		}
 
-		public static IHtmlContent Render()
+		public static IHtmlContent Render(IHtmlContent? blazorComponent = null)
 			=> FluentHtml.Div(root =>
 			{
 				root.Id("e2e-harness")
@@ -168,6 +168,7 @@ document.addEventListener("heimdall:offline", function(event) {
 					.Text("Stable browser scenarios for Heimdall server/runtime integration tests.");
 				})
 				.Add(
+					blazorComponent,
 					RenderLoadSection(),
 					RenderLocalTimeSection(),
 					RenderDynamicBootSection(),

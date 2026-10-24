@@ -147,19 +147,25 @@ namespace Heimdall.Server
         {
             var rt = method.ReturnType;
 
-            if (rt == typeof(IHtmlContent))
+            if (typeof(IHtmlContent).IsAssignableFrom(rt))
                 return ContentActionReturnKind.Html;
 
-            if (rt == typeof(Task<IHtmlContent>))
+            if (IsGenericHtmlResult(rt, typeof(Task<>)))
                 return ContentActionReturnKind.TaskHtml;
 
-            if (rt == typeof(ValueTask<IHtmlContent>))
+            if (IsGenericHtmlResult(rt, typeof(ValueTask<>)))
                 return ContentActionReturnKind.ValueTaskHtml;
 
             throw new InvalidOperationException(
-                $"[ContentInvocation] must return IHtmlContent / Task<IHtmlContent> / ValueTask<IHtmlContent>: " +
+                $"[ContentInvocation] must return an IHtmlContent implementation, Task<THtml>, or ValueTask<THtml> " +
+                "where THtml implements IHtmlContent: " +
                 $"{method.DeclaringType?.FullName}.{method.Name} returns {rt.FullName}");
         }
+
+        private static bool IsGenericHtmlResult(Type returnType, Type genericTypeDefinition)
+            => returnType.IsGenericType &&
+               returnType.GetGenericTypeDefinition() == genericTypeDefinition &&
+               typeof(IHtmlContent).IsAssignableFrom(returnType.GetGenericArguments()[0]);
 
         private static IReadOnlyList<ContentActionParameterDescriptor> BuildParameterPlan(
             MethodInfo method,

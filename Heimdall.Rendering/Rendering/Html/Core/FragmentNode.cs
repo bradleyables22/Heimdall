@@ -16,7 +16,7 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Represents an HTML fragment that renders its parts in sequence.
 		/// </summary>
-		private sealed class FragmentNode : IHtmlContent
+		private sealed class FragmentNode : IHtmlAsyncContent
 		{
 			private readonly object?[] _parts;
 			private FragmentNode(object?[] parts) => _parts = parts;
@@ -38,6 +38,15 @@ namespace Heimdall.Server.Rendering
 			{
 				foreach (var p in _parts)
 					RenderPart(writer, encoder, p);
+			}
+
+			/// <summary>
+			/// Writes the fragment asynchronously, including async descendants.
+			/// </summary>
+			public async ValueTask WriteToAsync(TextWriter writer)
+			{
+				foreach (var p in _parts)
+					await RenderPartAsync(writer, p).ConfigureAwait(false);
 			}
 		}
 

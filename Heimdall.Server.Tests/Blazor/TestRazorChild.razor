@@ -1,0 +1,16 @@
+@namespace Heimdall.Server.Tests
+
+<span data-child="@Label">@Greeting.Prefix: @Label</span>
+
+@code {
+    [Inject]
+    private BlazorGreeting Greeting { get; set; } = null!;
+
+    [Parameter]
+    public string? Label { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await Task.Yield();
+    }
+}

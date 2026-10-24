@@ -10,7 +10,7 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Provides a pooled fluent builder for constructing an HTML fragment.
 		/// </summary>
-		public sealed class FragmentBuilder : IDisposable
+		public sealed partial class FragmentBuilder : IDisposable
 		{
 			private PooledBuffer<object?> _parts;
 

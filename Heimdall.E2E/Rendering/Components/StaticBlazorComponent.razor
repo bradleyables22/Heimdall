@@ -1,0 +1,33 @@
+@namespace Heimdall.E2E.Rendering.Components
+
+<section id="e2e-blazor-component">
+    <div id="e2e-blazor-target">Static component target original</div>
+    <form id="e2e-blazor-form"
+          heimdall-content-submit="@Action_Render"
+          heimdall-payload-from="closest-form"
+          heimdall-content-target="#e2e-blazor-target"
+          heimdall-content-swap="inner">
+        <input name="Name" value="Ada &lt;Lovelace&gt;" />
+        <button id="e2e-blazor-button" type="submit">Render static Blazor component</button>
+    </form>
+    <form id="e2e-blazor-second-form"
+          heimdall-content-submit="@Action_Render"
+          heimdall-payload-from="closest-form"
+          heimdall-content-target="#e2e-blazor-target"
+          heimdall-content-swap="inner">
+        <input name="Name" value="Grace Hopper" />
+        <button id="e2e-blazor-second-button" type="submit">Render another component</button>
+    </form>
+
+    <form id="e2e-blazor-native-form" method="get" action="/e2e">
+        <input name="native" value="true" />
+        <button id="e2e-blazor-native-button" type="submit">Use native form submission</button>
+    </form>
+</section>
+
+@code {
+    protected override async Task OnInitializedAsync()
+    {
+        await Task.Yield();
+    }
+}

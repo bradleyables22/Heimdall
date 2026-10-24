@@ -1,6 +1,6 @@
 # HeimdallFramework.Web changelog
 
-## [3.1.0] - Unreleased
+## [4.0.0] - Unreleased
 
 ### Added
 

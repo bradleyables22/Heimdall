@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<GenerateDocumentationFile>true</GenerateDocumentationFile>
+		<IsPackable>true</IsPackable>
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+		<PackageId>HeimdallFramework.Rendering</PackageId>
+		<Version>4.0.0</Version>
+		<PackageReadmeFile>readme.md</PackageReadmeFile>
+		<Authors>Bradley Ables</Authors>
+		<Description>Server-side HTML rendering primitives and FluentHtml builders for Heimdall.</Description>
+		<PackageTags>heimdall framework;html;fluent;SSR;aspnetcore;rendering</PackageTags>
+		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+
+		<PackageIcon>favicon.png</PackageIcon>
+
+		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+		<Deterministic>true</Deterministic>
+		<ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+
+		<IncludeSymbols>true</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<FrameworkReference Include="Microsoft.AspNetCore.App" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="Favicon.png" Pack="true" PackagePath="favicon.png" />
+		<None Include="..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
+		<None Include="readme.md" Pack="true" PackagePath="\" />
+		<None Include="CHANGELOG.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+
+</Project>

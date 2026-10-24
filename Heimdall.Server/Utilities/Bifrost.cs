@@ -138,7 +138,8 @@ namespace Heimdall.Server
         /// </summary>
         /// <param name="topic">The topic to which the message will be published. Cannot be null, empty, or consist only of white-space
         /// characters.</param>
-        /// <param name="content">The HTML content to publish. Cannot be null.</param>
+        /// <param name="content">The HTML content to publish. Any <see cref="IHtmlContent"/> implementation is accepted;
+        /// <see cref="IHtmlAsyncContent"/> is awaited before publishing. Cannot be null.</param>
         /// <param name="ttl">The duration for which the message remains valid. If less than or equal to zero, a default TTL of 5 seconds
         /// is used.</param>
         /// <param name="ct">A cancellation token that can be used to cancel the publish operation.</param>
@@ -155,7 +156,8 @@ namespace Heimdall.Server
         /// characters.</param>
         /// <param name="eventName">The SSE event name to emit. If null, empty, or white-space, the default Heimdall event name is used.
         /// Newline characters are not allowed.</param>
-        /// <param name="content">The HTML content to publish. Cannot be null.</param>
+        /// <param name="content">The HTML content to publish. Any <see cref="IHtmlContent"/> implementation is accepted;
+        /// <see cref="IHtmlAsyncContent"/> is awaited before publishing. Cannot be null.</param>
         /// <param name="ttl">The duration for which the message remains valid. If less than or equal to zero, a default TTL of 5 seconds
         /// is used.</param>
         /// <param name="ct">A cancellation token that can be used to cancel the publish operation.</param>
@@ -163,7 +165,7 @@ namespace Heimdall.Server
         /// <exception cref="ArgumentException">Thrown if topic is null, empty, or consists only of white-space characters, or if
         /// eventName contains newline characters.</exception>
         /// <exception cref="ArgumentNullException">Thrown if content is null.</exception>
-        public ValueTask PublishAsync(string topic, string? eventName, IHtmlContent content, TimeSpan ttl, CancellationToken ct = default)
+        public async ValueTask PublishAsync(string topic, string? eventName, IHtmlContent content, TimeSpan ttl, CancellationToken ct = default)
         {
             if (string.IsNullOrWhiteSpace(topic))
                 throw new ArgumentException("Topic is required.", nameof(topic));
@@ -177,7 +179,7 @@ namespace Heimdall.Server
             if (ttl <= TimeSpan.Zero)
                 ttl = TimeSpan.FromSeconds(5);
 
-            var html = content.RenderHtml();
+            var html = await content.RenderHtmlAsync(ct).ConfigureAwait(false);
             var now = DateTimeOffset.UtcNow;
 
             var msg = new BifrostMessage(
@@ -196,14 +198,13 @@ namespace Heimdall.Server
                 HeimdallTelemetry.RecordBifrostDropped(eventName, "no_subscribers");
                 activity?.SetTag(HeimdallDiagnostics.OutcomeTagName, "no_subscribers");
                 activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Ok);
-                return ValueTask.CompletedTask;
+                return;
             }
 
             bucket.Publish(msg);
             activity?.SetTag(HeimdallDiagnostics.OutcomeTagName, "published");
             activity?.SetStatus(System.Diagnostics.ActivityStatusCode.Ok);
 
-            return ValueTask.CompletedTask;
         }
 
         private static string NormalizeEventName(string? eventName)

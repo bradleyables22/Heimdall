@@ -600,7 +600,8 @@ namespace Heimdall.Server
                     ex);
             }
 
-            var bytes = Utf8NoBom.GetBytes(html.RenderHtml());
+            var rendered = await html.RenderHtmlAsync(cancellationToken).ConfigureAwait(false);
+            var bytes = Utf8NoBom.GetBytes(rendered);
             try
             {
                 await WriteBytesAsync(PageKind, outputFilePath, bytes, cancellationToken)

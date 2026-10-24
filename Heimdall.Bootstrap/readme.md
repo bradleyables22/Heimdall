@@ -12,7 +12,7 @@ The helpers map to Bootstrap class names and are designed to improve discoverabi
 dotnet add package HeimdallFramework.Bootstrap
 ```
 
-The class helpers can be used independently. Examples that use Heimdall's fluent HTML rendering also require `HeimdallFramework.Server`.
+The class helpers can be used independently. Examples that use the FluentHtml rendering API require `HeimdallFramework.Rendering`; examples that also use Heimdall behavior helpers require `HeimdallFramework.Server`.
 
 ## Links
 

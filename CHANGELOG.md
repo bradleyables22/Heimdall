@@ -4,10 +4,14 @@ Notable changes to the Heimdall solution are recorded here. Package-specific det
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released packages use semantic versioning.
 
-## [3.1.0] - Unreleased
+## [4.0.0] - Unreleased
 
 ### Added
 
+- Extracted the server-side `Html` core and `FluentHtml` builder APIs into the new `HeimdallFramework.Rendering` package. `HeimdallFramework.Server` depends on it transitively.
+- Added concrete `IHtmlContent` return-type support across content actions, pages, static-site generation, and Bifrost, including `IHtmlAsyncContent` and async HTML materialization.
+- Added async callback overloads across the FluentHtml element, fragment, and nested builder helpers, with recursive async rendering for nested HTML content.
+- Added opt-in static Razor component rendering through `AddHeimdallBlazor()` and `IHeimdallBlazorRenderer`, including component parameters, dependency injection, and asynchronous component initialization without creating a Blazor circuit.
 - Added the read-only `Bifrost.SubscribedTopics` snapshot for active local subscriber topics.
 - Added terminal Bifrost subscriber disconnects that close local SSE connections without browser reconnects.
 - Added DI-backed `AddBifrostTopicAuthHandler<THandler>()` registration for fail-closed, per-topic-family Bifrost authorization.
