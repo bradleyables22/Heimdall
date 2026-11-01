@@ -362,3 +362,8 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Local .NET CLI and template-engine state
+/.dotnet/
+/.dotnet-cli-home/
+/.templateengine/
