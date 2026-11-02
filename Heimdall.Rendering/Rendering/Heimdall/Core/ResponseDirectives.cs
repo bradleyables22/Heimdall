@@ -47,5 +47,31 @@ namespace Heimdall.Server.Rendering
 
 		/// <summary>Replaces the browser's current history entry with the supplied URL.</summary>
 		public static IHtmlContent HistoryReplace(string url) => History(HistoryMode.Replace, url);
+
+		/// <summary>Creates a directive that sets one browser storage value.</summary>
+		public static IHtmlContent SetStorage(StorageArea area, string key, string value)
+		{
+			var normalizedKey = NormalizeStorageKey(key);
+			ArgumentNullException.ThrowIfNull(value);
+
+			return Html.Tag(
+				"storage",
+				Html.Attr("area", StorageAreaToString(area)),
+				Html.Attr("operation", "set"),
+				Html.Attr("key", normalizedKey),
+				value);
+		}
+
+		/// <summary>Creates a directive that removes one browser storage value.</summary>
+		public static IHtmlContent RemoveStorage(StorageArea area, string key)
+		{
+			var normalizedKey = NormalizeStorageKey(key);
+
+			return Html.Tag(
+				"storage",
+				Html.Attr("area", StorageAreaToString(area)),
+				Html.Attr("operation", "remove"),
+				Html.Attr("key", normalizedKey));
+		}
 	}
 }

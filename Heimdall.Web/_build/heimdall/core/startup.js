@@ -124,6 +124,15 @@ export function createHeimdallRuntime({
             antiforgery: true,
             clientInfo: false,
             clientInfoMaxAgeMs: 60000,
+            clientInfoLimits: {
+                maxKeysPerArea: 16,
+                maxKeyLength: 128,
+                maxValueLength: 1024,
+                maxStorageChars: 2048,
+                maxExtensionEntries: 16,
+                maxExtensionChars: 1024,
+                maxExtensionDepth: 4
+            },
 
             inputDebounceMs: 250,
             hoverDelayMs: 150,

@@ -48,6 +48,112 @@ public sealed partial class ServerIntegrationTests
     }
 
     [Fact]
+    public async Task ContentAction_BindsStorageAndExtensionsAndIgnoresUnknownFields()
+    {
+        await using var app = await CreateAppAsync();
+        using var client = app.GetTestClient();
+        var header = JsonSerializer.Serialize(new
+        {
+            storage = new
+            {
+                local = new Dictionary<string, string> { ["ui.theme"] = "dark" },
+                session = new Dictionary<string, string> { ["checkout.state"] = "checkout" }
+            },
+            extensions = new { appMode = "compact" },
+            unknown = "ignored"
+        });
+
+        using var response = await PostClientInfoActionAsync(
+            client,
+            header,
+            new { value = "storage" },
+            actionId: "tests.client-info.storage");
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("<span>dark|checkout|compact|True</span>", body);
+    }
+
+    [Fact]
+    public async Task ContentAction_RejectsClientInfoStorageThatExceedsConfiguredLimits()
+    {
+        await using var app = await CreateAppAsync(
+            configureHeimdall: options => options.ClientInfoLimits.MaxStorageValueLength = 3);
+        using var client = app.GetTestClient();
+        var header = JsonSerializer.Serialize(new
+        {
+            storage = new
+            {
+                local = new Dictionary<string, string> { ["ui.theme"] = "dark" }
+            }
+        });
+
+        using var response = await PostClientInfoActionAsync(
+            client,
+            header,
+            new { value = "storage-limit" });
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("storage value exceeds", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ContentAction_RejectsClientInfoExtensionsThatExceedEntryLimit()
+    {
+        await using var app = await CreateAppAsync(
+            configureHeimdall: options => options.ClientInfoLimits.MaxExtensionEntries = 1);
+        using var client = app.GetTestClient();
+        var header = JsonSerializer.Serialize(new
+        {
+            extensions = new
+            {
+                allowed = "yes",
+                omitted = "no"
+            }
+        });
+
+        using var response = await PostClientInfoActionAsync(
+            client,
+            header,
+            new { value = "extension-limit" });
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("extensions value exceeds", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ContentAction_RejectsClientInfoExtensionsThatExceedDepthLimit()
+    {
+        await using var app = await CreateAppAsync(
+            configureHeimdall: options => options.ClientInfoLimits.MaxExtensionDepth = 1);
+        using var client = app.GetTestClient();
+        var header = JsonSerializer.Serialize(new
+        {
+            extensions = new
+            {
+                nested = new
+                {
+                    outer = new
+                    {
+                        value = true
+                    }
+                }
+            }
+        });
+
+        using var response = await PostClientInfoActionAsync(
+            client,
+            header,
+            new { value = "extension-depth" });
+        var body = await response.Content.ReadAsStringAsync();
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        Assert.Contains("depth limit", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task ContentAction_ProvidesUnavailableClientInfoWhenHeaderIsMissing()
     {
         await using var app = await CreateAppAsync();
@@ -112,11 +218,12 @@ public sealed partial class ServerIntegrationTests
     private static async Task<HttpResponseMessage> PostClientInfoActionAsync(
         HttpClient client,
         string header,
-        object payload)
+        object payload,
+        string actionId = "tests.client-info.echo")
     {
         var csrf = await GetCsrfTokenAsync(client);
         using var request = new HttpRequestMessage(HttpMethod.Post, "/__heimdall/v1/content/actions");
-        request.Headers.Add("X-Heimdall-Content-Action", "tests.client-info.echo");
+        request.Headers.Add("X-Heimdall-Content-Action", actionId);
         request.Headers.Add("RequestVerificationToken", csrf.RequestToken);
         request.Headers.Add("Cookie", csrf.CookieHeader);
         request.Headers.TryAddWithoutValidation(HeimdallClientInfo.HeaderName, header);

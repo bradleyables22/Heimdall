@@ -114,6 +114,25 @@ namespace Heimdall.Server.Rendering
 				return this;
 			}
 
+			/// <summary>Adds a directive that sets one browser storage value.</summary>
+			public HeimdallFragmentBuilder SetStorage(
+				HeimdallHtml.StorageArea area,
+				string key,
+				string value)
+			{
+				_f.Add(HeimdallHtml.SetStorage(area, key, value));
+				return this;
+			}
+
+			/// <summary>Adds a directive that removes one browser storage value.</summary>
+			public HeimdallFragmentBuilder RemoveStorage(
+				HeimdallHtml.StorageArea area,
+				string key)
+			{
+				_f.Add(HeimdallHtml.RemoveStorage(area, key));
+				return this;
+			}
+
 			/// <summary>
 			/// Adds a JavaScript void invocation directive that runs after response swaps.
 			/// </summary>

@@ -43,5 +43,17 @@ public sealed partial class ServerIntegrationTests
 
             return Html.Span(summary);
         }
+
+        [ContentInvocation("tests.client-info.storage")]
+        public static IHtmlContent Storage(HeimdallClientInfo client)
+        {
+            var local = client.Storage.Local.GetValueOrDefault("ui.theme") ?? string.Empty;
+            var session = client.Storage.Session.GetValueOrDefault("checkout.state") ?? string.Empty;
+            var extension = client.Extensions.TryGetValue("appMode", out var value)
+                ? value.GetString() ?? value.GetRawText()
+                : string.Empty;
+
+            return Html.Span($"{local}|{session}|{extension}|{client.IsAvailable}");
+        }
     }
 }

@@ -1,4 +1,6 @@
 ﻿
+using System.Text.Json;
+
 namespace Heimdall.Server.Rendering
 {
 	/// <summary>
@@ -163,6 +165,59 @@ namespace Heimdall.Server.Rendering
 		/// <param name="value">The value to assign.</param>
 		/// <returns>A <see cref="HtmlAttr"/> representing the generated data attribute.</returns>
 		public static HtmlAttr Data(string key, string value) => Attr($"data-{key}", value);
+
+		/// <summary>
+		/// Creates one <c>data-*</c> attribute for each property in a JSON object.
+		/// </summary>
+		/// <param name="values">An object that serializes to a JSON object.</param>
+		/// <param name="options">Optional JSON serialization options.</param>
+		/// <returns>The generated data attributes.</returns>
+		/// <remarks>
+		/// Property names are converted to kebab-case data keys. Scalar values are emitted as
+		/// their text representation; object and array values are emitted as JSON strings.
+		/// Null properties are omitted.
+		/// </remarks>
+		public static HtmlAttr[] Data(object? values, JsonSerializerOptions? options = null)
+		{
+			if (values is null)
+				return Array.Empty<HtmlAttr>();
+
+			using var document = JsonDocument.Parse(JsonSerializer.Serialize(values, options));
+			if (document.RootElement.ValueKind != JsonValueKind.Object)
+				throw new ArgumentException("Data values must serialize to a JSON object.", nameof(values));
+
+			var attributes = new List<HtmlAttr>();
+			foreach (var property in document.RootElement.EnumerateObject())
+			{
+				if (property.Value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+					continue;
+
+				var value = property.Value.ValueKind == JsonValueKind.String
+					? property.Value.GetString() ?? string.Empty
+					: property.Value.GetRawText();
+				attributes.Add(Data(JsonNamingPolicy.KebabCaseLower.ConvertName(property.Name), value));
+			}
+
+			return attributes.ToArray();
+		}
+
+		/// <summary>
+		/// Creates one <c>data-*</c> attribute containing a JSON value.
+		/// </summary>
+		/// <param name="key">The custom data key without the <c>data-</c> prefix.</param>
+		/// <param name="value">The value to serialize as JSON.</param>
+		/// <param name="options">Optional JSON serialization options.</param>
+		/// <returns>A <see cref="HtmlAttr"/> containing the encoded JSON string.</returns>
+		public static HtmlAttr DataJson(
+			string key,
+			object? value,
+			JsonSerializerOptions? options = null)
+		{
+			if (string.IsNullOrWhiteSpace(key))
+				throw new ArgumentException("Data key is required.", nameof(key));
+
+			return Data(key.Trim(), JsonSerializer.Serialize(value, options));
+		}
 
 		/// <summary>
 		/// Creates an <c>aria-*</c> attribute.

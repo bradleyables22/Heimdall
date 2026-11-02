@@ -1,4 +1,6 @@
 ﻿
+using System.Text.Json;
+
 namespace Heimdall.Server.Rendering
 {
 	/// <summary>
@@ -155,6 +157,21 @@ namespace Heimdall.Server.Rendering
 		/// <param name="value">The attribute value.</param>
 		/// <returns>An attribute descriptor.</returns>
 		public static Html.HtmlAttr Data(string key, string value) => Html.Data(key, value);
+
+		/// <summary>
+		/// Creates one <c>data-*</c> attribute for each property in a JSON object.
+		/// </summary>
+		public static Html.HtmlAttr[] Data(object? values, JsonSerializerOptions? options = null)
+			=> Html.Data(values, options);
+
+		/// <summary>
+		/// Creates one <c>data-*</c> attribute containing a JSON value.
+		/// </summary>
+		public static Html.HtmlAttr DataJson(
+			string key,
+			object? value,
+			JsonSerializerOptions? options = null)
+			=> Html.DataJson(key, value, options);
 
 		/// <summary>
 		/// Creates an <c>aria-*</c> attribute.

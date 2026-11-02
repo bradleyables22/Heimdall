@@ -1,8 +1,8 @@
 # HeimdallFramework.Rendering
 
-`HeimdallFramework.Rendering` provides the server-side HTML rendering foundation for [Heimdall](https://heimdall-framework.org).
+`HeimdallFramework.Rendering` provides the standalone server-side HTML and Heimdall markup-authoring foundation for [Heimdall](https://heimdall-framework.org).
 
-It contains the lower-level `Html` helpers, the `FluentHtml` builder API, synchronous and asynchronous HTML composition, and `ToHtmlString()` / `ToHtmlStringAsync()` materialization helpers. It does not include Heimdall middleware, content actions, pages, Bifrost, or the browser runtime.
+It contains the lower-level `Html` helpers, the `FluentHtml` builder API, the typed `HeimdallHtml` and `FluentHeimdall` helpers, synchronous and asynchronous HTML composition, Heimdall attributes and response directives, and `ToHtmlString()` / `ToHtmlStringAsync()` materialization helpers. It does not include Heimdall middleware, content actions, pages, Bifrost, or the browser runtime.
 
 ## Install
 
@@ -10,7 +10,7 @@ It contains the lower-level `Html` helpers, the `FluentHtml` builder API, synchr
 dotnet add package HeimdallFramework.Rendering
 ```
 
-Applications using `HeimdallFramework.Server` receive this package transitively. Install it directly when you only need server-side HTML composition.
+Applications using `HeimdallFramework.Server` receive this package transitively. Install it directly when you want to author complete server-rendered Heimdall markup without the Heimdall server execution pipeline.
 
 ## FluentHtml
 
@@ -39,6 +39,23 @@ var content = await FluentHtml.Div(async div =>
 
 string markup = await content.ToHtmlStringAsync();
 ```
+
+## Heimdall markup
+
+The typed Heimdall helpers are included in this package, so pages and fragments can be authored without referencing `HeimdallFramework.Server`:
+
+```csharp
+using Microsoft.AspNetCore.Html;
+using Heimdall.Server.Rendering;
+
+IHtmlContent content = Html.Button(
+    HeimdallHtml.OnClick("users.select"),
+    HeimdallHtml.Target("#details"),
+    HeimdallHtml.SwapMode(HeimdallHtml.Swap.Outer),
+    "Select");
+```
+
+The markup can be rendered by any ASP.NET Core application. Install `HeimdallFramework.Server` when the emitted actions need Heimdall's endpoint, binding, authorization, and response pipeline, and install `HeimdallFramework.Web` when the browser needs the Heimdall runtime.
 
 Text is encoded by default. Use `Raw(...)` only for trusted markup.
 

@@ -1,5 +1,59 @@
+using System.Text.Json;
+
 namespace Heimdall.Server
 {
+    /// <summary>
+    /// Contains explicitly allowlisted browser storage values reported with a content action.
+    /// Every value is supplied by the client and must be treated as untrusted input.
+    /// </summary>
+    public sealed class HeimdallClientStorage
+    {
+        private Dictionary<string, string> _local = new(StringComparer.Ordinal);
+        private Dictionary<string, string> _session = new(StringComparer.Ordinal);
+
+        /// <summary>Gets allowlisted local-storage values.</summary>
+        public Dictionary<string, string> Local
+        {
+            get => _local;
+            init => _local = value ?? new(StringComparer.Ordinal);
+        }
+
+        /// <summary>Gets allowlisted session-storage values.</summary>
+        public Dictionary<string, string> Session
+        {
+            get => _session;
+            init => _session = value ?? new(StringComparer.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Configures server-side limits for the optional client-information storage and extension fields.
+    /// The existing 4096-character client-information header limit remains authoritative.
+    /// </summary>
+    public sealed class HeimdallClientInfoLimits
+    {
+        /// <summary>Maximum number of storage values accepted in either storage area.</summary>
+        public int MaxStorageKeysPerArea { get; set; } = 16;
+
+        /// <summary>Maximum storage key length in characters.</summary>
+        public int MaxStorageKeyLength { get; set; } = 128;
+
+        /// <summary>Maximum storage value length in characters.</summary>
+        public int MaxStorageValueLength { get; set; } = 1024;
+
+        /// <summary>Maximum serialized storage length in characters.</summary>
+        public int MaxStorageChars { get; set; } = 2048;
+
+        /// <summary>Maximum number of extension properties accepted.</summary>
+        public int MaxExtensionEntries { get; set; } = 16;
+
+        /// <summary>Maximum serialized extension length in characters.</summary>
+        public int MaxExtensionChars { get; set; } = 1024;
+
+        /// <summary>Maximum JSON nesting depth accepted in extensions.</summary>
+        public int MaxExtensionDepth { get; set; } = 4;
+    }
+
     /// <summary>
     /// Describes presentation-oriented browser capabilities reported with a Heimdall content action.
     /// Every value is supplied by the client and must be treated as untrusted input.
@@ -7,6 +61,8 @@ namespace Heimdall.Server
     public sealed class HeimdallClientInfo
     {
         private string[] _languages = [];
+        private HeimdallClientStorage _storage = new();
+        private Dictionary<string, JsonElement> _extensions = new(StringComparer.Ordinal);
 
         /// <summary>The request header used by the Heimdall browser runtime.</summary>
         public const string HeaderName = "X-Heimdall-Client-Info";
@@ -16,6 +72,20 @@ namespace Heimdall.Server
 
         /// <summary>Whether the request contained a client-information header.</summary>
         public bool IsAvailable { get; internal set; }
+
+        /// <summary>Gets the explicitly allowlisted browser storage values.</summary>
+        public HeimdallClientStorage Storage
+        {
+            get => _storage;
+            init => _storage = value ?? new();
+        }
+
+        /// <summary>Gets small application-defined client hints.</summary>
+        public Dictionary<string, JsonElement> Extensions
+        {
+            get => _extensions;
+            init => _extensions = value ?? new(StringComparer.Ordinal);
+        }
 
         /// <summary>The browser's IANA timezone identifier, when available.</summary>
         public string? TimeZone { get; init; }

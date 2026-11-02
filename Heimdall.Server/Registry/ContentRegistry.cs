@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Http.Timeouts;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
 using System.Reflection;
 
@@ -13,6 +14,8 @@ namespace Heimdall.Server
     internal sealed class ContentRegistry
     {
         private readonly Dictionary<string, ContentActionDescriptor> _contentActions = new(StringComparer.OrdinalIgnoreCase);
+
+        internal IReadOnlyCollection<ContentActionDescriptor> Actions => _contentActions.Values;
 
         internal void AddFromAssembly(Assembly assembly, IServiceProvider services)
         {
@@ -98,6 +101,7 @@ namespace Heimdall.Server
             var antiforgery = ResolveNearestMetadata<IAntiforgeryMetadata>(
                 method,
                 "antiforgery");
+            var rateLimitingMetadata = ResolveRateLimitingMetadata(method);
 
             if (requestSizeLimit?.MaxRequestBodySize < 0)
             {
@@ -117,7 +121,8 @@ namespace Heimdall.Server
                 authorizationMetadata.AllowAnonymous,
                 requestSizeLimit,
                 formOptions,
-                antiforgery?.RequiresValidation ?? true);
+                antiforgery?.RequiresValidation ?? true,
+                rateLimitingMetadata);
         }
 
         private static void ValidateCallable(MethodInfo method)
@@ -450,6 +455,44 @@ namespace Heimdall.Server
             allowAnonymous |= methodAttributes.OfType<IAllowAnonymous>().Any();
 
             return new AuthorizationMetadata(authorizeData.ToArray(), allowAnonymous);
+        }
+
+        private static IReadOnlyList<object> ResolveRateLimitingMetadata(MethodInfo method)
+        {
+            var methodMetadata = method
+                .GetCustomAttributes(inherit: false)
+                .Where(attribute =>
+                    attribute is EnableRateLimitingAttribute or DisableRateLimitingAttribute)
+                .ToArray();
+
+            if (methodMetadata.Length > 1)
+            {
+                throw new InvalidOperationException(
+                    $"[ContentInvocation] cannot combine multiple rate-limiting attributes on " +
+                    $"{method.DeclaringType?.FullName}.{method.Name}.");
+            }
+
+            if (methodMetadata.Length == 1)
+                return methodMetadata;
+
+            var declaringType = method.DeclaringType;
+            if (declaringType is null)
+                return Array.Empty<object>();
+
+            var typeMetadata = declaringType
+                .GetCustomAttributes(inherit: true)
+                .Where(attribute =>
+                    attribute is EnableRateLimitingAttribute or DisableRateLimitingAttribute)
+                .ToArray();
+
+            if (typeMetadata.Length > 1)
+            {
+                throw new InvalidOperationException(
+                    $"[ContentInvocation] cannot combine multiple rate-limiting attributes on " +
+                    $"{declaringType.FullName}.");
+            }
+
+            return typeMetadata;
         }
 
         private readonly record struct RequestTimeoutMetadata(

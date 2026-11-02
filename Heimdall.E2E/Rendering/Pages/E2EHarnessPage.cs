@@ -62,6 +62,10 @@ namespace Heimdall.E2E.Rendering.Pages
 		public const string Action_AuthRequired = "e2e.auth.required";
 		public const string Action_AntiforgeryDisabled = "e2e.antiforgery.disabled";
 		public const string Action_ClientInfo = "e2e.client-info";
+		public const string Action_StoragePayload = "e2e.storage.payload";
+		public const string Action_StorageDirective = "e2e.storage.directive";
+		public const string Action_StorageAbort = "e2e.storage.abort";
+		public const string Action_StorageSse = "e2e.storage.sse";
 		public const string Action_RequestHeaders = "e2e.request-headers";
 		public const string Action_Unauthorized = "e2e.unauthorized";
 
@@ -193,6 +197,7 @@ document.addEventListener("heimdall:offline", function(event) {
 					RenderSseSection(),
 					RenderAntiforgerySection(),
 					RenderClientInfoSection(),
+					RenderClientStorageSection(),
 					RenderAuthSection(),
 					RenderErrorSection(),
 					RenderHistorySection(),

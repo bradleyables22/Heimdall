@@ -8,7 +8,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Http.Timeouts;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -54,11 +53,11 @@ namespace Heimdall.Server
                 .GetService<ILoggerFactory>()
                 ?.CreateLogger("Heimdall.Server.ContentEndpoints");
 
-            app.MapPost("__heimdall/v1/content/actions", async (
-                HttpContext ctx,
-                [FromServices] ContentRegistry registry,
-                [FromServices] IOptions<HeimdallServiceSettings> options) =>
+            Func<HttpContext, Task<IResult>> handler = async ctx =>
             {
+                var registry = ctx.RequestServices.GetRequiredService<ContentRegistry>();
+                var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
+
                 using var telemetry = HeimdallTelemetry.StartContentAction(ctx);
                 var settings = options.Value;
 
@@ -172,7 +171,11 @@ namespace Heimdall.Server
 
                 try
                 {
-                    var args = await BindArgumentsAsync(ctx, action, telemetry);
+                    var args = await BindArgumentsAsync(
+                        ctx,
+                        action,
+                        telemetry,
+                        settings.ClientInfoLimits ?? new());
                     var raw = await action.InvokeAsync(ctx.RequestServices, args);
 
                     if (raw is null)
@@ -297,7 +300,27 @@ namespace Heimdall.Server
                 {
                     timeoutScope.Dispose();
                 }
-            }).ExcludeFromDescription();
+            };
+
+            var registry = app.ServiceProvider.GetRequiredService<ContentRegistry>();
+            foreach (var action in registry.Actions)
+            {
+                var endpoint = app.MapPost(
+                    "__heimdall/v1/content/actions",
+                    handler);
+
+                endpoint.WithMetadata(new HeimdallContentActionEndpointMetadata(action.ActionId));
+                foreach (var metadata in action.RateLimitingMetadata)
+                    endpoint.WithMetadata(metadata);
+
+                endpoint.ExcludeFromDescription();
+            }
+
+            app.MapPost(
+                    "__heimdall/v1/content/actions",
+                    handler)
+                .WithMetadata(new HeimdallContentActionEndpointMetadata(actionId: null))
+                .ExcludeFromDescription();
 
             return app;
         }
@@ -390,7 +413,8 @@ namespace Heimdall.Server
         private static async Task<object?[]> BindArgumentsAsync(
             HttpContext ctx,
             ContentActionDescriptor action,
-            HeimdallTelemetry.ContentActionTelemetryScope telemetry)
+            HeimdallTelemetry.ContentActionTelemetryScope telemetry,
+            HeimdallClientInfoLimits clientInfoLimits)
         {
             if (action.Parameters.Count == 0)
                 return Array.Empty<object?>();
@@ -410,7 +434,7 @@ namespace Heimdall.Server
                     ContentActionParameterKind.HttpContext => ctx,
                     ContentActionParameterKind.CancellationToken => ctx.RequestAborted,
                     ContentActionParameterKind.ClaimsPrincipal => ctx.User,
-                    ContentActionParameterKind.ClientInfo => BindClientInfo(ctx),
+                    ContentActionParameterKind.ClientInfo => BindClientInfo(ctx, clientInfoLimits),
                     ContentActionParameterKind.Service => ResolveRequiredService(ctx, action, parameter),
                     ContentActionParameterKind.Payload => await BindPayloadParameterAsync(ctx, parameter),
                     ContentActionParameterKind.FormPayload => await BindFormPayloadParameterAsync(ctx, parameter),
@@ -422,7 +446,9 @@ namespace Heimdall.Server
 
             return args;
 
-            HeimdallClientInfo BindClientInfo(HttpContext httpContext)
+            HeimdallClientInfo BindClientInfo(
+                HttpContext httpContext,
+                HeimdallClientInfoLimits limits)
             {
                 if (clientInfoRead)
                     return clientInfo!;
@@ -451,6 +477,7 @@ namespace Heimdall.Server
                 {
                     clientInfo = JsonSerializer.Deserialize<HeimdallClientInfo>(raw, JsonOptions)
                         ?? throw new JsonException("The client information value was null.");
+                    ValidateClientInfo(clientInfo, limits);
                     clientInfo.IsAvailable = true;
                     return clientInfo;
                 }
@@ -549,6 +576,106 @@ namespace Heimdall.Server
 
                 return requestForm!;
             }
+        }
+
+        private static void ValidateClientInfo(
+            HeimdallClientInfo clientInfo,
+            HeimdallClientInfoLimits configuredLimits)
+        {
+            var limits = configuredLimits ?? new HeimdallClientInfoLimits();
+
+            ValidateStorageArea(clientInfo.Storage.Local, "local", limits);
+            ValidateStorageArea(clientInfo.Storage.Session, "session", limits);
+
+            var storageChars = JsonSerializer.Serialize(clientInfo.Storage, JsonOptions).Length;
+            if (storageChars > Math.Max(0, limits.MaxStorageChars))
+            {
+                throw new ContentActionBindingException(
+                    StatusCodes.Status400BadRequest,
+                    $"The {HeimdallClientInfo.HeaderName} storage value exceeds the configured " +
+                    $"{Math.Max(0, limits.MaxStorageChars)}-character limit.");
+            }
+
+            if (clientInfo.Extensions.Count > Math.Max(0, limits.MaxExtensionEntries))
+            {
+                throw new ContentActionBindingException(
+                    StatusCodes.Status400BadRequest,
+                    $"The {HeimdallClientInfo.HeaderName} extensions value exceeds the configured " +
+                    $"{Math.Max(0, limits.MaxExtensionEntries)}-entry limit.");
+            }
+
+            var extensionChars = JsonSerializer.Serialize(clientInfo.Extensions, JsonOptions).Length;
+            if (extensionChars > Math.Max(0, limits.MaxExtensionChars))
+            {
+                throw new ContentActionBindingException(
+                    StatusCodes.Status400BadRequest,
+                    $"The {HeimdallClientInfo.HeaderName} extensions value exceeds the configured " +
+                    $"{Math.Max(0, limits.MaxExtensionChars)}-character limit.");
+            }
+
+            var maxDepth = Math.Max(0, limits.MaxExtensionDepth);
+            foreach (var extension in clientInfo.Extensions)
+            {
+                if (GetJsonDepth(extension.Value) > maxDepth)
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status400BadRequest,
+                        $"The {HeimdallClientInfo.HeaderName} extension '{extension.Key}' exceeds the configured " +
+                        $"JSON depth limit of {maxDepth}.");
+                }
+            }
+        }
+
+        private static void ValidateStorageArea(
+            Dictionary<string, string> values,
+            string area,
+            HeimdallClientInfoLimits limits)
+        {
+            var maxKeys = Math.Max(0, limits.MaxStorageKeysPerArea);
+            if (values.Count > maxKeys)
+            {
+                throw new ContentActionBindingException(
+                    StatusCodes.Status400BadRequest,
+                    $"The {HeimdallClientInfo.HeaderName} {area} storage value exceeds the configured " +
+                    $"{maxKeys}-key limit.");
+            }
+
+            var maxKeyLength = Math.Max(0, limits.MaxStorageKeyLength);
+            var maxValueLength = Math.Max(0, limits.MaxStorageValueLength);
+            foreach (var pair in values)
+            {
+                if (pair.Key.Length > maxKeyLength)
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status400BadRequest,
+                        $"The {HeimdallClientInfo.HeaderName} {area} storage key exceeds the configured " +
+                        $"{maxKeyLength}-character limit.");
+                }
+
+                if (pair.Value is null || pair.Value.Length > maxValueLength)
+                {
+                    throw new ContentActionBindingException(
+                        StatusCodes.Status400BadRequest,
+                        $"The {HeimdallClientInfo.HeaderName} {area} storage value exceeds the configured " +
+                        $"{maxValueLength}-character limit.");
+                }
+            }
+        }
+
+        private static int GetJsonDepth(JsonElement element)
+        {
+            return element.ValueKind switch
+            {
+                JsonValueKind.Array => 1 + element.EnumerateArray()
+                    .Select(GetJsonDepth)
+                    .DefaultIfEmpty(0)
+                    .Max(),
+                JsonValueKind.Object => 1 + element.EnumerateObject()
+                    .Select(property => GetJsonDepth(property.Value))
+                    .DefaultIfEmpty(0)
+                    .Max(),
+                _ => 0
+            };
         }
 
         private static async Task<IResult?> AuthorizeActionAsync(

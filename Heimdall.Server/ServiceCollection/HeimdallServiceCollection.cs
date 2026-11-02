@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.AspNetCore.Routing;
 using System.Reflection;
 
 namespace Heimdall.Server
@@ -224,6 +225,9 @@ namespace Heimdall.Server
 
                 return registry;
             });
+
+            services.TryAddEnumerable(
+                ServiceDescriptor.Singleton<MatcherPolicy, HeimdallContentActionMatcherPolicy>());
 
             services.AddSingleton<BifrostSubscribeToken>();
             services.AddSingleton<BifrostConnectionStore>();

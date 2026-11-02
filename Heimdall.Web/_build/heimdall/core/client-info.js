@@ -11,6 +11,18 @@ const MEDIA_QUERIES = [
     "(hover: hover)"
 ];
 
+const DEFAULT_LIMITS = {
+    maxKeysPerArea: 16,
+    maxKeyLength: 128,
+    maxValueLength: 1024,
+    maxStorageChars: 2048,
+    maxExtensionEntries: 16,
+    maxExtensionChars: 1024,
+    maxExtensionDepth: 4
+};
+
+const MAX_HEADER_LENGTH = 4096;
+
 export function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg }) {
     const media = new Map();
     let installed = false;
@@ -81,6 +93,343 @@ export function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg 
 
     function shortString(value, maxLength) {
         return String(value || "").trim().slice(0, maxLength);
+    }
+
+    function nonNegativeLimit(value, fallback) {
+        const number = Number(value);
+        return Number.isFinite(number)
+            ? Math.max(0, Math.floor(number))
+            : fallback;
+    }
+
+    function normalizeLimits(config) {
+        const configured = config?.clientInfoLimits;
+        return {
+            maxKeysPerArea: nonNegativeLimit(configured?.maxKeysPerArea, DEFAULT_LIMITS.maxKeysPerArea),
+            maxKeyLength: nonNegativeLimit(configured?.maxKeyLength, DEFAULT_LIMITS.maxKeyLength),
+            maxValueLength: nonNegativeLimit(configured?.maxValueLength, DEFAULT_LIMITS.maxValueLength),
+            maxStorageChars: nonNegativeLimit(configured?.maxStorageChars, DEFAULT_LIMITS.maxStorageChars),
+            maxExtensionEntries: nonNegativeLimit(configured?.maxExtensionEntries, DEFAULT_LIMITS.maxExtensionEntries),
+            maxExtensionChars: nonNegativeLimit(configured?.maxExtensionChars, DEFAULT_LIMITS.maxExtensionChars),
+            maxExtensionDepth: nonNegativeLimit(configured?.maxExtensionDepth, DEFAULT_LIMITS.maxExtensionDepth)
+        };
+    }
+
+    function normalizeClientInfoConfig(config) {
+        const raw = config?.clientInfo;
+        const enabled = raw === true
+            ? true
+            : !!(raw && typeof raw === "object" && raw.enabled === true);
+        const storage = raw && typeof raw === "object" && raw.storage && typeof raw.storage === "object"
+            ? raw.storage
+            : {};
+
+        function keysFor(area) {
+            if (!Array.isArray(storage[area]))
+                return [];
+
+            const seen = new Set();
+            const result = [];
+            for (const rawKey of storage[area]) {
+                const key = String(rawKey ?? "").trim();
+                if (!key || seen.has(key))
+                    continue;
+                seen.add(key);
+                result.push(key);
+            }
+            return result;
+        }
+
+        return {
+            enabled,
+            local: keysFor("local"),
+            session: keysFor("session"),
+            limits: normalizeLimits(config)
+        };
+    }
+
+    function emitClientInfoError(requestContext, detail) {
+        const eventDetail = {
+            phase: "client-info",
+            actionId: requestContext?.actionId || null,
+            requestId: requestContext?.requestId || null,
+            attempt: requestContext?.attempt || 0,
+            sourceElement: requestContext?.sourceElement || null,
+            ...detail
+        };
+
+        if (typeof emitLifecycle === "function") {
+            emitLifecycle(
+                requestContext?.sourceElement || null,
+                "heimdall:client-info-error",
+                eventDetail);
+        }
+
+        if (typeof dbg === "function")
+            dbg("client information value omitted", eventDetail);
+    }
+
+    function serializedLength(value) {
+        try {
+            return JSON.stringify(value).length;
+        } catch {
+            return Number.POSITIVE_INFINITY;
+        }
+    }
+
+    function jsonDepth(value) {
+        if (!value || typeof value !== "object")
+            return 0;
+
+        const values = Array.isArray(value) ? value : Object.values(value);
+        if (values.length === 0)
+            return 1;
+
+        return 1 + Math.max(...values.map(jsonDepth));
+    }
+
+    function tryReadStorage(area, key, requestContext) {
+        let storage;
+        try {
+            storage = global[area === "local" ? "localStorage" : "sessionStorage"];
+        } catch (error) {
+            emitClientInfoError(requestContext, {
+                code: "storage-area-unavailable",
+                area,
+                key: null,
+                errorName: error?.name || "StorageError"
+            });
+            return { available: false, value: null };
+        }
+
+        if (!storage || typeof storage.getItem !== "function") {
+            emitClientInfoError(requestContext, {
+                code: "storage-area-unavailable",
+                area,
+                key: null,
+                errorName: "StorageUnavailable"
+            });
+            return { available: false, value: null };
+        }
+
+        try {
+            return { available: true, value: storage.getItem(key) };
+        } catch (error) {
+            emitClientInfoError(requestContext, {
+                code: "storage-read-failed",
+                area,
+                key,
+                errorName: error?.name || "StorageError"
+            });
+            return { available: true, value: null };
+        }
+    }
+
+    function collectStorage(clientInfoConfig, requestContext) {
+        const limits = clientInfoConfig.limits;
+        const storage = {};
+        let hasValues = false;
+
+        for (const area of ["local", "session"]) {
+            const configuredKeys = clientInfoConfig[area];
+            const areaValues = {};
+
+            for (let index = 0; index < configuredKeys.length; index++) {
+                const key = configuredKeys[index];
+                if (index >= limits.maxKeysPerArea) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-key-limit",
+                        area,
+                        key,
+                        limit: limits.maxKeysPerArea
+                    });
+                    continue;
+                }
+
+                if (key.length > limits.maxKeyLength) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-key-too-long",
+                        area,
+                        key,
+                        limit: limits.maxKeyLength
+                    });
+                    continue;
+                }
+
+                const result = tryReadStorage(area, key, requestContext);
+                if (!result.available || result.value == null)
+                    continue;
+
+                if (result.value.length > limits.maxValueLength) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-value-too-long",
+                        area,
+                        key,
+                        limit: limits.maxValueLength
+                    });
+                    continue;
+                }
+
+                const candidate = {
+                    local: area === "local" ? { ...areaValues, [key]: result.value } : storage.local || {},
+                    session: area === "session" ? { ...areaValues, [key]: result.value } : storage.session || {}
+                };
+                if (area === "local")
+                    candidate.session = storage.session || {};
+                else
+                    candidate.local = storage.local || {};
+
+                if (serializedLength(candidate) > limits.maxStorageChars) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-size-limit",
+                        area,
+                        key,
+                        limit: limits.maxStorageChars
+                    });
+                    continue;
+                }
+
+                areaValues[key] = result.value;
+                storage[area] = areaValues;
+                hasValues = true;
+            }
+        }
+
+        return hasValues ? storage : null;
+    }
+
+    function normalizeExtensions(info, requestContext, limits) {
+        const source = info && info.extensions && typeof info.extensions === "object"
+            ? info.extensions
+            : {};
+        const normalized = {};
+        const entries = Object.entries(source);
+
+        for (let index = 0; index < entries.length; index++) {
+            const [key, value] = entries[index];
+            if (index >= limits.maxExtensionEntries) {
+                emitClientInfoError(requestContext, {
+                    code: "extension-entry-limit",
+                    area: null,
+                    key,
+                    limit: limits.maxExtensionEntries
+                });
+                continue;
+            }
+
+            if (jsonDepth(value) > limits.maxExtensionDepth) {
+                emitClientInfoError(requestContext, {
+                    code: "extension-depth-limit",
+                    area: null,
+                    key,
+                    limit: limits.maxExtensionDepth
+                });
+                continue;
+            }
+
+            const candidate = { ...normalized, [key]: value };
+            if (serializedLength(candidate) > limits.maxExtensionChars) {
+                emitClientInfoError(requestContext, {
+                    code: "extension-size-limit",
+                    area: null,
+                    key,
+                    limit: limits.maxExtensionChars
+                });
+                continue;
+            }
+
+            normalized[key] = value;
+        }
+
+        return normalized;
+    }
+
+    function normalizeStorage(infoStorage, requestContext, limits) {
+        const normalized = {};
+        let hasValues = false;
+
+        for (const area of ["local", "session"]) {
+            const source = infoStorage && infoStorage[area] && typeof infoStorage[area] === "object"
+                ? infoStorage[area]
+                : {};
+            const values = {};
+            const entries = Object.entries(source);
+
+            for (let index = 0; index < entries.length; index++) {
+                const [key, value] = entries[index];
+                if (index >= limits.maxKeysPerArea) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-key-limit",
+                        area,
+                        key,
+                        limit: limits.maxKeysPerArea
+                    });
+                    continue;
+                }
+
+                if (key.length > limits.maxKeyLength) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-key-too-long",
+                        area,
+                        key,
+                        limit: limits.maxKeyLength
+                    });
+                    continue;
+                }
+
+                if (typeof value !== "string") {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-value-invalid",
+                        area,
+                        key,
+                        limit: limits.maxValueLength
+                    });
+                    continue;
+                }
+
+                if (value.length > limits.maxValueLength) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-value-too-long",
+                        area,
+                        key,
+                        limit: limits.maxValueLength
+                    });
+                    continue;
+                }
+
+                const candidate = {
+                    local: area === "local" ? { ...values, [key]: value } : normalized.local || {},
+                    session: area === "session" ? { ...values, [key]: value } : normalized.session || {}
+                };
+                if (serializedLength(candidate) > limits.maxStorageChars) {
+                    emitClientInfoError(requestContext, {
+                        code: "storage-size-limit",
+                        area,
+                        key,
+                        limit: limits.maxStorageChars
+                    });
+                    continue;
+                }
+
+                values[key] = value;
+                normalized[area] = values;
+                hasValues = true;
+            }
+        }
+
+        return hasValues ? normalized : {};
+    }
+
+    function prepareHeaderInfo(info, clientInfoConfig, requestContext) {
+        if (!info || typeof info !== "object")
+            return info;
+
+        const limits = clientInfoConfig.limits;
+        if (info.storage && typeof info.storage === "object")
+            info.storage = normalizeStorage(info.storage, requestContext, limits);
+        if (Object.prototype.hasOwnProperty.call(info, "extensions"))
+            info.extensions = normalizeExtensions(info, requestContext, limits);
+        return info;
     }
 
     function preferredContrast() {
@@ -164,7 +513,8 @@ export function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg 
 
     function getHeaderValue(requestContext) {
         const config = getConfig();
-        if (!config || config.clientInfo !== true)
+        const clientInfoConfig = normalizeClientInfoConfig(config);
+        if (!config || !clientInfoConfig.enabled)
             return null;
 
         installInvalidationListeners();
@@ -198,6 +548,9 @@ export function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg 
             sourceElement: requestContext?.sourceElement || null,
             info: cloneInfo(cachedInfo)
         };
+        const storage = collectStorage(clientInfoConfig, requestContext);
+        if (storage)
+            detail.info.storage = storage;
         const shouldInclude = typeof emitLifecycle !== "function" || emitLifecycle(
             requestContext?.sourceElement || null,
             "heimdall:client-info-before",
@@ -209,8 +562,52 @@ export function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg 
             return null;
 
         try {
-            return JSON.stringify(detail.info);
+            const prepared = prepareHeaderInfo(detail.info, clientInfoConfig, requestContext);
+            let serialized = JSON.stringify(prepared);
+            if (serialized.length > MAX_HEADER_LENGTH && prepared && typeof prepared === "object") {
+                if (prepared.extensions && Object.keys(prepared.extensions).length > 0) {
+                    delete prepared.extensions;
+                    emitClientInfoError(requestContext, {
+                        code: "header-size-limit",
+                        area: null,
+                        key: null,
+                        dropped: "extensions",
+                        limit: MAX_HEADER_LENGTH
+                    });
+                    serialized = JSON.stringify(prepared);
+                }
+                if (serialized.length > MAX_HEADER_LENGTH && prepared.storage) {
+                    delete prepared.storage;
+                    emitClientInfoError(requestContext, {
+                        code: "header-size-limit",
+                        area: null,
+                        key: null,
+                        dropped: "storage",
+                        limit: MAX_HEADER_LENGTH
+                    });
+                    serialized = JSON.stringify(prepared);
+                }
+            }
+
+            if (serialized.length > MAX_HEADER_LENGTH) {
+                emitClientInfoError(requestContext, {
+                    code: "header-size-limit",
+                    area: null,
+                    key: null,
+                    dropped: "client-info",
+                    limit: MAX_HEADER_LENGTH
+                });
+                return null;
+            }
+
+            return serialized;
         } catch (error) {
+            emitClientInfoError(requestContext, {
+                code: "serialization-failed",
+                area: null,
+                key: null,
+                errorName: error?.name || "SerializationError"
+            });
             if (typeof dbg === "function")
                 dbg("client information serialization failed", error);
             return null;

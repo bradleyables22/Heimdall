@@ -4,7 +4,7 @@ import {
     resolveTarget
 } from "./utils.js";
 
-export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
+export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -164,6 +164,111 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
             directive.remove();
     }
 
+    function stripStorageFromFragment(fragment) {
+        if (!fragment || !fragment.querySelectorAll)
+            return;
+        const directives = fragment.querySelectorAll("storage");
+        for (const directive of directives)
+            directive.remove();
+    }
+
+    function emitStorageError(sourceEl, context, detail) {
+        if (!emitLifecycle)
+            return;
+
+        emitLifecycle(sourceEl, "heimdall:storage-error", {
+            phase: "response-directive",
+            sourceElement: sourceEl || null,
+            ...(context || {}),
+            ...detail
+        });
+    }
+
+    function processStorageDirectives(fragment, sourceEl, context) {
+        if (!fragment || !fragment.querySelectorAll)
+            return 0;
+
+        const directives = Array.from(fragment.querySelectorAll("storage"));
+        let applied = 0;
+        for (const directive of directives) {
+            const area = String(getAttr(directive, "area") || "").trim().toLowerCase();
+            const operation = String(getAttr(directive, "operation") || "").trim().toLowerCase();
+            const key = getAttr(directive, "key");
+
+            if (area !== "local" && area !== "session") {
+                emitStorageError(sourceEl, context, {
+                    code: "invalid-area",
+                    area: area || null,
+                    operation: operation || null,
+                    key: key || null
+                });
+                directive.remove();
+                continue;
+            }
+
+            if (operation !== "set" && operation !== "remove") {
+                emitStorageError(sourceEl, context, {
+                    code: "invalid-operation",
+                    area,
+                    operation: operation || null,
+                    key: key || null
+                });
+                directive.remove();
+                continue;
+            }
+
+            if (!key || !key.trim()) {
+                emitStorageError(sourceEl, context, {
+                    code: "missing-key",
+                    area,
+                    operation,
+                    key: null
+                });
+                directive.remove();
+                continue;
+            }
+
+            let storage;
+            try {
+                storage = global[area === "local" ? "localStorage" : "sessionStorage"];
+            } catch (error) {
+                emitStorageError(sourceEl, context, {
+                    code: "storage-area-unavailable",
+                    area,
+                    operation,
+                    key,
+                    errorName: error?.name || "StorageError"
+                });
+                directive.remove();
+                continue;
+            }
+
+            try {
+                if (!storage)
+                    throw new Error("Storage area is unavailable.");
+
+                if (operation === "set")
+                    storage.setItem(key, directive.textContent || "");
+                else
+                    storage.removeItem(key);
+
+                applied++;
+            } catch (error) {
+                emitStorageError(sourceEl, context, {
+                    code: operation === "set" ? "storage-write-failed" : "storage-remove-failed",
+                    area,
+                    operation,
+                    key,
+                    errorName: error?.name || "StorageError"
+                });
+            }
+
+            directive.remove();
+        }
+
+        return applied;
+    }
+
     function extractHistoryFromFragment(fragment) {
         if (!fragment || !fragment.querySelectorAll)
             return null;
@@ -293,8 +398,9 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         const hasJsInvokeVoid = containsTag(html, "javascript");
         const hasMutation = containsTag(html, "mutation");
         const hasHistory = containsTag(html, "history");
+        const hasStorage = containsTag(html, "storage");
 
-        if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory)
+        if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage)
             return html;
 
         const tpl = parseHtmlToTemplate(html);
@@ -304,6 +410,7 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         stripJsInvokeVoidFromFragment(tpl.content);
         stripMutationsFromFragment(tpl.content);
         stripHistoryFromFragment(tpl.content);
+        stripStorageFromFragment(tpl.content);
         return fragmentToHtml(tpl.content);
     }
 
@@ -315,8 +422,9 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         const hasJsInvokeVoid = containsTag(html, "javascript");
         const hasMutation = containsTag(html, "mutation");
         const hasHistory = containsTag(html, "history");
+        const hasStorage = containsTag(html, "storage");
 
-        if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory) {
+        if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage) {
             return {
                 html: html || "",
                 applied: 0,
@@ -336,6 +444,7 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         if (redirect && redirect.url) {
             stripRedirectsFromFragment(fragment);
             stripHistoryFromFragment(fragment);
+            stripStorageFromFragment(fragment);
             return {
                 html: fragmentToHtml(fragment),
                 applied: 0,
@@ -347,6 +456,8 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
                 historyCommand: null
             };
         }
+
+        processStorageDirectives(fragment, sourceEl, context);
 
         const historyCommand = extractHistoryFromFragment(fragment);
 
@@ -491,6 +602,8 @@ export function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvok
         stripMutationsFromFragment,
         stripJsInvokeVoidFromFragment,
         stripRedirectsFromFragment,
-        stripHistoryFromFragment
+        stripHistoryFromFragment,
+        stripStorageFromFragment,
+        processStorageDirectives
     };
 }

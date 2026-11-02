@@ -256,6 +256,28 @@ namespace Heimdall.Server.Rendering
 			public FragmentBuilder Data(string key, string value) { _parts.Add(Html.Data(key, value)); return this; }
 
 			/// <summary>
+			/// Adds one <c>data-*</c> attribute for each property in a JSON object.
+			/// </summary>
+			public FragmentBuilder Data(object? values, System.Text.Json.JsonSerializerOptions? options = null)
+			{
+				foreach (var attribute in Html.Data(values, options))
+					_parts.Add(attribute);
+				return this;
+			}
+
+			/// <summary>
+			/// Adds one <c>data-*</c> attribute containing a JSON value.
+			/// </summary>
+			public FragmentBuilder DataJson(
+				string key,
+				object? value,
+				System.Text.Json.JsonSerializerOptions? options = null)
+			{
+				_parts.Add(Html.DataJson(key, value, options));
+				return this;
+			}
+
+			/// <summary>
 			/// Adds an <c>aria-*</c> attribute.
 			/// </summary>
 			public FragmentBuilder Aria(string key, string value) { _parts.Add(Html.Aria(key, value)); return this; }

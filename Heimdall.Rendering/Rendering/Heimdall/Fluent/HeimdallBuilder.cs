@@ -408,6 +408,13 @@ namespace Heimdall.Server.Rendering
 				return this;
 			}
 
+			/// <summary>Uses one local or session storage value as the complete JSON payload source.</summary>
+			public HeimdallBuilder PayloadFromStorage(HeimdallHtml.StorageArea area, string key)
+			{
+				_b.Add(HeimdallHtml.PayloadFromStorage(area, key));
+				return this;
+			}
+
 			/// <summary>
 			/// References a global payload object by path.
 			/// </summary>

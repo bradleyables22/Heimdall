@@ -280,6 +280,38 @@ Heimdall honors ASP.NET Core's native `[RequestSizeLimit]`, `[DisableRequestSize
 
 Uploads are parsed through ASP.NET Core's buffered `IFormFile` pipeline. Keep the limits finite, validate file signatures rather than trusting extensions or `Content-Type`, generate storage names instead of using `FileName`, and use a dedicated streaming endpoint for files that are too large to buffer safely.
 
+## Content-action rate limiting
+
+Heimdall content actions support ASP.NET Core's native `[EnableRateLimiting]` and `[DisableRateLimiting]` metadata at the method or declaring-type level. Register the native rate-limiter services and middleware in the normal ASP.NET Core pipeline:
+
+```csharp
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("content-actions", limiter =>
+    {
+        limiter.PermitLimit = 60;
+        limiter.Window = TimeSpan.FromMinutes(1);
+        limiter.QueueLimit = 0;
+    });
+});
+
+// UseRateLimiter must run before UseHeimdall's endpoint execution.
+app.UseRateLimiter();
+app.UseHeimdall();
+```
+
+```csharp
+[EnableRateLimiting("content-actions")]
+[ContentInvocation("profile.save")]
+public static IHtmlContent Save(ProfilePayload payload)
+{
+    return Profile.Render(payload);
+}
+```
+
+Method-level metadata overrides declaring-type metadata. `[DisableRateLimiting]` skips both global and endpoint-specific rate limiting for that invocation. Heimdall preserves the existing shared content-action URL and selects the invocation endpoint before ASP.NET Core's rate-limiter middleware runs, so native policy registration, rejection handling, and metrics remain available.
+
 ## Browser-local time
 
 Any fluent HTML element can render an absolute time with a server fallback and mark it for conversion to the browser user's local timezone:

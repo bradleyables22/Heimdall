@@ -4,7 +4,7 @@
 
 ### Added
 
-- Moved the `Html` core and `FluentHtml` builder APIs to the transitive `HeimdallFramework.Rendering` package.
+- Moved the `Html` core, `FluentHtml` builder APIs, and typed Heimdall markup-authoring helpers to the transitive `HeimdallFramework.Rendering` package. The Server package retains the execution and integration pipeline.
 - Added support for concrete `IHtmlContent` return types, `Task<THtml>` and `ValueTask<THtml>` content actions, `IHtmlAsyncContent` rendering, async HTML materialization, and async-aware Bifrost/static-page output.
 - Added async callback overloads across the FluentHtml element, fragment, and nested builder helpers, with recursive async rendering for nested HTML content.
 - Added opt-in static Razor component rendering through `AddHeimdallBlazor()` and `IHeimdallBlazorRenderer`, including component parameters, dependency injection, and asynchronous component initialization without creating a Blazor circuit.
@@ -13,6 +13,7 @@
 - Added `AddBifrostTopicAuthHandler<THandler>()` and `IBifrostTopicAuthHandler` for DI-backed, async authorization across multiple topic families.
 - Added the local `IBifrostConnectionStore`, `BifrostConnectionSelector`, and `BifrostConnectionInfo` APIs for inspecting, enriching, and selectively disconnecting active Bifrost connections.
 - Added `AddBifrostConnectionHandler<THandler>()` plus inline authenticated/disconnected callbacks for scoped Bifrost connection lifecycle integration.
+- Added native ASP.NET Core `[EnableRateLimiting]` and `[DisableRateLimiting]` support for Heimdall content invocations, including declaring-type metadata and shared-endpoint action selection before rate-limiter middleware.
 
 ## [3.0.9] - 2026-08-30
 

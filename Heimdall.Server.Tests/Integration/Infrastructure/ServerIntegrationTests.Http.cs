@@ -23,6 +23,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewEngines;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -89,6 +90,45 @@ public sealed partial class ServerIntegrationTests
         app.UseAuthentication();
         app.UseAuthorization();
         ((IApplicationBuilder)app).UseHeimdall();
+        await app.StartAsync();
+        return app;
+    }
+
+    private static async Task<WebApplication> CreateRateLimitedAppAsync()
+    {
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = "Development"
+        });
+        builder.WebHost.UseTestServer();
+
+        builder.Services.AddAntiforgery();
+        builder.Services.AddAuthentication(TestAuthHandler.SchemeName)
+            .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(TestAuthHandler.SchemeName, _ => { });
+        builder.Services.AddAuthorization();
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddFixedWindowLimiter(
+                "tests.rate-limited",
+                limiterOptions =>
+                {
+                    limiterOptions.PermitLimit = 1;
+                    limiterOptions.Window = TimeSpan.FromMinutes(1);
+                    limiterOptions.QueueLimit = 0;
+                });
+        });
+        builder.Services.AddHeimdall(options =>
+        {
+            options.EnableDetailedErrors = true;
+        }, typeof(ServerIntegrationTests).Assembly);
+
+        var app = builder.Build();
+        app.UseAntiforgery();
+        app.UseAuthentication();
+        app.UseAuthorization();
+        app.UseRateLimiter();
+        app.UseHeimdall();
         await app.StartAsync();
         return app;
     }

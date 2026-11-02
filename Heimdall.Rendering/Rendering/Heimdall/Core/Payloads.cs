@@ -51,6 +51,16 @@ namespace Heimdall.Server.Rendering
 				key is null ? PayloadFrom.ClosestState : PayloadFrom.ClosestStateKey(key));
 
 		/// <summary>
+		/// Uses one local or session storage value as the complete JSON payload source.
+		/// </summary>
+		public static Html.HtmlAttr PayloadFromStorage(StorageArea area, string key)
+		{
+			var normalizedKey = NormalizeStorageKey(key);
+			return Html.Attr(Attrs.PayloadFrom,
+				$"{StorageAreaToString(area)}-storage:{normalizedKey}");
+		}
+
+		/// <summary>
 		/// Provides helpers for building payload source directives.
 		/// </summary>
 		public static class PayloadFrom

@@ -38,6 +38,8 @@ namespace Heimdall.Server
 
         public bool RequiresAntiforgery { get; }
 
+        public IReadOnlyList<object> RateLimitingMetadata { get; }
+
         public bool RequiresAuthorization => AuthorizeData.Count > 0 && !AllowAnonymous;
 
         public bool HasPayload => PayloadParameter is not null;
@@ -57,7 +59,8 @@ namespace Heimdall.Server
             bool allowAnonymous,
             IRequestSizeLimitMetadata? requestSizeLimit,
             IFormOptionsMetadata? formOptions,
-            bool requiresAntiforgery)
+            bool requiresAntiforgery,
+            IReadOnlyList<object> rateLimitingMetadata)
         {
             ActionId = actionId;
             Method = method;
@@ -70,6 +73,7 @@ namespace Heimdall.Server
             RequestSizeLimit = requestSizeLimit;
             FormOptions = formOptions;
             RequiresAntiforgery = requiresAntiforgery;
+            RateLimitingMetadata = rateLimitingMetadata;
             PayloadParameter = parameters.FirstOrDefault(x =>
                 x.Kind is ContentActionParameterKind.Payload or ContentActionParameterKind.FormPayload);
             _invoker = CompileInvoker(method);

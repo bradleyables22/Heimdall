@@ -79,7 +79,7 @@ import {
     //
     // Payload Options:
     //   - heimdall-payload='{"json":1}'
-    //   - heimdall-payload-from="closest-form|self|#form|ref:path|closest-state[:key]"
+    //   - heimdall-payload-from="closest-form|self|#form|ref:path|closest-state[:key]|local-storage:key|session-storage:key"
     //   - heimdall-payload-ref="Path.To.Object"
     //
     // Trigger Modifiers:
@@ -125,7 +125,7 @@ import {
     //   Useful for modal backdrops, overlays, and dismiss regions.
     //
     // ---------------------------------------------------------------------------
-    // Response Directives (<invocation>, <mutation>, <abort>, <redirect>, <history>)
+    // Response Directives (<invocation>, <mutation>, <storage>, <abort>, <redirect>, <history>)
     // ---------------------------------------------------------------------------
     // Any <invocation> element returned by the server is treated as an instruction
     // and is never rendered directly into the response output.
@@ -152,6 +152,11 @@ import {
     //   - Acts as a hard-stop directive
     //   - Prevents OOB processing, abort handling, and main target swap
     //   - First redirect wins
+    //
+    // <storage>:
+    //   - Applies one localStorage or sessionStorage set/remove operation
+    //   - Is removed before the main swap
+    //   - Does not execute JavaScript or target the DOM
     //
     // <history>:
     //   - Successful content actions may push or replace one same-origin URL
@@ -380,6 +385,7 @@ import {
         busyState
     });
     const dom = createDomPipeline({
+        global,
         getConfig: getRuntimeConfig,
         boot: root => boot(root),
         dbg,

@@ -8,11 +8,11 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Rendering</PackageId>
-		<Version>4.0.0</Version>
+		<Version>4.0.1</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
-		<Description>Server-side HTML rendering primitives and FluentHtml builders for Heimdall.</Description>
-		<PackageTags>heimdall framework;html;fluent;SSR;aspnetcore;rendering</PackageTags>
+		<Description>Standalone server-side HTML and Heimdall markup rendering primitives and FluentHtml builders.</Description>
+		<PackageTags>heimdall framework;html;fluent;SSR;aspnetcore;rendering;attributes;directives</PackageTags>
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>

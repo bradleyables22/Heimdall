@@ -73,6 +73,25 @@ export function createPayloadResolver(global) {
         return undefined;
     }
 
+    function readStoragePayload(area, key) {
+        let storage;
+        try {
+            storage = global[area === "local" ? "localStorage" : "sessionStorage"];
+        } catch {
+            return null;
+        }
+
+        if (!storage || typeof storage.getItem !== "function")
+            return null;
+
+        try {
+            const raw = storage.getItem(key);
+            return raw == null ? null : safeJsonParse(raw);
+        } catch {
+            return null;
+        }
+    }
+
     function payloadBindingFromElement(el) {
         const payloadAttr = getAttr(el, "heimdall-payload");
         if (payloadAttr)
@@ -93,6 +112,15 @@ export function createPayloadResolver(global) {
             const binding = createClosestStateBinding(el, key || null);
             return binding
                 ? { value: binding.value, binding }
+                : { value: null, binding: null };
+        }
+
+        if (from.startsWith("local-storage:") || from.startsWith("session-storage:")) {
+            const separator = from.indexOf(":");
+            const area = from.substring(0, separator) === "local-storage" ? "local" : "session";
+            const key = fromRaw.substring(separator + 1).trim();
+            return key
+                ? { value: readStoragePayload(area, key), binding: null }
                 : { value: null, binding: null };
         }
 

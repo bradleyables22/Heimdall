@@ -23,6 +23,7 @@ using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.AspNetCore.Mvc.ViewEngines;
 using Microsoft.AspNetCore.Mvc.ViewFeatures;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -232,5 +233,18 @@ public sealed partial class ServerIntegrationTests
         [ContentInvocation("tests.upload.form-limit-overridden")]
         public static IHtmlContent Overridden(IFormFile upload)
             => Html.Span(upload.Length);
+    }
+
+    [EnableRateLimiting("tests.rate-limited")]
+    private static class RateLimitedActions
+    {
+        [ContentInvocation("tests.rate.limited")]
+        public static IHtmlContent Limited()
+            => Html.Span("rate limited");
+
+        [DisableRateLimiting]
+        [ContentInvocation("tests.rate.disabled")]
+        public static IHtmlContent Disabled()
+            => Html.Span("rate limit disabled");
     }
 }

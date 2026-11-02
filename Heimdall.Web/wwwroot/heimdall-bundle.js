@@ -1233,6 +1233,16 @@
     "(pointer: fine)",
     "(hover: hover)"
   ];
+  var DEFAULT_LIMITS = {
+    maxKeysPerArea: 16,
+    maxKeyLength: 128,
+    maxValueLength: 1024,
+    maxStorageChars: 2048,
+    maxExtensionEntries: 16,
+    maxExtensionChars: 1024,
+    maxExtensionDepth: 4
+  };
+  var MAX_HEADER_LENGTH = 4096;
   function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg }) {
     const media = /* @__PURE__ */ new Map();
     let installed = false;
@@ -1288,6 +1298,291 @@
     }
     function shortString(value, maxLength) {
       return String(value || "").trim().slice(0, maxLength);
+    }
+    function nonNegativeLimit(value, fallback) {
+      const number = Number(value);
+      return Number.isFinite(number) ? Math.max(0, Math.floor(number)) : fallback;
+    }
+    function normalizeLimits(config) {
+      const configured = config?.clientInfoLimits;
+      return {
+        maxKeysPerArea: nonNegativeLimit(configured?.maxKeysPerArea, DEFAULT_LIMITS.maxKeysPerArea),
+        maxKeyLength: nonNegativeLimit(configured?.maxKeyLength, DEFAULT_LIMITS.maxKeyLength),
+        maxValueLength: nonNegativeLimit(configured?.maxValueLength, DEFAULT_LIMITS.maxValueLength),
+        maxStorageChars: nonNegativeLimit(configured?.maxStorageChars, DEFAULT_LIMITS.maxStorageChars),
+        maxExtensionEntries: nonNegativeLimit(configured?.maxExtensionEntries, DEFAULT_LIMITS.maxExtensionEntries),
+        maxExtensionChars: nonNegativeLimit(configured?.maxExtensionChars, DEFAULT_LIMITS.maxExtensionChars),
+        maxExtensionDepth: nonNegativeLimit(configured?.maxExtensionDepth, DEFAULT_LIMITS.maxExtensionDepth)
+      };
+    }
+    function normalizeClientInfoConfig(config) {
+      const raw = config?.clientInfo;
+      const enabled = raw === true ? true : !!(raw && typeof raw === "object" && raw.enabled === true);
+      const storage = raw && typeof raw === "object" && raw.storage && typeof raw.storage === "object" ? raw.storage : {};
+      function keysFor(area) {
+        if (!Array.isArray(storage[area]))
+          return [];
+        const seen = /* @__PURE__ */ new Set();
+        const result = [];
+        for (const rawKey of storage[area]) {
+          const key = String(rawKey ?? "").trim();
+          if (!key || seen.has(key))
+            continue;
+          seen.add(key);
+          result.push(key);
+        }
+        return result;
+      }
+      return {
+        enabled,
+        local: keysFor("local"),
+        session: keysFor("session"),
+        limits: normalizeLimits(config)
+      };
+    }
+    function emitClientInfoError(requestContext, detail) {
+      const eventDetail = {
+        phase: "client-info",
+        actionId: requestContext?.actionId || null,
+        requestId: requestContext?.requestId || null,
+        attempt: requestContext?.attempt || 0,
+        sourceElement: requestContext?.sourceElement || null,
+        ...detail
+      };
+      if (typeof emitLifecycle === "function") {
+        emitLifecycle(
+          requestContext?.sourceElement || null,
+          "heimdall:client-info-error",
+          eventDetail
+        );
+      }
+      if (typeof dbg === "function")
+        dbg("client information value omitted", eventDetail);
+    }
+    function serializedLength(value) {
+      try {
+        return JSON.stringify(value).length;
+      } catch {
+        return Number.POSITIVE_INFINITY;
+      }
+    }
+    function jsonDepth(value) {
+      if (!value || typeof value !== "object")
+        return 0;
+      const values = Array.isArray(value) ? value : Object.values(value);
+      if (values.length === 0)
+        return 1;
+      return 1 + Math.max(...values.map(jsonDepth));
+    }
+    function tryReadStorage(area, key, requestContext) {
+      let storage;
+      try {
+        storage = global[area === "local" ? "localStorage" : "sessionStorage"];
+      } catch (error) {
+        emitClientInfoError(requestContext, {
+          code: "storage-area-unavailable",
+          area,
+          key: null,
+          errorName: error?.name || "StorageError"
+        });
+        return { available: false, value: null };
+      }
+      if (!storage || typeof storage.getItem !== "function") {
+        emitClientInfoError(requestContext, {
+          code: "storage-area-unavailable",
+          area,
+          key: null,
+          errorName: "StorageUnavailable"
+        });
+        return { available: false, value: null };
+      }
+      try {
+        return { available: true, value: storage.getItem(key) };
+      } catch (error) {
+        emitClientInfoError(requestContext, {
+          code: "storage-read-failed",
+          area,
+          key,
+          errorName: error?.name || "StorageError"
+        });
+        return { available: true, value: null };
+      }
+    }
+    function collectStorage(clientInfoConfig, requestContext) {
+      const limits = clientInfoConfig.limits;
+      const storage = {};
+      let hasValues = false;
+      for (const area of ["local", "session"]) {
+        const configuredKeys = clientInfoConfig[area];
+        const areaValues = {};
+        for (let index = 0; index < configuredKeys.length; index++) {
+          const key = configuredKeys[index];
+          if (index >= limits.maxKeysPerArea) {
+            emitClientInfoError(requestContext, {
+              code: "storage-key-limit",
+              area,
+              key,
+              limit: limits.maxKeysPerArea
+            });
+            continue;
+          }
+          if (key.length > limits.maxKeyLength) {
+            emitClientInfoError(requestContext, {
+              code: "storage-key-too-long",
+              area,
+              key,
+              limit: limits.maxKeyLength
+            });
+            continue;
+          }
+          const result = tryReadStorage(area, key, requestContext);
+          if (!result.available || result.value == null)
+            continue;
+          if (result.value.length > limits.maxValueLength) {
+            emitClientInfoError(requestContext, {
+              code: "storage-value-too-long",
+              area,
+              key,
+              limit: limits.maxValueLength
+            });
+            continue;
+          }
+          const candidate = {
+            local: area === "local" ? { ...areaValues, [key]: result.value } : storage.local || {},
+            session: area === "session" ? { ...areaValues, [key]: result.value } : storage.session || {}
+          };
+          if (area === "local")
+            candidate.session = storage.session || {};
+          else
+            candidate.local = storage.local || {};
+          if (serializedLength(candidate) > limits.maxStorageChars) {
+            emitClientInfoError(requestContext, {
+              code: "storage-size-limit",
+              area,
+              key,
+              limit: limits.maxStorageChars
+            });
+            continue;
+          }
+          areaValues[key] = result.value;
+          storage[area] = areaValues;
+          hasValues = true;
+        }
+      }
+      return hasValues ? storage : null;
+    }
+    function normalizeExtensions(info, requestContext, limits) {
+      const source = info && info.extensions && typeof info.extensions === "object" ? info.extensions : {};
+      const normalized = {};
+      const entries = Object.entries(source);
+      for (let index = 0; index < entries.length; index++) {
+        const [key, value] = entries[index];
+        if (index >= limits.maxExtensionEntries) {
+          emitClientInfoError(requestContext, {
+            code: "extension-entry-limit",
+            area: null,
+            key,
+            limit: limits.maxExtensionEntries
+          });
+          continue;
+        }
+        if (jsonDepth(value) > limits.maxExtensionDepth) {
+          emitClientInfoError(requestContext, {
+            code: "extension-depth-limit",
+            area: null,
+            key,
+            limit: limits.maxExtensionDepth
+          });
+          continue;
+        }
+        const candidate = { ...normalized, [key]: value };
+        if (serializedLength(candidate) > limits.maxExtensionChars) {
+          emitClientInfoError(requestContext, {
+            code: "extension-size-limit",
+            area: null,
+            key,
+            limit: limits.maxExtensionChars
+          });
+          continue;
+        }
+        normalized[key] = value;
+      }
+      return normalized;
+    }
+    function normalizeStorage(infoStorage, requestContext, limits) {
+      const normalized = {};
+      let hasValues = false;
+      for (const area of ["local", "session"]) {
+        const source = infoStorage && infoStorage[area] && typeof infoStorage[area] === "object" ? infoStorage[area] : {};
+        const values = {};
+        const entries = Object.entries(source);
+        for (let index = 0; index < entries.length; index++) {
+          const [key, value] = entries[index];
+          if (index >= limits.maxKeysPerArea) {
+            emitClientInfoError(requestContext, {
+              code: "storage-key-limit",
+              area,
+              key,
+              limit: limits.maxKeysPerArea
+            });
+            continue;
+          }
+          if (key.length > limits.maxKeyLength) {
+            emitClientInfoError(requestContext, {
+              code: "storage-key-too-long",
+              area,
+              key,
+              limit: limits.maxKeyLength
+            });
+            continue;
+          }
+          if (typeof value !== "string") {
+            emitClientInfoError(requestContext, {
+              code: "storage-value-invalid",
+              area,
+              key,
+              limit: limits.maxValueLength
+            });
+            continue;
+          }
+          if (value.length > limits.maxValueLength) {
+            emitClientInfoError(requestContext, {
+              code: "storage-value-too-long",
+              area,
+              key,
+              limit: limits.maxValueLength
+            });
+            continue;
+          }
+          const candidate = {
+            local: area === "local" ? { ...values, [key]: value } : normalized.local || {},
+            session: area === "session" ? { ...values, [key]: value } : normalized.session || {}
+          };
+          if (serializedLength(candidate) > limits.maxStorageChars) {
+            emitClientInfoError(requestContext, {
+              code: "storage-size-limit",
+              area,
+              key,
+              limit: limits.maxStorageChars
+            });
+            continue;
+          }
+          values[key] = value;
+          normalized[area] = values;
+          hasValues = true;
+        }
+      }
+      return hasValues ? normalized : {};
+    }
+    function prepareHeaderInfo(info, clientInfoConfig, requestContext) {
+      if (!info || typeof info !== "object")
+        return info;
+      const limits = clientInfoConfig.limits;
+      if (info.storage && typeof info.storage === "object")
+        info.storage = normalizeStorage(info.storage, requestContext, limits);
+      if (Object.prototype.hasOwnProperty.call(info, "extensions"))
+        info.extensions = normalizeExtensions(info, requestContext, limits);
+      return info;
     }
     function preferredContrast() {
       if (matches("(prefers-contrast: more)")) return "more";
@@ -1355,7 +1650,8 @@
     }
     function getHeaderValue(requestContext) {
       const config = getConfig();
-      if (!config || config.clientInfo !== true)
+      const clientInfoConfig = normalizeClientInfoConfig(config);
+      if (!config || !clientInfoConfig.enabled)
         return null;
       installInvalidationListeners();
       const configuredMaxAge = Number(config.clientInfoMaxAgeMs);
@@ -1382,6 +1678,9 @@
         sourceElement: requestContext?.sourceElement || null,
         info: cloneInfo(cachedInfo)
       };
+      const storage = collectStorage(clientInfoConfig, requestContext);
+      if (storage)
+        detail.info.storage = storage;
       const shouldInclude = typeof emitLifecycle !== "function" || emitLifecycle(
         requestContext?.sourceElement || null,
         "heimdall:client-info-before",
@@ -1391,8 +1690,50 @@
       if (!shouldInclude || detail.info == null)
         return null;
       try {
-        return JSON.stringify(detail.info);
+        const prepared = prepareHeaderInfo(detail.info, clientInfoConfig, requestContext);
+        let serialized = JSON.stringify(prepared);
+        if (serialized.length > MAX_HEADER_LENGTH && prepared && typeof prepared === "object") {
+          if (prepared.extensions && Object.keys(prepared.extensions).length > 0) {
+            delete prepared.extensions;
+            emitClientInfoError(requestContext, {
+              code: "header-size-limit",
+              area: null,
+              key: null,
+              dropped: "extensions",
+              limit: MAX_HEADER_LENGTH
+            });
+            serialized = JSON.stringify(prepared);
+          }
+          if (serialized.length > MAX_HEADER_LENGTH && prepared.storage) {
+            delete prepared.storage;
+            emitClientInfoError(requestContext, {
+              code: "header-size-limit",
+              area: null,
+              key: null,
+              dropped: "storage",
+              limit: MAX_HEADER_LENGTH
+            });
+            serialized = JSON.stringify(prepared);
+          }
+        }
+        if (serialized.length > MAX_HEADER_LENGTH) {
+          emitClientInfoError(requestContext, {
+            code: "header-size-limit",
+            area: null,
+            key: null,
+            dropped: "client-info",
+            limit: MAX_HEADER_LENGTH
+          });
+          return null;
+        }
+        return serialized;
       } catch (error) {
+        emitClientInfoError(requestContext, {
+          code: "serialization-failed",
+          area: null,
+          key: null,
+          errorName: error?.name || "SerializationError"
+        });
         if (typeof dbg === "function")
           dbg("client information serialization failed", error);
         return null;
@@ -1442,7 +1783,7 @@
   }
 
   // core/dom.js
-  function createDomPipeline({ getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
+  function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
     function stripScripts(rootNode) {
       if (!rootNode || !rootNode.querySelectorAll)
         return;
@@ -1578,6 +1919,97 @@
       for (const directive of directives)
         directive.remove();
     }
+    function stripStorageFromFragment(fragment) {
+      if (!fragment || !fragment.querySelectorAll)
+        return;
+      const directives = fragment.querySelectorAll("storage");
+      for (const directive of directives)
+        directive.remove();
+    }
+    function emitStorageError(sourceEl, context, detail) {
+      if (!emitLifecycle)
+        return;
+      emitLifecycle(sourceEl, "heimdall:storage-error", {
+        phase: "response-directive",
+        sourceElement: sourceEl || null,
+        ...context || {},
+        ...detail
+      });
+    }
+    function processStorageDirectives(fragment, sourceEl, context) {
+      if (!fragment || !fragment.querySelectorAll)
+        return 0;
+      const directives = Array.from(fragment.querySelectorAll("storage"));
+      let applied = 0;
+      for (const directive of directives) {
+        const area = String(getAttr(directive, "area") || "").trim().toLowerCase();
+        const operation = String(getAttr(directive, "operation") || "").trim().toLowerCase();
+        const key = getAttr(directive, "key");
+        if (area !== "local" && area !== "session") {
+          emitStorageError(sourceEl, context, {
+            code: "invalid-area",
+            area: area || null,
+            operation: operation || null,
+            key: key || null
+          });
+          directive.remove();
+          continue;
+        }
+        if (operation !== "set" && operation !== "remove") {
+          emitStorageError(sourceEl, context, {
+            code: "invalid-operation",
+            area,
+            operation: operation || null,
+            key: key || null
+          });
+          directive.remove();
+          continue;
+        }
+        if (!key || !key.trim()) {
+          emitStorageError(sourceEl, context, {
+            code: "missing-key",
+            area,
+            operation,
+            key: null
+          });
+          directive.remove();
+          continue;
+        }
+        let storage;
+        try {
+          storage = global[area === "local" ? "localStorage" : "sessionStorage"];
+        } catch (error) {
+          emitStorageError(sourceEl, context, {
+            code: "storage-area-unavailable",
+            area,
+            operation,
+            key,
+            errorName: error?.name || "StorageError"
+          });
+          directive.remove();
+          continue;
+        }
+        try {
+          if (!storage)
+            throw new Error("Storage area is unavailable.");
+          if (operation === "set")
+            storage.setItem(key, directive.textContent || "");
+          else
+            storage.removeItem(key);
+          applied++;
+        } catch (error) {
+          emitStorageError(sourceEl, context, {
+            code: operation === "set" ? "storage-write-failed" : "storage-remove-failed",
+            area,
+            operation,
+            key,
+            errorName: error?.name || "StorageError"
+          });
+        }
+        directive.remove();
+      }
+      return applied;
+    }
     function extractHistoryFromFragment(fragment) {
       if (!fragment || !fragment.querySelectorAll)
         return null;
@@ -1680,7 +2112,8 @@
       const hasJsInvokeVoid = containsTag(html, "javascript");
       const hasMutation = containsTag(html, "mutation");
       const hasHistory = containsTag(html, "history");
-      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory)
+      const hasStorage = containsTag(html, "storage");
+      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage)
         return html;
       const tpl = parseHtmlToTemplate(html);
       stripInvocationsFromFragment(tpl.content);
@@ -1689,6 +2122,7 @@
       stripJsInvokeVoidFromFragment(tpl.content);
       stripMutationsFromFragment(tpl.content);
       stripHistoryFromFragment(tpl.content);
+      stripStorageFromFragment(tpl.content);
       return fragmentToHtml(tpl.content);
     }
     function processOob(html, sourceEl, context) {
@@ -1699,7 +2133,8 @@
       const hasJsInvokeVoid = containsTag(html, "javascript");
       const hasMutation = containsTag(html, "mutation");
       const hasHistory = containsTag(html, "history");
-      if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory) {
+      const hasStorage = containsTag(html, "storage");
+      if (!hasInv && !hasScript && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage) {
         return {
           html: html || "",
           applied: 0,
@@ -1717,6 +2152,7 @@
       if (redirect && redirect.url) {
         stripRedirectsFromFragment(fragment);
         stripHistoryFromFragment(fragment);
+        stripStorageFromFragment(fragment);
         return {
           html: fragmentToHtml(fragment),
           applied: 0,
@@ -1728,6 +2164,7 @@
           historyCommand: null
         };
       }
+      processStorageDirectives(fragment, sourceEl, context);
       const historyCommand = extractHistoryFromFragment(fragment);
       const jsDirectives = collectJsInvokeVoidDirectives(fragment);
       const jsGroups = splitJsInvokeVoidDirectives(jsDirectives);
@@ -1853,7 +2290,9 @@
       stripMutationsFromFragment,
       stripJsInvokeVoidFromFragment,
       stripRedirectsFromFragment,
-      stripHistoryFromFragment
+      stripHistoryFromFragment,
+      stripStorageFromFragment,
+      processStorageDirectives
     };
   }
 
@@ -2589,6 +3028,22 @@
       }
       return void 0;
     }
+    function readStoragePayload(area, key) {
+      let storage;
+      try {
+        storage = global[area === "local" ? "localStorage" : "sessionStorage"];
+      } catch {
+        return null;
+      }
+      if (!storage || typeof storage.getItem !== "function")
+        return null;
+      try {
+        const raw = storage.getItem(key);
+        return raw == null ? null : safeJsonParse(raw);
+      } catch {
+        return null;
+      }
+    }
     function payloadBindingFromElement(el) {
       const payloadAttr = getAttr(el, "heimdall-payload");
       if (payloadAttr)
@@ -2602,6 +3057,12 @@
         const key = from.startsWith("closest-state:") ? fromRaw.substring("closest-state:".length).trim() : null;
         const binding = createClosestStateBinding(el, key || null);
         return binding ? { value: binding.value, binding } : { value: null, binding: null };
+      }
+      if (from.startsWith("local-storage:") || from.startsWith("session-storage:")) {
+        const separator = from.indexOf(":");
+        const area = from.substring(0, separator) === "local-storage" ? "local" : "session";
+        const key = fromRaw.substring(separator + 1).trim();
+        return key ? { value: readStoragePayload(area, key), binding: null } : { value: null, binding: null };
       }
       if (!from)
         return { value: null, binding: null };
@@ -3247,6 +3708,15 @@
         antiforgery: true,
         clientInfo: false,
         clientInfoMaxAgeMs: 6e4,
+        clientInfoLimits: {
+          maxKeysPerArea: 16,
+          maxKeyLength: 128,
+          maxValueLength: 1024,
+          maxStorageChars: 2048,
+          maxExtensionEntries: 16,
+          maxExtensionChars: 1024,
+          maxExtensionDepth: 4
+        },
         inputDebounceMs: 250,
         hoverDelayMs: 150,
         scrollThresholdPx: 120,
@@ -4528,6 +4998,7 @@ ${topic}`;
       busyState
     });
     const dom = createDomPipeline({
+      global,
       getConfig: getRuntimeConfig,
       boot: (root) => boot(root),
       dbg,

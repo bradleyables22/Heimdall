@@ -24,6 +24,11 @@ namespace Heimdall.Server
 		public bool EnableDetailedErrors { get; set; } = false;
 
 		/// <summary>
+		/// Limits for optional browser storage and application extension values in client information.
+		/// </summary>
+		public HeimdallClientInfoLimits ClientInfoLimits { get; set; } = new();
+
+		/// <summary>
 		/// Optional authorization policy name used when minting Bifrost subscribe tokens.
 		/// </summary>
 		public string? BifrostTopicPolicy { get; set; }
