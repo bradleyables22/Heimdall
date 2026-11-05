@@ -175,10 +175,10 @@ async function testTimeLocalizationAllSwapModes(page) {
     beforeendLast: "time-beforeend",
     afterbeginFirst: "time-afterbegin",
     localized: [
-      { id: "time-inner", connected: false, kind: "main", origin: "action" },
-      { id: "target-outer", connected: false, kind: "main", origin: "action" },
-      { id: "time-beforeend", connected: false, kind: "main", origin: "action" },
-      { id: "time-afterbegin", connected: false, kind: "main", origin: "action" }
+      { id: "time-inner", connected: false, kind: "main", origin: "invocation" },
+      { id: "target-outer", connected: false, kind: "main", origin: "invocation" },
+      { id: "time-beforeend", connected: false, kind: "main", origin: "invocation" },
+      { id: "time-afterbegin", connected: false, kind: "main", origin: "invocation" }
     ]
   });
 }

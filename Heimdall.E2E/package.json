@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/e2e.spec.mjs"
+    "test": "node tests/e2e.spec.mjs",
+    "test:plugins": "node tests/e2e.spec.mjs --filter=plugin"
   },
   "devDependencies": {
     "playwright": "1.59.1"

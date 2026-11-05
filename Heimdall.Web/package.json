@@ -7,13 +7,15 @@
     "install:browsers": "playwright install chromium",
     "test": "node tests/heimdall-runtime.spec.mjs",
     "test:package": "node tests/heimdall-package.spec.mjs",
-    "verify": "node build.mjs --verify && node tests/heimdall-runtime.spec.mjs",
-    "verify:all": "node build.mjs --verify && node tests/heimdall-runtime.spec.mjs && node tests/heimdall-package.spec.mjs",
-    "verify:package": "node tests/heimdall-package.spec.mjs"
+    "verify": "node build.mjs --verify && npm run test:types && node tests/heimdall-runtime.spec.mjs",
+    "verify:all": "node build.mjs --verify && npm run test:types && node tests/heimdall-runtime.spec.mjs && node tests/heimdall-package.spec.mjs",
+    "verify:package": "node tests/heimdall-package.spec.mjs",
+    "test:types": "tsc -p tests/types/tsconfig.json"
   },
   "devDependencies": {
     "esbuild": "0.28.0",
     "eslint": "^10.5.0",
-    "playwright": "1.59.1"
+    "playwright": "1.59.1",
+    "typescript": "5.9.3"
   }
 }

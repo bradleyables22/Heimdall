@@ -1,6 +1,7 @@
 using Heimdall.E2E.Rendering.Components;
 using Heimdall.E2E.Rendering.Layouts;
 using Heimdall.E2E.Rendering.Pages;
+using Heimdall.E2E.TestPlugin;
 using Heimdall.Server;
 using Heimdall.Server.Rendering;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -18,6 +19,7 @@ builder.Services
 	});
 builder.Services.AddAuthorization();
 builder.Services.AddHeimdallBlazor();
+builder.Services.AddHeimdallE2ETestPlugin(options => options.Label = "Configured by E2E host");
 builder.Services.AddHeimdall(options =>
 {
 	options.EnableDetailedErrors = true;
@@ -63,6 +65,14 @@ app.MapStaticAssets();
 app.UseStaticFiles();
 
 app.UseHeimdall();
+
+app.MapHeimdallPage("/e2e/plugins", context => MainLayout.Render(
+    TestPluginWorkbench.Render(),
+    "Plugin Workbench",
+    FluentHtml.Fragment(head => head
+        .Link(link => link.Attr("rel", "stylesheet").Href(TestPluginWorkbench.StylesheetPath))
+        .Script(script => script.Type("module").Src("/js/e2e-test-plugin.js"))),
+    debugRuntime: context.Request.Query["runtime"] == "debug"));
 
 app.MapHeimdallPage("/", async (services, ctx) =>
 {

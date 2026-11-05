@@ -6,7 +6,7 @@ import {
 
 export function createEventDelegates({
     getConfig,
-    runActionFromElement
+    runInvocationFromElement
 }) {
     function parseTokenList(value) {
         return String(value || "")
@@ -96,7 +96,7 @@ export function createEventDelegates({
         if (preventDefault)
             e.preventDefault();
 
-        await runActionFromElement(el, actionId, "click");
+        await runInvocationFromElement(el, actionId, "click");
     }
 
     async function handleChange(e) {
@@ -114,12 +114,12 @@ export function createEventDelegates({
         const ms = intAttr(el, "heimdall-debounce", 0);
         if (ms > 0) {
             scheduleDebounced(el, "change", ms, () => {
-                runActionFromElement(el, actionId, "change").catch(() => { /* logged */ });
+                runInvocationFromElement(el, actionId, "change").catch(() => { /* logged */ });
             });
             return;
         }
 
-        await runActionFromElement(el, actionId, "change");
+        await runInvocationFromElement(el, actionId, "change");
     }
 
     const _debouncers = new WeakMap();
@@ -140,6 +140,10 @@ export function createEventDelegates({
         }, ms);
 
         map.set(key, tid);
+        return () => {
+            clearTimeout(tid);
+            if (map.get(key) === tid) map.delete(key);
+        };
     }
 
     async function handleInput(e) {
@@ -158,12 +162,12 @@ export function createEventDelegates({
 
         if (ms > 0) {
             scheduleDebounced(el, "input", ms, () => {
-                runActionFromElement(el, actionId, "input").catch(() => { /* logged */ });
+                runInvocationFromElement(el, actionId, "input").catch(() => { /* logged */ });
             });
             return;
         }
 
-        await runActionFromElement(el, actionId, "input");
+        await runInvocationFromElement(el, actionId, "input");
     }
 
     async function handleSubmit(e) {
@@ -182,7 +186,7 @@ export function createEventDelegates({
         if (preventDefault)
             e.preventDefault();
 
-        await runActionFromElement(form, actionId, "submit");
+        await runInvocationFromElement(form, actionId, "submit");
     }
 
     function normalizeKeySpec(spec) {
@@ -229,7 +233,7 @@ export function createEventDelegates({
         if (wantsPreventDefault)
             e.preventDefault();
 
-        await runActionFromElement(el, actionId, "keydown");
+        await runInvocationFromElement(el, actionId, "keydown");
     }
 
     async function handleFocusOut(e) {
@@ -244,7 +248,7 @@ export function createEventDelegates({
         if (!actionId)
             return;
 
-        await runActionFromElement(el, actionId, "blur");
+        await runInvocationFromElement(el, actionId, "blur");
     }
 
     const _hoverTimers = new WeakMap();
@@ -277,13 +281,13 @@ export function createEventDelegates({
         if (delay > 0) {
             const tid = setTimeout(() => {
                 _hoverTimers.delete(el);
-                runActionFromElement(el, actionId, "hover").catch(() => { /* logged */ });
+                runInvocationFromElement(el, actionId, "hover").catch(() => { /* logged */ });
             }, delay);
             _hoverTimers.set(el, tid);
             return;
         }
 
-        await runActionFromElement(el, actionId, "hover");
+        await runInvocationFromElement(el, actionId, "hover");
     }
 
     function handleMouseOut(e) {
@@ -303,6 +307,8 @@ export function createEventDelegates({
     }
 
     return {
+        resolveTriggerElement: resolveActionElement,
+        scheduleDebounced,
         handleChange,
         handleClick,
         handleFocusOut,

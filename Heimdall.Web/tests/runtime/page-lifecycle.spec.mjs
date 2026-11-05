@@ -8,7 +8,7 @@ import {
 async function waitForActionCount(page, count) {
   await page.waitForFunction(expected => {
     const fetches = window.__heimdallFetches || [];
-    return fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/content/actions")).length === expected;
+    return fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/content/invocations")).length === expected;
   }, count);
 }
 
@@ -46,7 +46,7 @@ async function testOnlineInvokesEveryCurrentMatchingElement(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.deepEqual(
-    actions.map(action => action.headers["x-heimdall-content-action"]),
+    actions.map(action => action.headers["x-heimdall-content-invocation"]),
     [
       "Connection.First",
       "Connection.Second",
@@ -105,7 +105,7 @@ async function testDocumentVisibleOnlyInvokesWhileVisible(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.deepEqual(
-    actions.map(action => action.headers["x-heimdall-content-action"]),
+    actions.map(action => action.headers["x-heimdall-content-invocation"]),
     ["Dashboard.First", "Dashboard.First", "Dashboard.Dynamic"]
   );
 }
@@ -130,7 +130,7 @@ async function testLifecycleTriggersUseNormalPayloadAndSwapPipeline(page) {
   await page.waitForSelector("#online-result");
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Connection.Restore");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Connection.Restore");
   assert.deepEqual(actions[0].jsonBody, { reason: "browser-online" });
   assert.equal(await page.locator("#online-target").innerText(), "Restored");
 }

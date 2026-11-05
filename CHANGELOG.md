@@ -4,7 +4,21 @@ Notable changes to the Heimdall solution are recorded here. Package-specific det
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released packages use semantic versioning.
 
-## [4.0.0] - Unreleased
+## [4.0.1] - 2026-11-05
+
+### Added
+
+- Added frontend plugins, typed plugin helpers, and reusable invocation assembly registration.
+
+### Changed
+
+- Adopted invocation naming across rendering, requests, and diagnostics, with compatibility aliases.
+
+### Fixed
+
+- Fixed single and repeated form values binding to collection properties and parameters.
+
+## [4.0.0]
 
 ### Added
 

@@ -64,6 +64,8 @@ function assertNoInternalFiles(entries, label) {
     entry === "package-lock.json" ||
     entry === "heimdall.entry.js" ||
     entry.startsWith("tests/") ||
+    entry.startsWith("examples/") ||
+    entry.includes("/examples/") ||
     entry.startsWith("node_modules/") ||
     /^core\/.+\.js$/.test(entry)
   );
@@ -88,11 +90,13 @@ try {
   const packageEntries = listPackageEntries(nupkgPath);
   assert.ok(packageEntries.includes("staticwebassets/heimdall-bundle.js"), "Package should contain generated runtime.");
   assert.ok(packageEntries.includes("staticwebassets/heimdall-bundle.min.js"), "Package should contain minified generated runtime.");
+  assert.ok(packageEntries.includes("staticwebassets/heimdall-plugins.d.ts"), "Package should contain the public plugin types.");
   assertNoInternalFiles(packageEntries, "Package");
 
   const publishEntries = listFilesRecursive(publishDir);
   assert.ok(publishEntries.includes("wwwroot/heimdall-bundle.js"), "Publish output should contain generated runtime.");
   assert.ok(publishEntries.includes("wwwroot/heimdall-bundle.min.js"), "Publish output should contain minified generated runtime.");
+  assert.ok(publishEntries.includes("wwwroot/heimdall-plugins.d.ts"), "Publish output should contain the public plugin types.");
   assertNoInternalFiles(publishEntries, "Publish output");
 
   console.log("Heimdall package shape tests passed.");

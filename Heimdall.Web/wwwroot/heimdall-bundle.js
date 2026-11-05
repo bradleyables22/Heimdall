@@ -138,7 +138,7 @@
   // core/request-headers.js
   var REQUEST_HEADERS_FAILED_CODE = "request-headers-failed";
   function createRequestHeadersRuntime({ global, getConfig }) {
-    function abortError() {
+    function abortError2() {
       if (typeof global.DOMException === "function")
         return new global.DOMException("The request was aborted.", "AbortError");
       const error = new Error("The request was aborted.");
@@ -150,14 +150,14 @@
       if (!signal || typeof signal.addEventListener !== "function")
         return promise;
       if (signal.aborted)
-        return Promise.reject(abortError());
+        return Promise.reject(abortError2());
       return new Promise((resolve2, reject) => {
         let settled = false;
         const onAbort = () => {
           if (settled)
             return;
           settled = true;
-          reject(abortError());
+          reject(abortError2());
         };
         signal.addEventListener("abort", onAbort, { once: true });
         promise.then(
@@ -267,7 +267,7 @@
   }
 
   // core/actions.js
-  function createActionInvoker({
+  function createInvocationInvoker({
     global,
     getConfig,
     ensureCsrfToken,
@@ -281,10 +281,11 @@
     historyRuntime,
     coordinator,
     busyState,
+    plugins,
     resolveRequestHeaders,
     mergeRequestHeaders,
     getClientInfoHeader,
-    actionHeader,
+    invocationHeader,
     csrfHeader,
     clientInfoHeader
   }) {
@@ -372,16 +373,16 @@
       const sourceElement = options.sourceEl || null;
       const configuredSync = options.sync != null ? options.sync : sourceElement ? getAttr(sourceElement, "heimdall-sync") : null;
       const configuredGroup = options.syncGroup != null ? options.syncGroup : sourceElement ? getAttr(sourceElement, "heimdall-sync-group") : null;
+      let currentInvocationId = actionId;
       const context = {
         requestId: ++nextRequestId,
         attempt: 0,
-        actionId,
         trigger: options.triggerName || null,
         sourceElement,
         target: options.target,
         fallbackTarget: options.fallbackTarget || null,
         swap: options.swap || "inner",
-        endpoint: options.endpoint || config.endpoints.contentActions,
+        endpoint: options.endpoint || config.endpoints.contentInvocations || config.endpoints.contentActions,
         headers: Object.assign({}, options.headers || {}),
         sync: configuredSync || config.requestSync || "parallel",
         syncGroup: configuredGroup && String(configuredGroup).trim() ? String(configuredGroup).trim() : null,
@@ -401,6 +402,29 @@
         startedExecutionAt: null,
         finishedAt: null
       };
+      Object.defineProperties(context, {
+        invocationId: {
+          configurable: true,
+          enumerable: true,
+          get() {
+            return currentInvocationId;
+          },
+          set(value) {
+            currentInvocationId = value;
+          }
+        },
+        // Compatibility alias for applications migrating from v1.
+        actionId: {
+          configurable: true,
+          enumerable: true,
+          get() {
+            return currentInvocationId;
+          },
+          set(value) {
+            currentInvocationId = value;
+          }
+        }
+      });
       installPayloadState(context, payload, options.payloadBinding);
       return context;
     }
@@ -426,7 +450,8 @@
         requestId: context.requestId
       };
       emit("heimdall:error", {
-        actionId: context.actionId,
+        invocationId: context.invocationId,
+        actionId: context.invocationId,
         payload: context.payload,
         target: context.target,
         swap: context.swap,
@@ -476,7 +501,7 @@
     async function executeRequestAttempt(context, options, shouldRetry) {
       context.attempt++;
       const url = new URL(context.endpoint, global.location?.origin || void 0);
-      url.searchParams.set("action", context.actionId);
+      url.searchParams.set("invocation", context.invocationId);
       const antiforgeryEnabled = getConfig().antiforgery !== false;
       let token = null;
       if (antiforgeryEnabled) {
@@ -494,7 +519,7 @@
       }
       const isFormData = typeof global.FormData === "function" && context.payload instanceof global.FormData;
       let headers = {
-        [actionHeader]: context.actionId
+        [invocationHeader]: context.invocationId
       };
       if (antiforgeryEnabled)
         headers[csrfHeader] = token;
@@ -506,10 +531,11 @@
       if (typeof resolveRequestHeaders === "function") {
         try {
           headers = await resolveRequestHeaders({
-            kind: "content-action",
+            kind: "content-invocation",
             url: url.toString(),
             method: "POST",
-            actionId: context.actionId,
+            invocationId: context.invocationId,
+            actionId: context.invocationId,
             requestId: context.requestId,
             attempt: context.attempt,
             sourceElement: context.sourceElement,
@@ -537,10 +563,11 @@
         try {
           body = context.payload == null ? "{}" : JSON.stringify(context.payload);
         } catch (e) {
-          const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
+          const err = new Error(`Heimdall payload is not JSON-serializable for invocation '${context.invocationId}'.`);
           err.cause = e;
           emit("heimdall:error", {
-            actionId: context.actionId,
+            invocationId: context.invocationId,
+            actionId: context.invocationId,
             payload: context.payload,
             target: context.target,
             swap: context.swap,
@@ -571,13 +598,14 @@
         return coordinator.getCancellationResult(context);
       const attemptStarted = performance.now();
       emit("heimdall:before", {
-        actionId: context.actionId,
+        invocationId: context.invocationId,
+        actionId: context.invocationId,
         payload: context.payload,
         target: context.target,
         swap: context.swap,
         endpoint: context.request.url
       });
-      dbg("invoke ->", context.actionId, {
+      dbg("invoke ->", context.invocationId, {
         endpoint: context.request.url,
         swap: context.swap,
         target: context.target,
@@ -606,7 +634,8 @@
           requestId: context.requestId
         };
         emit("heimdall:error", {
-          actionId: context.actionId,
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -635,8 +664,9 @@
         emitLifecycle,
         sourceElement: context.sourceElement,
         detail: {
-          kind: "content-action",
-          actionId: context.actionId,
+          kind: "content-invocation",
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           requestId: context.requestId,
           attempt: context.attempt,
           sourceElement: context.sourceElement,
@@ -650,7 +680,8 @@
       if (authRedirectUrl && useDefaultUnauthorizedHandling) {
         const redirectUrl2 = normalizedAuthRedirectUrl;
         emit("heimdall:redirect", {
-          actionId: context.actionId,
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -658,7 +689,7 @@
           status: response.status,
           url: redirectUrl2
         });
-        dbg("redirecting", { actionId: context.actionId, url: redirectUrl2 });
+        dbg("redirecting", { actionId: context.invocationId, url: redirectUrl2 });
         global.location.href = redirectUrl2;
         return {
           ok: response.ok,
@@ -680,10 +711,25 @@
       let jsAfter = [];
       let oobMutationTargets = [];
       let historyCommand = null;
+      let pluginCommands = { before: [], after: [] };
+      const pluginContext = {
+        sourceElement: context.sourceElement,
+        invocationId: context.invocationId,
+        origin: "invocation",
+        signal: context.signal,
+        isCurrent: () => coordinator.isCurrent(context)
+      };
       if (response.ok) {
+        pluginCommands = plugins.prepareCommands(html);
+        html = pluginCommands.html;
+        if (pluginCommands.before.length)
+          await plugins.runCommands(pluginCommands.before, pluginContext);
+        if (!coordinator.isCurrent(context))
+          return coordinator.getCancellationResult(context);
         const oob = dom.processOob(html, context.sourceElement, {
-          kind: "action",
-          actionId: context.actionId,
+          kind: "invocation",
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -704,7 +750,8 @@
       }
       if (response.ok && redirectUrl) {
         emit("heimdall:redirect", {
-          actionId: context.actionId,
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -712,7 +759,7 @@
           status: response.status,
           url: redirectUrl
         });
-        dbg("redirecting", { actionId: context.actionId, url: redirectUrl });
+        dbg("redirecting", { actionId: context.invocationId, url: redirectUrl });
         global.location.href = redirectUrl;
         return {
           ok: true,
@@ -729,7 +776,8 @@
       }
       if (response.ok && abortSwap) {
         emit("heimdall:abort", {
-          actionId: context.actionId,
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -737,7 +785,7 @@
           status: response.status,
           reason: abortReason
         });
-        dbg("swap aborted", { actionId: context.actionId, reason: abortReason, target: context.target });
+        dbg("swap aborted", { actionId: context.invocationId, reason: abortReason, target: context.target });
       }
       if (response.ok && !abortSwap) {
         refreshTarget(context, false);
@@ -755,7 +803,7 @@
           mainTemplate.content,
           context.swap,
           {
-            kind: "action",
+            kind: "invocation",
             swapKind: "main",
             sourceEl: context.sourceElement,
             requestContext: context
@@ -778,10 +826,15 @@
         });
       }
       if (response.ok) {
+        if (pluginCommands.after.length)
+          await plugins.runCommands(pluginCommands.after, pluginContext);
+        if (!coordinator.isCurrent(context))
+          return coordinator.getCancellationResult(context);
         dom.invokeJsInvokeVoidDirectives(jsAfter, {
           phase: "after",
-          kind: "action",
-          actionId: context.actionId,
+          kind: "invocation",
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -805,7 +858,8 @@
         result.history = historyResult;
       if (!response.ok) {
         emit("heimdall:error", {
-          actionId: context.actionId,
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -814,7 +868,8 @@
         });
       } else {
         emit("heimdall:after", {
-          actionId: context.actionId,
+          invocationId: context.invocationId,
+          actionId: context.invocationId,
           payload: context.payload,
           target: context.target,
           swap: context.swap,
@@ -829,7 +884,7 @@
         options.onSuccess(result);
       if (typeof options.onError === "function" && !response.ok)
         options.onError(result);
-      dbg("invoke <-", context.actionId, result);
+      dbg("invoke <-", context.invocationId, result);
       return result;
     }
     const DEFAULT_DISABLE_BY_TRIGGER = {
@@ -847,12 +902,12 @@
       scroll: false,
       sse: false
     };
-    function getCommonOptions(el, triggerName) {
+    function getCommonOptions(el, triggerName, extraOptions) {
       const target = getAttr(el, "heimdall-content-target") || el;
       const swap = getAttr(el, "heimdall-content-swap") || "inner";
       const sync = getAttr(el, "heimdall-sync");
       const syncGroup = getAttr(el, "heimdall-sync-group");
-      let payloadResolution = payloadBindingFromElement(el);
+      let payloadResolution = extraOptions && Object.prototype.hasOwnProperty.call(extraOptions, "payload") ? { value: extraOptions.payload, binding: null } : payloadBindingFromElement(el);
       let payload = payloadResolution.value;
       let payloadBinding = payloadResolution.binding;
       if (payload == null && triggerName === "submit") {
@@ -869,34 +924,40 @@
       }
       return { target, swap, payload, payloadBinding, sync, syncGroup };
     }
-    async function runActionFromElement(el, actionId, triggerName, extraOptions) {
+    async function runInvocationFromElement(el, actionId, triggerName, extraOptions) {
       if (!el || !actionId)
         return;
       if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
         return;
-      const { target, swap, payload, payloadBinding, sync, syncGroup } = getCommonOptions(el, triggerName);
-      const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
-      const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
-      const opts = Object.assign({
-        target,
-        swap,
-        sync,
-        syncGroup,
-        fallbackTarget: el,
-        sourceEl: el,
-        triggerName,
-        payloadBinding,
-        disableElement: shouldDisable ? el : null
-      }, extraOptions || {});
       try {
-        await invoke(actionId, payload, opts);
+        const pending = plugins?.ready(el);
+        if (pending) {
+          await pending;
+          if (!el.isConnected) return;
+        }
+        const { target, swap, payload, payloadBinding, sync, syncGroup } = getCommonOptions(el, triggerName, extraOptions);
+        const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
+        const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
+        const opts = Object.assign({
+          target,
+          swap,
+          sync,
+          syncGroup,
+          fallbackTarget: el,
+          sourceEl: el,
+          triggerName,
+          payloadBinding,
+          disableElement: shouldDisable ? el : null
+        }, extraOptions || {});
+        return await invoke(actionId, payload, opts);
       } catch (err) {
         console.error(err);
       }
     }
     return {
       invoke,
-      runActionFromElement
+      runInvocationFromElement,
+      runActionFromElement: runInvocationFromElement
     };
   }
 
@@ -904,7 +965,7 @@
   function createBootTriggers({
     global,
     getConfig,
-    runActionFromElement
+    runInvocationFromElement
   }) {
     function matchesTriggerAttr(el, attr) {
       return isElement(el) && el.hasAttribute(attr);
@@ -937,7 +998,7 @@
         return;
       _loadActions.set(el, actionId);
       el.__heimdallLoaded = true;
-      runActionFromElement(el, actionId, "load").catch(() => {
+      runInvocationFromElement(el, actionId, "load").catch(() => {
       });
     }
     function bootLoads(root) {
@@ -974,7 +1035,7 @@
             if (state)
               state.observed = false;
           }
-          runActionFromElement(el, actionId, "visible").catch(() => {
+          runInvocationFromElement(el, actionId, "visible").catch(() => {
           });
         }
       }, {
@@ -1066,7 +1127,7 @@
           if (now - state.lastFire < minInterval)
             return;
           state.lastFire = now;
-          runActionFromElement(el, currentActionId, "scroll").catch(() => {
+          runInvocationFromElement(el, currentActionId, "scroll").catch(() => {
           });
         });
       };
@@ -1100,7 +1161,7 @@
           return;
         state.inFlight = true;
         try {
-          await runActionFromElement(el, state.actionId, "load", { reason: "poll" });
+          await runInvocationFromElement(el, state.actionId, "load", { reason: "poll" });
         } finally {
           state.inFlight = false;
         }
@@ -1343,6 +1404,7 @@
     function emitClientInfoError(requestContext, detail) {
       const eventDetail = {
         phase: "client-info",
+        invocationId: requestContext?.invocationId || requestContext?.actionId || null,
         actionId: requestContext?.actionId || null,
         requestId: requestContext?.requestId || null,
         attempt: requestContext?.attempt || 0,
@@ -1672,6 +1734,7 @@
       if (!cachedInfo)
         return null;
       const detail = {
+        invocationId: requestContext?.invocationId || requestContext?.actionId || null,
         actionId: requestContext?.actionId || null,
         requestId: requestContext?.requestId || null,
         attempt: requestContext?.attempt || 0,
@@ -1783,7 +1846,7 @@
   }
 
   // core/dom.js
-  function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
+  function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations, plugins }) {
     function stripScripts(rootNode) {
       if (!rootNode || !rootNode.querySelectorAll)
         return;
@@ -1814,7 +1877,7 @@
         return { didApply: false, appliedRoot: null, target: null, swap: mode, cancelled: false };
       stripScripts(fragment);
       const detail = {
-        origin: lifecycleContext.kind || "action",
+        origin: lifecycleContext.kind || "invocation",
         kind: lifecycleContext.swapKind || "main",
         target: targetEl,
         fragment,
@@ -1836,6 +1899,7 @@
       if (mode === "none" || !targetEl)
         return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: false };
       stripScripts(fragment);
+      plugins?.stripCommands(fragment);
       if (timeLocalization && typeof timeLocalization.localize === "function") {
         const contextElement = mode === "outer" ? targetEl.parentElement : targetEl;
         timeLocalization.localize(fragment, {
@@ -1845,6 +1909,12 @@
         });
       }
       const nodes = fragmentToNodesArray(fragment);
+      if (plugins) {
+        if (mode === "outer") plugins.dispose(targetEl, nodes);
+        else if (mode !== "beforeend" && mode !== "afterbegin") {
+          for (const child of Array.from(targetEl.children)) plugins.dispose(child, nodes);
+        }
+      }
       const firstElement = nodes.find((n) => n && n.nodeType === 1) || null;
       const appliedRoot = firstElement || targetEl;
       let result;
@@ -1872,6 +1942,9 @@
           targetEl.replaceChildren(...nodes);
           result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
           break;
+      }
+      for (const node of nodes) {
+        if (node.nodeType === 1) plugins?.boot(node);
       }
       if (emitLifecycle) {
         emitLifecycle(detail.sourceElement, "heimdall:swap-after", {
@@ -2113,7 +2186,8 @@
       const hasMutation = containsTag(html, "mutation");
       const hasHistory = containsTag(html, "history");
       const hasStorage = containsTag(html, "storage");
-      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage)
+      const hasPluginCommand = containsTag(html, "heimdall-command");
+      if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage && !hasPluginCommand)
         return html;
       const tpl = parseHtmlToTemplate(html);
       stripInvocationsFromFragment(tpl.content);
@@ -2123,6 +2197,7 @@
       stripMutationsFromFragment(tpl.content);
       stripHistoryFromFragment(tpl.content);
       stripStorageFromFragment(tpl.content);
+      plugins?.stripCommands(tpl.content);
       return fragmentToHtml(tpl.content);
     }
     function processOob(html, sourceEl, context) {
@@ -2246,6 +2321,7 @@
           stripInvocationsFromFragment(payloadFrag);
           stripMutationsFromFragment(payloadFrag);
           stripHistoryFromFragment(payloadFrag);
+          plugins?.stripCommands(payloadFrag);
           const swapResult = applySwap(targetEl, payloadFrag, swap, Object.assign({}, context || {}, {
             sourceEl,
             swapKind: "invocation"
@@ -2299,7 +2375,7 @@
   // core/event-delegates.js
   function createEventDelegates({
     getConfig,
-    runActionFromElement
+    runInvocationFromElement
   }) {
     function parseTokenList(value) {
       return String(value || "").split(/\s+/).map((x) => x.trim().toLowerCase()).filter(Boolean);
@@ -2365,7 +2441,7 @@
       const preventDefault = truthyAttr(el, "heimdall-prevent-default", isAnchor);
       if (preventDefault)
         e.preventDefault();
-      await runActionFromElement(el, actionId, "click");
+      await runInvocationFromElement(el, actionId, "click");
     }
     async function handleChange(e) {
       if (e.defaultPrevented)
@@ -2379,12 +2455,12 @@
       const ms = intAttr(el, "heimdall-debounce", 0);
       if (ms > 0) {
         scheduleDebounced(el, "change", ms, () => {
-          runActionFromElement(el, actionId, "change").catch(() => {
+          runInvocationFromElement(el, actionId, "change").catch(() => {
           });
         });
         return;
       }
-      await runActionFromElement(el, actionId, "change");
+      await runInvocationFromElement(el, actionId, "change");
     }
     const _debouncers = /* @__PURE__ */ new WeakMap();
     function scheduleDebounced(el, key, ms, fn) {
@@ -2400,6 +2476,10 @@
         fn();
       }, ms);
       map.set(key, tid);
+      return () => {
+        clearTimeout(tid);
+        if (map.get(key) === tid) map.delete(key);
+      };
     }
     async function handleInput(e) {
       if (e.defaultPrevented)
@@ -2413,12 +2493,12 @@
       const ms = intAttr(el, "heimdall-debounce", getConfig().inputDebounceMs || 250);
       if (ms > 0) {
         scheduleDebounced(el, "input", ms, () => {
-          runActionFromElement(el, actionId, "input").catch(() => {
+          runInvocationFromElement(el, actionId, "input").catch(() => {
           });
         });
         return;
       }
-      await runActionFromElement(el, actionId, "input");
+      await runInvocationFromElement(el, actionId, "input");
     }
     async function handleSubmit(e) {
       if (e.defaultPrevented)
@@ -2432,7 +2512,7 @@
       const preventDefault = truthyAttr(form, "heimdall-prevent-default", true);
       if (preventDefault)
         e.preventDefault();
-      await runActionFromElement(form, actionId, "submit");
+      await runInvocationFromElement(form, actionId, "submit");
     }
     function normalizeKeySpec(spec) {
       return String(spec || "").trim();
@@ -2467,7 +2547,7 @@
       );
       if (wantsPreventDefault)
         e.preventDefault();
-      await runActionFromElement(el, actionId, "keydown");
+      await runInvocationFromElement(el, actionId, "keydown");
     }
     async function handleFocusOut(e) {
       if (e.defaultPrevented)
@@ -2478,7 +2558,7 @@
       const actionId = getAttr(el, "heimdall-content-blur");
       if (!actionId)
         return;
-      await runActionFromElement(el, actionId, "blur");
+      await runInvocationFromElement(el, actionId, "blur");
     }
     const _hoverTimers = /* @__PURE__ */ new WeakMap();
     function isRealMouseEnter(e, el) {
@@ -2503,13 +2583,13 @@
       if (delay > 0) {
         const tid = setTimeout(() => {
           _hoverTimers.delete(el);
-          runActionFromElement(el, actionId, "hover").catch(() => {
+          runInvocationFromElement(el, actionId, "hover").catch(() => {
           });
         }, delay);
         _hoverTimers.set(el, tid);
         return;
       }
-      await runActionFromElement(el, actionId, "hover");
+      await runInvocationFromElement(el, actionId, "hover");
     }
     function handleMouseOut(e) {
       const el = resolveActionElement(e.target, "heimdall-content-hover", "hover");
@@ -2525,6 +2605,8 @@
       }
     }
     return {
+      resolveTriggerElement: resolveActionElement,
+      scheduleDebounced,
       handleChange,
       handleClick,
       handleFocusOut,
@@ -2736,10 +2818,10 @@
   }
 
   // core/mutations.js
-  function createMutationRuntime({ global, emitLifecycle, dbg, boot, busyState }) {
+  function createMutationRuntime({ global, emitLifecycle, dbg, boot, busyState, plugins }) {
     function mutationError(sourceEl, directive, context, code, message, error) {
       const detail = {
-        origin: context && context.kind ? context.kind : "action",
+        origin: context && context.kind ? context.kind : "invocation",
         sourceElement: sourceEl || null,
         requestContext: context && context.requestContext ? context.requestContext : null,
         directive,
@@ -2866,7 +2948,7 @@
       if (roots.length === 0)
         return mutationError(sourceEl, directive, context, "target-not-found", `Mutation target '${targetSelector}' was not found.`);
       const detail = {
-        origin: context.kind || "action",
+        origin: context.kind || "invocation",
         sourceElement: sourceEl || null,
         requestContext: context.requestContext || null,
         directive,
@@ -2908,7 +2990,7 @@
       }
       if (durationMs > 16)
         dbg("long mutation batch", { targetSelector, targetCount: targets.length, operationCount: operations.length, durationMs });
-      const reconcileTargets = operations.some(requiresBehaviorReconciliation) ? targets : [];
+      const reconcileTargets = plugins?.hasPlugins() || operations.some(requiresBehaviorReconciliation) ? targets : [];
       return { applied: true, cancelled: false, targets, reconcileTargets, detail };
     }
     function reconcile(targets) {
@@ -2933,7 +3015,7 @@
   // core/page-lifecycle.js
   function createPageLifecycleRuntime({
     global,
-    runActionFromElement,
+    runInvocationFromElement,
     emit
   }) {
     function invokeMatching(attr, triggerName) {
@@ -2942,7 +3024,7 @@
         const actionId = (getAttr(el, attr) || "").trim();
         if (!actionId)
           continue;
-        runActionFromElement(el, actionId, triggerName).catch(() => {
+        runInvocationFromElement(el, actionId, triggerName).catch(() => {
         });
       }
     }
@@ -2969,7 +3051,7 @@
   }
 
   // core/payloads.js
-  function createPayloadResolver(global) {
+  function createPayloadResolver(global, resolvePluginPayload) {
     function findClosestStateElement(el, key) {
       let cur = el;
       while (cur && cur.nodeType === 1) {
@@ -3053,6 +3135,10 @@
         return { value: refObj, binding: null };
       const fromRaw = (getAttr(el, "heimdall-payload-from") || "").trim();
       const from = fromRaw.toLowerCase();
+      if (from.startsWith("plugin:")) {
+        if (!resolvePluginPayload) throw new Error("Plugin payload sources are unavailable.");
+        return resolvePluginPayload(fromRaw.substring("plugin:".length).trim(), el);
+      }
       if (from === "closest-state" || from.startsWith("closest-state:")) {
         const key = from.startsWith("closest-state:") ? fromRaw.substring("closest-state:".length).trim() : null;
         const binding = createClosestStateBinding(el, key || null);
@@ -3089,6 +3175,639 @@
     return {
       payloadBindingFromElement,
       payloadFromElement
+    };
+  }
+
+  // core/plugins.js
+  var PLUGIN_API_VERSION = 1;
+  var validName = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
+  var reservedTriggers = /* @__PURE__ */ new Set([
+    "load",
+    "click",
+    "change",
+    "input",
+    "submit",
+    "keydown",
+    "blur",
+    "hover",
+    "visible",
+    "scroll",
+    "document-visible",
+    "online",
+    "target",
+    "swap",
+    "disable"
+  ]);
+  function abortError() {
+    return new DOMException("Plugin operation was cancelled.", "AbortError");
+  }
+  function waitFor(promise, signal, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      let timer;
+      const finish = (callback, value) => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", abort);
+        callback(value);
+      };
+      const abort = () => finish(reject, abortError());
+      Promise.resolve(promise).then(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error)
+      );
+      if (signal?.aborted) {
+        reject(abortError());
+        return;
+      }
+      signal?.addEventListener("abort", abort, { once: true });
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          const error = new Error("Plugin operation timed out.");
+          error.code = "plugin-timeout";
+          finish(reject, error);
+        }, timeoutMs);
+      }
+    });
+  }
+  function matchingElements(root, selector) {
+    const elements = root?.matches?.(selector) ? [root] : [];
+    return elements.concat(Array.from(root?.querySelectorAll?.(selector) || []));
+  }
+  function snapshot(value, global) {
+    if (typeof global.FormData === "function" && value instanceof global.FormData) {
+      const copy = new global.FormData();
+      for (const [key, item] of value.entries()) copy.append(key, item);
+      return copy;
+    }
+    return value == null ? value : JSON.parse(JSON.stringify(value));
+  }
+  function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
+    const installed = /* @__PURE__ */ new Map();
+    const registries = {
+      behaviors: /* @__PURE__ */ new Map(),
+      triggers: /* @__PURE__ */ new Map(),
+      payloads: /* @__PURE__ */ new Map(),
+      commands: /* @__PURE__ */ new Map()
+    };
+    let host = {};
+    let started = false;
+    let registryChanged = () => {
+    };
+    function report(pluginId, extension, phase, code, error, extra = {}) {
+      const detail = { pluginId, extension, phase, code, error, ...extra };
+      emitLifecycle(extra.sourceElement || null, "heimdall:plugin-error", detail);
+      dbg("plugin error", detail);
+      return error;
+    }
+    function checkName(value, description) {
+      if (typeof value !== "string" || value.length > 128 || !validName.test(value))
+        throw new TypeError(`${description} must be a lowercase dotted or hyphenated name.`);
+      return value;
+    }
+    function disposeRecord(definition, element, record) {
+      definition.instances.delete(element);
+      record.controller.abort();
+      try {
+        const result = record.dispose?.();
+        if (result && typeof result.then === "function")
+          Promise.resolve(result).catch((error) => report(
+            definition.owner.id,
+            definition.name,
+            "dispose",
+            "dispose-failed",
+            error,
+            { sourceElement: element }
+          ));
+      } catch (error) {
+        report(
+          definition.owner.id,
+          definition.name,
+          "dispose",
+          "dispose-failed",
+          error,
+          { sourceElement: element }
+        );
+      }
+    }
+    function invokeCleanup(owner, callback) {
+      try {
+        const result = callback();
+        if (result && typeof result.then === "function")
+          Promise.resolve(result).catch((error) => report(owner.id, null, "dispose", "dispose-failed", error));
+      } catch (error) {
+        report(owner.id, null, "dispose", "dispose-failed", error);
+      }
+    }
+    function remove(id) {
+      const owner = installed.get(id);
+      if (!owner) return false;
+      for (const other of installed.values()) {
+        if (other.requires.includes(id))
+          throw new Error(`Plugin '${id}' is required by '${other.id}'.`);
+      }
+      installed.delete(id);
+      owner.controller.abort();
+      for (const definition of owner.definitions) {
+        registries[definition.kind].delete(definition.name);
+        for (const [element, record] of definition.instances || [])
+          disposeRecord(definition, element, record);
+      }
+      for (const callback of owner.cleanup.reverse()) invokeCleanup(owner, callback);
+      registryChanged();
+      return true;
+    }
+    function use(plugin, options) {
+      if (!plugin || typeof plugin !== "object" || typeof plugin.install !== "function")
+        throw new TypeError("A plugin must provide an install function.");
+      const id = checkName(plugin.id, "Plugin id");
+      if (id === "heimdall" || id.startsWith("heimdall."))
+        throw new Error("The heimdall namespace is reserved.");
+      if (plugin.pluginApiVersion !== PLUGIN_API_VERSION)
+        throw new Error(`Plugin '${id}' requires an unsupported plugin API version.`);
+      if (plugin.version != null && (typeof plugin.version !== "string" || !plugin.version.trim()))
+        throw new TypeError("Plugin version must be a non-empty string when provided.");
+      const existing = installed.get(id);
+      if (existing) {
+        if (existing.plugin === plugin && existing.options === options) return;
+        throw new Error(`Plugin '${id}' is already installed.`);
+      }
+      const requires = plugin.requires || [];
+      if (!Array.isArray(requires)) throw new TypeError("Plugin requires must be an array of plugin ids.");
+      for (const dependency of requires) {
+        checkName(dependency, "Dependency id");
+        if (!installed.has(dependency))
+          throw new Error(`Plugin '${id}' requires '${dependency}' to be installed first.`);
+      }
+      const owner = {
+        id,
+        plugin,
+        options,
+        version: plugin.version || null,
+        requires: [...requires],
+        controller: new AbortController(),
+        definitions: [],
+        cleanup: []
+      };
+      let installing = true;
+      const assertInstalling = () => {
+        if (!installing) throw new Error("Plugin registrations must be made synchronously during install.");
+      };
+      function register(kind, descriptor) {
+        assertInstalling();
+        if (!descriptor || typeof descriptor !== "object")
+          throw new TypeError("An extension descriptor is required.");
+        const localName = checkName(descriptor.name, "Extension name");
+        const name = `${id}.${localName}`;
+        if (owner.definitions.some((d) => d.kind === kind && d.name === name))
+          throw new Error(`Extension '${name}' is already registered.`);
+        const definition = { ...descriptor, name, kind, owner, instances: /* @__PURE__ */ new Map() };
+        if (kind === "behaviors") {
+          global.document.querySelectorAll(descriptor.selector);
+          if (!descriptor.selector || typeof descriptor.mount !== "function")
+            throw new TypeError("A behavior requires a selector and mount function.");
+          if (descriptor.observedAttributes != null && (!Array.isArray(descriptor.observedAttributes) || descriptor.observedAttributes.some((a) => typeof a !== "string" || !a)))
+            throw new TypeError("observedAttributes must contain attribute names.");
+          definition.observedAttributes = [...descriptor.observedAttributes || []];
+        } else if (kind === "triggers") {
+          const attribute = descriptor.attribute || `heimdall-content-${name.replace(/\./g, "-")}`;
+          if (!/^heimdall-content-[a-z][a-z0-9-]*$/.test(attribute) || reservedTriggers.has(attribute.substring("heimdall-content-".length)))
+            throw new Error(`Trigger attribute '${attribute}' is invalid or reserved.`);
+          for (const other of [...registries.triggers.values(), ...owner.definitions]) {
+            if (other.kind === "triggers" && other.attribute === attribute)
+              throw new Error(`Trigger attribute '${attribute}' is already registered.`);
+          }
+          const events = descriptor.events || (descriptor.event ? [descriptor.event] : []);
+          if (!Array.isArray(events) || events.some((e) => typeof e !== "string" || !e || /\s/.test(e)))
+            throw new TypeError("Trigger events must be an array of individual DOM event names.");
+          if (events.length > 0 === (typeof descriptor.subscribe === "function"))
+            throw new TypeError("A trigger requires either DOM events or a subscribe function.");
+          definition.attribute = attribute;
+          if (descriptor.filter != null && typeof descriptor.filter !== "function")
+            throw new TypeError("A trigger filter must be a function.");
+          definition.events = [...events];
+        } else if (kind === "payloads") {
+          if (typeof descriptor.read !== "function" || !["trigger", "execution"].includes(descriptor.timing || "trigger"))
+            throw new TypeError("A payload source requires read and trigger/execution timing.");
+        } else if (typeof descriptor.handle !== "function") {
+          throw new TypeError("A command requires a handle function.");
+        }
+        if (kind === "commands" && descriptor.validate != null && typeof descriptor.validate !== "function")
+          throw new TypeError("A command validator must be a function.");
+        owner.definitions.push(definition);
+        return name;
+      }
+      const api = {
+        pluginId: id,
+        pluginApiVersion: PLUGIN_API_VERSION,
+        signal: owner.controller.signal,
+        invoke: (invocationId, payload, options2 = {}) => {
+          if (owner.controller.signal.aborted) return Promise.reject(abortError());
+          if (installed.get(id) !== owner)
+            throw new Error("Plugin invocation is available after installation commits.");
+          const controller = new AbortController();
+          const signals = [owner.controller.signal, options2.signal].filter(Boolean);
+          const abort = () => controller.abort();
+          const unlink = () => {
+            for (const signal of signals) signal.removeEventListener("abort", abort);
+          };
+          for (const signal of signals) {
+            if (signal.aborted) abort();
+            else signal.addEventListener("abort", abort, { once: true });
+          }
+          try {
+            return Promise.resolve(host.invoke(invocationId, payload, { ...options2, signal: controller.signal })).finally(unlink);
+          } catch (error) {
+            unlink();
+            throw error;
+          }
+        },
+        onDispose(callback) {
+          assertInstalling();
+          if (typeof callback !== "function") throw new TypeError("A cleanup function is required.");
+          owner.cleanup.push(callback);
+        }
+      };
+      for (const kind of Object.keys(registries))
+        api[kind] = Object.freeze({ register: (descriptor) => register(kind, descriptor) });
+      try {
+        const result = plugin.install(Object.freeze(api), options);
+        if (result && typeof result.then === "function") {
+          Promise.resolve(result).catch(() => {
+          });
+          throw new TypeError("Plugin install must be synchronous. Async work belongs in element behaviors.");
+        }
+        if (result !== void 0 && typeof result !== "function")
+          throw new TypeError("Plugin install may return a cleanup function or undefined.");
+        if (result) owner.cleanup.push(result);
+      } catch (error) {
+        owner.controller.abort();
+        for (const callback of owner.cleanup.reverse()) invokeCleanup(owner, callback);
+        report(id, null, "install", "install-failed", error);
+        throw error;
+      } finally {
+        installing = false;
+      }
+      installed.set(id, owner);
+      for (const definition of owner.definitions) registries[definition.kind].set(definition.name, definition);
+      registryChanged();
+      if (started) host.boot(global.document);
+    }
+    function signature(definition, element) {
+      return JSON.stringify((definition.observedAttributes || []).map((a) => element.getAttribute(a)));
+    }
+    function mountBehavior(definition, element) {
+      const previous = definition.instances.get(element);
+      const nextSignature = signature(definition, element);
+      if (previous) {
+        if (previous.signature === nextSignature || previous.pending) return;
+        if (previous.update) {
+          previous.signature = nextSignature;
+          try {
+            const result = previous.update({ element, signal: previous.controller.signal });
+            if (result && typeof result.then === "function") {
+              Promise.resolve(result).catch(() => {
+              });
+              throw new TypeError("Behavior update must be synchronous; remount for asynchronous updates.");
+            }
+          } catch (error) {
+            report(
+              definition.owner.id,
+              definition.name,
+              "update",
+              "update-failed",
+              error,
+              { sourceElement: element }
+            );
+          }
+          return;
+        }
+        disposeRecord(definition, element, previous);
+      }
+      const record = { controller: new AbortController(), signature: nextSignature, pending: false, ready: null };
+      definition.instances.set(element, record);
+      function accept(result) {
+        if (result != null && typeof result !== "function" && typeof result !== "object")
+          throw new TypeError("Behavior mount must return cleanup, a behavior instance, or undefined.");
+        record.dispose = typeof result === "function" ? result : result?.dispose?.bind(result);
+        record.update = typeof result === "object" ? result?.update?.bind(result) : null;
+        if (record.controller.signal.aborted) return record.dispose?.();
+        record.pending = false;
+        if (!record.controller.signal.aborted) mountBehavior(definition, element);
+      }
+      try {
+        const result = definition.mount(element, {
+          element,
+          pluginId: definition.owner.id,
+          options: definition.owner.options,
+          signal: record.controller.signal
+        });
+        if (result && typeof result.then === "function") {
+          record.pending = true;
+          const mounting = Promise.resolve(result).then(accept);
+          record.ready = waitFor(
+            mounting,
+            record.controller.signal,
+            getConfig().pluginMountTimeoutMs ?? 1e4
+          ).then(() => {
+            record.ready = null;
+          }).catch((error) => {
+            record.pending = false;
+            record.controller.abort();
+            if (error?.name !== "AbortError")
+              report(
+                definition.owner.id,
+                definition.name,
+                "mount",
+                error?.code || "mount-failed",
+                error,
+                { sourceElement: element }
+              );
+            throw error;
+          });
+          record.ready.catch(() => {
+          });
+        } else accept(result);
+      } catch (error) {
+        record.controller.abort();
+        record.ready = Promise.reject(error);
+        record.ready.catch(() => {
+        });
+        report(
+          definition.owner.id,
+          definition.name,
+          "mount",
+          "mount-failed",
+          error,
+          { sourceElement: element }
+        );
+      }
+    }
+    function mountTrigger(definition, element) {
+      if (definition.instances.has(element)) return;
+      const record = { controller: new AbortController() };
+      definition.instances.set(element, record);
+      const emit = async (event = null, overrides = {}) => {
+        if (record.controller.signal.aborted || !element.isConnected) return Promise.resolve(null);
+        if (event?.defaultPrevented) return Promise.resolve(null);
+        const eventTarget = event?.target || element;
+        if (host.resolveTriggerElement(eventTarget, definition.attribute, definition.name) !== element)
+          return Promise.resolve(null);
+        if (definition.filter && !definition.filter({ element, event })) return Promise.resolve(null);
+        const submitted = { ...overrides };
+        if (Object.prototype.hasOwnProperty.call(submitted, "payload"))
+          submitted.payload = snapshot(submitted.payload, global);
+        if (truthyAttr(element, "heimdall-prevent-default", !!definition.preventDefault)) event?.preventDefault?.();
+        const invoke = () => {
+          if (record.controller.signal.aborted || !element.isConnected) return;
+          return host.runInvocationFromElement(
+            element,
+            element.getAttribute(definition.attribute),
+            definition.name,
+            { ...submitted, event }
+          );
+        };
+        const delay = intAttr(element, "heimdall-debounce", Number(definition.debounceMs || 0));
+        if (delay > 0) {
+          record.cancelDebounce?.();
+          return new Promise((resolve, reject) => {
+            const cancel = host.scheduleDebounced(element, definition.name, delay, () => {
+              record.cancelDebounce = null;
+              Promise.resolve(invoke()).then(resolve, reject);
+            });
+            record.cancelDebounce = () => {
+              cancel();
+              resolve(null);
+            };
+          });
+        }
+        return Promise.resolve(invoke());
+      };
+      try {
+        for (const event of definition.events) {
+          element.addEventListener(event, (e) => {
+            emit(e).catch((error) => report(
+              definition.owner.id,
+              definition.name,
+              "trigger",
+              "trigger-failed",
+              error,
+              { sourceElement: element }
+            ));
+          }, { signal: record.controller.signal });
+        }
+        const cleanup = definition.subscribe?.({ element, emit, signal: record.controller.signal });
+        if (cleanup && typeof cleanup.then === "function") Promise.resolve(cleanup).catch(() => {
+        });
+        if (cleanup != null && typeof cleanup !== "function")
+          throw new TypeError("Trigger subscribe must return cleanup or undefined.");
+        record.dispose = () => {
+          record.cancelDebounce?.();
+          cleanup?.();
+        };
+      } catch (error) {
+        record.controller.abort();
+        record.cancelDebounce?.();
+        report(
+          definition.owner.id,
+          definition.name,
+          "subscribe",
+          "subscribe-failed",
+          error,
+          { sourceElement: element }
+        );
+      }
+    }
+    function boot(root) {
+      if (!root || root.nodeType === 1 && !root.isConnected) return;
+      for (const kind of ["behaviors", "triggers"]) {
+        for (const definition of registries[kind].values()) {
+          const selector = kind === "behaviors" ? definition.selector : `[${definition.attribute}]`;
+          for (const [element, record] of definition.instances) {
+            if (!element.isConnected || !element.matches(selector))
+              disposeRecord(definition, element, record);
+          }
+          for (const element of matchingElements(root, selector)) {
+            if (kind === "behaviors") mountBehavior(definition, element);
+            else mountTrigger(definition, element);
+          }
+        }
+      }
+    }
+    function dispose(root, preserved = []) {
+      for (const kind of ["triggers", "behaviors"]) {
+        for (const definition of registries[kind].values()) {
+          for (const [element, record] of definition.instances) {
+            if ((root === element || root?.contains?.(element)) && !preserved.some((node) => node === element || node.contains?.(element)))
+              disposeRecord(definition, element, record);
+          }
+        }
+      }
+    }
+    function ready(root, subtree = false) {
+      const promises = [];
+      for (const definition of registries.behaviors.values()) {
+        for (const [element, record] of definition.instances) {
+          if (record.ready && (element === root || element.contains(root) || subtree && root?.contains?.(element))) {
+            promises.push(record.ready.catch((error) => {
+              const replacement = definition.instances.get(element);
+              if (error?.name === "AbortError" && replacement && replacement !== record) return;
+              throw error;
+            }));
+          }
+        }
+      }
+      return promises.length ? Promise.all(promises).then(() => ready(root, subtree)) : null;
+    }
+    function readPayload(name, element) {
+      const definition = registries.payloads.get(name);
+      if (!definition) throw report(null, name, "payload", "unknown-payload", new Error(`Unknown plugin payload '${name}'.`), { sourceElement: element });
+      const read = () => {
+        try {
+          const value = definition.read({ element, options: definition.owner.options });
+          if (value && typeof value.then === "function") {
+            Promise.resolve(value).catch(() => {
+            });
+            throw new TypeError("Payload readers must be synchronous. Initialize asynchronous data in a behavior.");
+          }
+          return snapshot(value, global);
+        } catch (error) {
+          throw report(definition.owner.id, name, "payload", "payload-failed", error, { sourceElement: element });
+        }
+      };
+      return {
+        value: read(),
+        binding: definition.timing === "execution" ? {
+          kind: "plugin",
+          resolve: () => element.isConnected && registries.payloads.get(name) === definition ? { available: true, value: read() } : { available: false, value: null }
+        } : null
+      };
+    }
+    function prepareCommands(html) {
+      if (!/<heimdall-command[\s>]/i.test(html || "")) return { html, before: [], after: [] };
+      const template = global.document.createElement("template");
+      template.innerHTML = html;
+      const redirect = template.content.querySelector("redirect");
+      const suppress = !!(redirect && (redirect.getAttribute("url")?.trim() || redirect.textContent.trim()));
+      const before = [], after = [];
+      let limitReported = false;
+      for (const node of Array.from(template.content.querySelectorAll("heimdall-command"))) {
+        if (before.length + after.length >= (getConfig().pluginCommandMaxCount ?? 256)) {
+          if (!limitReported) report(null, null, "command", "command-limit", new Error("Too many plugin commands in a response."));
+          limitReported = true;
+        } else if (!suppress) {
+          const command = {
+            name: node.getAttribute("name"),
+            argsJson: node.getAttribute("args") || "{}",
+            target: node.getAttribute("target"),
+            all: node.getAttribute("all") === "true",
+            timing: node.getAttribute("timing") || "after"
+          };
+          (command.timing === "before" ? before : after).push(command);
+        }
+        node.remove();
+      }
+      stripCommands(template.content);
+      const wrapper = global.document.createElement("div");
+      wrapper.append(template.content);
+      return { html: wrapper.innerHTML, before, after };
+    }
+    function stripCommands(root) {
+      for (const node of Array.from(root?.querySelectorAll?.("heimdall-command") || [])) node.remove();
+      for (const template of Array.from(root?.querySelectorAll?.("template") || [])) stripCommands(template.content);
+    }
+    async function runCommands(commands, context) {
+      for (const command of commands) {
+        if (context.isCurrent && !context.isCurrent()) return false;
+        const definition = registries.commands.get(command.name);
+        if (!definition) {
+          report(null, command.name, "command", "unknown-command", new Error(`Unknown plugin command '${command.name}'.`), context);
+          continue;
+        }
+        const controller = new AbortController();
+        const signals = [context.signal, definition.owner.controller.signal].filter(Boolean);
+        const abort = () => controller.abort();
+        for (const signal of signals) {
+          if (signal.aborted) abort();
+          else signal.addEventListener("abort", abort, { once: true });
+        }
+        try {
+          if (!["before", "after"].includes(command.timing)) throw new Error("Invalid command timing.");
+          if (command.argsJson.length > (getConfig().pluginCommandMaxArgsChars ?? 65536))
+            throw new Error("Plugin command arguments exceed the configured limit.");
+          const args = JSON.parse(command.argsJson);
+          if (definition.validate && definition.validate(args) !== true) throw new Error("Invalid plugin command arguments.");
+          const targets = command.target ? command.all ? Array.from(global.document.querySelectorAll(command.target)) : [global.document.querySelector(command.target)].filter(Boolean) : [null];
+          if (!targets.length) throw new Error(`Plugin command target '${command.target}' was not found.`);
+          for (const element of targets) {
+            if (controller.signal.aborted || context.isCurrent && !context.isCurrent()) return false;
+            if (element) {
+              boot(element);
+              const pending = ready(element, true);
+              if (pending) await waitFor(pending, controller.signal, getConfig().pluginMountTimeoutMs ?? 1e4);
+            }
+            if (controller.signal.aborted || context.isCurrent && !context.isCurrent()) return false;
+            if (element && !element.isConnected) throw new Error("Plugin command target was disconnected.");
+            await waitFor(definition.handle({
+              element,
+              args,
+              signal: controller.signal,
+              pluginId: definition.owner.id,
+              invocationId: context.invocationId || null,
+              sourceElement: context.sourceElement || null,
+              origin: context.origin || "invocation",
+              timing: command.timing
+            }), controller.signal, getConfig().pluginCommandTimeoutMs ?? 1e4);
+          }
+        } catch (error) {
+          if (error?.name !== "AbortError")
+            report(
+              definition.owner.id,
+              command.name,
+              "command",
+              error?.code || "command-failed",
+              error,
+              { invocationId: context.invocationId || null, sourceElement: context.sourceElement || null }
+            );
+        } finally {
+          controller.abort();
+          for (const signal of signals) signal.removeEventListener("abort", abort);
+        }
+      }
+      return !context.isCurrent || context.isCurrent();
+    }
+    return {
+      pluginApiVersion: PLUGIN_API_VERSION,
+      use,
+      remove,
+      boot,
+      dispose,
+      ready,
+      readPayload,
+      prepareCommands,
+      stripCommands,
+      runCommands,
+      configure(value) {
+        host = value;
+      },
+      start() {
+        started = true;
+      },
+      hasPlugins: () => installed.size > 0,
+      onRegistryChanged(callback) {
+        registryChanged = callback;
+      },
+      observe(mutations) {
+        if (!installed.size) return;
+        const roots = new Set(mutations.map((m) => m.target).filter((n) => n.isConnected));
+        for (const root of roots) {
+          if (!Array.from(roots).some((other) => other !== root && other.contains?.(root))) boot(root);
+        }
+      },
+      list: () => Array.from(installed.values(), (owner) => Object.freeze({
+        id: owner.id,
+        version: owner.version,
+        pluginApiVersion: PLUGIN_API_VERSION,
+        requires: Object.freeze([...owner.requires])
+      }))
     };
   }
 
@@ -3609,6 +4328,7 @@
     boot,
     onReady: onReady2,
     clearCsrfToken,
+    plugins,
     sseConnect,
     sseDisconnect,
     sseDisconnectAll,
@@ -3656,6 +4376,7 @@
         "lang"
       ];
       const obs = new MutationObserver((mutations) => {
+        plugins.observe(mutations);
         for (const m of mutations) {
           if (m.type === "attributes") {
             if (m.target && m.target.nodeType === 1)
@@ -3670,13 +4391,16 @@
         }
         if (pending.size) scheduleFlush();
       });
-      obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter });
-      if (document.documentElement && document.documentElement !== document.body) {
+      function observe() {
         obs.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
           attributes: true,
-          attributeFilter: ["lang"]
+          ...plugins.hasPlugins() ? {} : { attributeFilter }
         });
       }
+      observe();
+      plugins.onRegistryChanged(observe);
       Heimdall._observer = obs;
       dbg("MutationObserver installed");
     }
@@ -3686,6 +4410,13 @@
       boot,
       onReady: onReady2,
       clearCsrfToken,
+      pluginApiVersion: plugins.pluginApiVersion,
+      use(plugin, options) {
+        plugins.use(plugin, options);
+        return Heimdall;
+      },
+      plugins: Object.freeze({ list: plugins.list, remove: plugins.remove }),
+      dispose: plugins.dispose,
       sse: {
         connect: sseConnect,
         disconnect: sseDisconnect,
@@ -3696,7 +4427,7 @@
         basePath: defaultBasePath,
         apiVersion,
         endpoints: {
-          contentActions: defaultContentEndpoint,
+          contentInvocations: defaultContentEndpoint,
           csrf: defaultCsrfEndpoint,
           bifrostToken: defaultBifrostTokenEndpoint,
           bifrost: defaultBifrostEndpoint
@@ -3723,6 +4454,11 @@
         scrollMinIntervalMs: 250,
         requestSync: "parallel",
         requestTimeoutMs: 0,
+        pluginMountTimeoutMs: 1e4,
+        pluginCommandTimeoutMs: 1e4,
+        pluginCommandMaxArgsChars: 65536,
+        pluginCommandMaxCount: 256,
+        pluginSseQueueLimit: 128,
         // NOTE: visibleRootMargin and visibleThreshold are read once when
         // the IntersectionObserver is first created. Set these values before
         // any heimdall-content-visible element is booted (i.e. before DOMContentLoaded).
@@ -3738,6 +4474,16 @@
         ssePauseWhenHidden: false
       }
     };
+    Object.defineProperty(Heimdall.config.endpoints, "contentActions", {
+      configurable: true,
+      enumerable: true,
+      get() {
+        return Heimdall.config.endpoints.contentInvocations;
+      },
+      set(value) {
+        Heimdall.config.endpoints.contentInvocations = value;
+      }
+    });
     if (typeof onRuntimeCreated === "function")
       onRuntimeCreated(Heimdall);
     global.Heimdall = Heimdall;
@@ -3753,6 +4499,7 @@
         document.addEventListener("mouseover", handlers.handleMouseOver, false);
         document.addEventListener("mouseout", handlers.handleMouseOut, false);
       }
+      plugins.start();
       boot(document);
       installObserver();
       installPageLifecycle();
@@ -3778,6 +4525,7 @@
     clearBifrostSubscribeToken,
     ensureBifrostSubscribeToken,
     matchesTriggerAttr,
+    plugins,
     defaultBifrostEndpoint
   }) {
     const _sseByElement = /* @__PURE__ */ new WeakMap();
@@ -3872,6 +4620,8 @@ ${topic}`;
     function closeSseState(state, reason) {
       if (!state || state.closed)
         return;
+      state.commandController?.abort();
+      state.commandEpoch = (state.commandEpoch || 0) + 1;
       const connection = state.connection;
       state.url = getStateUrl(state);
       state.closed = true;
@@ -4023,6 +4773,9 @@ ${topic}`;
       for (const state of Array.from(connection.subscribers)) {
         state.paused = true;
         state.pauseReason = nextReason;
+        state.commandController?.abort();
+        state.commandController = null;
+        state.commandEpoch = (state.commandEpoch || 0) + 1;
       }
       if (!options.prepared) {
         connection.connectAttempt++;
@@ -4246,10 +4999,40 @@ ${topic}`;
       for (const state of Array.from(connection.subscribers)) {
         if (state.closed || state.paused || state.eventName !== eventName)
           continue;
-        handleSsePayload(state, ev, rawData);
+        const epoch = state.commandEpoch || 0;
+        const deliver = () => {
+          if ((state.commandEpoch || 0) !== epoch) return;
+          return handleSsePayload(state, ev, rawData);
+        };
+        if (state.pluginQueue || /<heimdall-command[\s>]/i.test(String(rawData || ""))) {
+          const queueLimit = Math.max(1, Number(getConfig().pluginSseQueueLimit) || 128);
+          if ((state.pluginQueueDepth || 0) >= queueLimit) {
+            emit("heimdall:plugin-error", {
+              pluginId: null,
+              extension: null,
+              phase: "command",
+              code: "sse-command-queue-full",
+              sourceElement: state.el,
+              error: new Error("The Bifrost plugin command queue is full.")
+            });
+            closeSseState(state, "plugin-command-queue-full");
+            continue;
+          }
+          state.pluginQueueDepth = (state.pluginQueueDepth || 0) + 1;
+          const queued = (state.pluginQueue || Promise.resolve()).then(deliver).catch((error) => {
+            emit("heimdall:sse-error", { topic: state.topic, el: state.el, error });
+          });
+          state.pluginQueue = queued;
+          queued.finally(() => {
+            state.pluginQueueDepth--;
+            if (state.pluginQueue === queued) state.pluginQueue = null;
+          });
+        } else {
+          deliver()?.catch((error) => emit("heimdall:sse-error", { topic: state.topic, el: state.el, error }));
+        }
       }
     }
-    function handleSsePayload(state, ev, rawData) {
+    async function handleSsePayload(state, ev, rawData) {
       if (state.closed || state.paused || state.connection && state.connection.paused)
         return;
       if (!state.el || !state.el.isConnected) {
@@ -4266,7 +5049,22 @@ ${topic}`;
       let redirectUrl = null;
       let jsAfter = [];
       let mutationTargets = [];
+      let pluginCommands = { before: [], after: [] };
+      if (!state.commandController || state.commandController.signal.aborted)
+        state.commandController = new AbortController();
+      const commandEpoch = state.commandEpoch || 0;
+      const pluginContext = {
+        sourceElement: state.el,
+        origin: "sse",
+        signal: state.commandController.signal,
+        isCurrent: () => !state.closed && !state.paused && state.el.isConnected && (state.commandEpoch || 0) === commandEpoch
+      };
       try {
+        pluginCommands = plugins.prepareCommands(html);
+        html = pluginCommands.html;
+        if (pluginCommands.before.length)
+          await plugins.runCommands(pluginCommands.before, pluginContext);
+        if (!pluginContext.isCurrent()) return;
         const oob = dom.processOob(html, state.el, {
           phase: "before",
           kind: "sse",
@@ -4327,6 +5125,10 @@ ${topic}`;
         }
       }
       dom.reconcileMutations(mutationTargets);
+      if (pluginCommands.after.length) {
+        await plugins.runCommands(pluginCommands.after, pluginContext);
+        if (!pluginContext.isCurrent()) return;
+      }
       dom.invokeJsInvokeVoidDirectives(jsAfter, {
         phase: "after",
         kind: "sse",
@@ -4948,17 +5750,18 @@ ${topic}`;
     "use strict";
     const API_VERSION = 1;
     const DEFAULT_BASE_PATH = "/__heimdall";
-    const DEFAULT_CONTENT_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/content/actions`;
+    const DEFAULT_CONTENT_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/content/invocations`;
     const DEFAULT_CSRF_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/csrf`;
     const DEFAULT_BIFROST_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/bifrost`;
     const DEFAULT_BIFROST_TOKEN_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/bifrost/token`;
-    const ACTION_HEADER = "X-Heimdall-Content-Action";
+    const INVOCATION_HEADER = "X-Heimdall-Content-Invocation";
     const CSRF_HEADER = "RequestVerificationToken";
     const CLIENT_INFO_HEADER = "X-Heimdall-Client-Info";
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
-    const { payloadBindingFromElement } = createPayloadResolver(global);
     const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
+    const plugins = createPluginRuntime({ global, getConfig: getRuntimeConfig, emitLifecycle, dbg });
+    const { payloadBindingFromElement } = createPayloadResolver(global, plugins.readPayload);
     const coordinator = createRequestCoordinator({
       global,
       dbg
@@ -4995,7 +5798,8 @@ ${topic}`;
       emitLifecycle,
       dbg,
       boot: (root) => boot(root),
-      busyState
+      busyState,
+      plugins
     });
     const dom = createDomPipeline({
       global,
@@ -5005,7 +5809,8 @@ ${topic}`;
       emitLifecycle,
       jsInvokeVoid,
       timeLocalization,
-      mutations
+      mutations,
+      plugins
     });
     const {
       clearBifrostSubscribeToken,
@@ -5025,8 +5830,8 @@ ${topic}`;
     });
     const {
       invoke,
-      runActionFromElement
-    } = createActionInvoker({
+      runInvocationFromElement
+    } = createInvocationInvoker({
       global,
       getConfig: getRuntimeConfig,
       ensureCsrfToken,
@@ -5040,10 +5845,11 @@ ${topic}`;
       historyRuntime,
       coordinator,
       busyState,
+      plugins,
       resolveRequestHeaders: requestHeaders.resolve,
       mergeRequestHeaders: requestHeaders.merge,
       getClientInfoHeader: clientInfo.getHeaderValue,
-      actionHeader: ACTION_HEADER,
+      invocationHeader: INVOCATION_HEADER,
       csrfHeader: CSRF_HEADER,
       clientInfoHeader: CLIENT_INFO_HEADER
     });
@@ -5055,10 +5861,12 @@ ${topic}`;
       handleKeydown,
       handleMouseOut,
       handleMouseOver,
-      handleSubmit
+      handleSubmit,
+      resolveTriggerElement,
+      scheduleDebounced
     } = createEventDelegates({
       getConfig: getRuntimeConfig,
-      runActionFromElement
+      runInvocationFromElement
     });
     const {
       bootLoads,
@@ -5069,11 +5877,11 @@ ${topic}`;
     } = createBootTriggers({
       global,
       getConfig: getRuntimeConfig,
-      runActionFromElement
+      runInvocationFromElement
     });
     const pageLifecycle = createPageLifecycleRuntime({
       global,
-      runActionFromElement,
+      runInvocationFromElement,
       emit
     });
     const {
@@ -5092,16 +5900,19 @@ ${topic}`;
       clearBifrostSubscribeToken,
       ensureBifrostSubscribeToken,
       matchesTriggerAttr,
+      plugins,
       defaultBifrostEndpoint: DEFAULT_BIFROST_ENDPOINT
     });
     function boot(root) {
       timeLocalization.localize(root, { origin: "boot" });
+      plugins.boot(root);
       bootLoads(root);
       bootVisible(root);
       bootScroll(root);
       bootPoll(root);
       bootSse(root);
     }
+    plugins.configure({ invoke, runInvocationFromElement, resolveTriggerElement, scheduleDebounced, boot });
     const Heimdall = createHeimdallRuntime({
       global,
       apiVersion: API_VERSION,
@@ -5114,6 +5925,7 @@ ${topic}`;
       boot,
       onReady,
       clearCsrfToken,
+      plugins,
       sseConnect,
       sseDisconnect,
       sseDisconnectAll,

@@ -1,6 +1,20 @@
 # HeimdallFramework.Server changelog
 
-## [4.0.0] - Unreleased
+## [4.0.1] - 2026-11-05
+
+### Added
+
+- Added `AddHeimdallInvocationAssembly` registration for reusable libraries, with `AddHeimdallAssembly` compatibility aliases.
+
+### Changed
+
+- Adopted invocation names for endpoints, errors, and telemetry; legacy request routes and headers remain supported.
+
+### Fixed
+
+- Fixed single and repeated form values binding to collection properties and parameters, including form field aliases.
+
+## [4.0.0]
 
 ### Added
 

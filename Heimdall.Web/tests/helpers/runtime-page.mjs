@@ -250,7 +250,7 @@ export async function getFetches(page) {
 }
 
 export function actionFetches(fetches) {
-  return fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/content/actions"));
+  return fetches.filter(fetch => fetch.url.includes("/__heimdall/v1/content/invocations"));
 }
 
 export function csrfFetches(fetches) {

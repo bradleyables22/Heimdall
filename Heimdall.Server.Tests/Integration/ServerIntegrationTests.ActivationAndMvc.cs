@@ -240,6 +240,6 @@ public sealed partial class ServerIntegrationTests
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
         Assert.Contains("Unable to find MVC partial view 'missing'", body);
         Assert.Contains("/Views/Shared/missing.cshtml", body);
-        Assert.Contains("Heimdall action invocation failed", body);
+        Assert.Contains("Heimdall invocation failed", body);
     }
 }

@@ -8,7 +8,7 @@ import {
 export function createBootTriggers({
     global,
     getConfig,
-    runActionFromElement
+    runInvocationFromElement
 }) {
     function matchesTriggerAttr(el, attr) {
         return isElement(el) && el.hasAttribute(attr);
@@ -52,7 +52,7 @@ export function createBootTriggers({
 
         _loadActions.set(el, actionId);
         el.__heimdallLoaded = true;
-        runActionFromElement(el, actionId, "load").catch(() => { /* logged */ });
+        runInvocationFromElement(el, actionId, "load").catch(() => { /* logged */ });
     }
 
     function bootLoads(root) {
@@ -95,7 +95,7 @@ export function createBootTriggers({
                         state.observed = false;
                 }
 
-                runActionFromElement(el, actionId, "visible").catch(() => { /* logged */ });
+                runInvocationFromElement(el, actionId, "visible").catch(() => { /* logged */ });
             }
         }, {
             root: null,
@@ -208,7 +208,7 @@ export function createBootTriggers({
                     return;
                 state.lastFire = now;
 
-                runActionFromElement(el, currentActionId, "scroll").catch(() => { /* logged */ });
+                runInvocationFromElement(el, currentActionId, "scroll").catch(() => { /* logged */ });
             });
         };
 
@@ -248,7 +248,7 @@ export function createBootTriggers({
 
             state.inFlight = true;
             try {
-                await runActionFromElement(el, state.actionId, "load", { reason: "poll" });
+                await runInvocationFromElement(el, state.actionId, "load", { reason: "poll" });
             }
             finally {
                 state.inFlight = false;
@@ -266,7 +266,7 @@ export function createBootTriggers({
                 try {
                     await tick();
                 }
-                catch { /* runActionFromElement logs */ }
+                catch { /* runInvocationFromElement logs */ }
                 finally {
                     if (_pollStates.get(el) === state)
                         schedule();

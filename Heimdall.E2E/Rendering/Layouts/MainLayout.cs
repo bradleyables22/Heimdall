@@ -6,7 +6,7 @@ namespace Heimdall.E2E.Rendering.Layouts
 {
 	public static class MainLayout
 	{
-		public static IHtmlContent Render(IHtmlContent page, string title)
+		public static IHtmlContent Render(IHtmlContent page, string title, IHtmlContent? additionalHead = null, bool debugRuntime = false)
 			=> FluentHtml.Fragment(f =>
 			{
 				f.Raw("<!DOCTYPE html>")
@@ -32,10 +32,13 @@ namespace Heimdall.E2E.Rendering.Layouts
 							l.Attr("rel", "stylesheet")
 							.Href("/css/bootstrap.css");
 						})
-						.Script(s => s.Src("/_content/HeimdallFramework.Web/heimdall-bundle.min.js"));
+						.Script(s => s.Src(debugRuntime
+							? "/_content/HeimdallFramework.Web/heimdall-bundle.js"
+							: "/_content/HeimdallFramework.Web/heimdall-bundle.min.js"));
 
 						if (Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")?.ToLowerInvariant() == "development")
 							head.Script(s => s.Src("/js/heimdall.debug.js"));
+						head.Add(additionalHead);
 					})
 					.Body(body =>
 					{

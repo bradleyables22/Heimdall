@@ -28,8 +28,8 @@ async function testDisabledAntiforgeryAction(page, baseUrl) {
   const csrfRequests = observedRequests.filter(request =>
     request.url.includes("/__heimdall/v1/csrf"));
   const actionRequest = observedRequests.find(request =>
-    request.url.includes("/__heimdall/v1/content/actions") &&
-    request.headers["x-heimdall-content-action"] === "e2e.antiforgery.disabled");
+    request.url.includes("/__heimdall/v1/content/invocations") &&
+    request.headers["x-heimdall-content-invocation"] === "e2e.antiforgery.disabled");
 
   assert.equal(csrfRequests.length, 0);
   assert.ok(actionRequest, "Expected the antiforgery-disabled content action request.");

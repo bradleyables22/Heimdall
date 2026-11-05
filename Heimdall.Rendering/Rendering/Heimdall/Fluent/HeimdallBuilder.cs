@@ -18,6 +18,20 @@ namespace Heimdall.Server.Rendering
 		{
 			private readonly FluentHtml.ElementBuilder _b;
 
+			/// <summary>Emits a fully qualified plugin trigger using its default attribute name.</summary>
+			public HeimdallBuilder OnPluginTrigger(string name, HeimdallHtml.InvocationId invocation)
+			{
+				_b.Add(HeimdallHtml.OnPluginTrigger(name, invocation));
+				return this;
+			}
+
+			/// <summary>Uses a registered browser plugin payload source.</summary>
+			public HeimdallBuilder PayloadFromPlugin(string name)
+			{
+				_b.Add(HeimdallHtml.PayloadFromPlugin(name));
+				return this;
+			}
+
 			/// <summary>
 			/// Initializes a new instance of the <see cref="HeimdallBuilder"/> struct.
 			/// </summary>
@@ -32,7 +46,7 @@ namespace Heimdall.Server.Rendering
 			/// <param name="trigger">The trigger that activates the action.</param>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder On(HeimdallHtml.Trigger trigger, HeimdallHtml.ActionId action)
+			public HeimdallBuilder On(HeimdallHtml.Trigger trigger, HeimdallHtml.InvocationId action)
 			{
 				_b.Add(HeimdallHtml.On(trigger, action));
 				return this;
@@ -43,168 +57,168 @@ namespace Heimdall.Server.Rendering
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnLoad(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnLoad(action)); return this; }
+			public HeimdallBuilder OnLoad(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnLoad(action)); return this; }
 
 			/// <summary>
 			/// Adds a click trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnClick(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnClick(action)); return this; }
+			public HeimdallBuilder OnClick(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnClick(action)); return this; }
 
 			/// <summary>
 			/// Adds a change trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnChange(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnChange(action)); return this; }
+			public HeimdallBuilder OnChange(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnChange(action)); return this; }
 
 			/// <summary>
 			/// Adds an input trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnInput(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnInput(action)); return this; }
+			public HeimdallBuilder OnInput(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnInput(action)); return this; }
 
 			/// <summary>
 			/// Adds a submit trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnSubmit(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnSubmit(action)); return this; }
+			public HeimdallBuilder OnSubmit(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnSubmit(action)); return this; }
 
 			/// <summary>
 			/// Adds a keydown trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnKeyDown(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnKeyDown(action)); return this; }
+			public HeimdallBuilder OnKeyDown(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnKeyDown(action)); return this; }
 
 			/// <summary>
 			/// Adds a blur trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnBlur(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnBlur(action)); return this; }
+			public HeimdallBuilder OnBlur(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnBlur(action)); return this; }
 
 			/// <summary>
 			/// Adds a hover trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnHover(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnHover(action)); return this; }
+			public HeimdallBuilder OnHover(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnHover(action)); return this; }
 
 			/// <summary>
 			/// Adds a visible trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnVisible(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnVisible(action)); return this; }
+			public HeimdallBuilder OnVisible(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnVisible(action)); return this; }
 
 			/// <summary>
 			/// Adds a document-visible trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnDocumentVisible(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnDocumentVisible(action)); return this; }
+			public HeimdallBuilder OnDocumentVisible(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnDocumentVisible(action)); return this; }
 
 			/// <summary>
 			/// Adds an online trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnOnline(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnOnline(action)); return this; }
+			public HeimdallBuilder OnOnline(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnOnline(action)); return this; }
 
 			/// <summary>
 			/// Adds a scroll trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder OnScroll(HeimdallHtml.ActionId action) { _b.Add(HeimdallHtml.OnScroll(action)); return this; }
+			public HeimdallBuilder OnScroll(HeimdallHtml.InvocationId action) { _b.Add(HeimdallHtml.OnScroll(action)); return this; }
 
 			/// <summary>
 			/// Adds a load trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Load(HeimdallHtml.ActionId action) => OnLoad(action);
+			public HeimdallBuilder Load(HeimdallHtml.InvocationId action) => OnLoad(action);
 
 			/// <summary>
 			/// Adds a click trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Click(HeimdallHtml.ActionId action) => OnClick(action);
+			public HeimdallBuilder Click(HeimdallHtml.InvocationId action) => OnClick(action);
 
 			/// <summary>
 			/// Adds a change trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Change(HeimdallHtml.ActionId action) => OnChange(action);
+			public HeimdallBuilder Change(HeimdallHtml.InvocationId action) => OnChange(action);
 
 			/// <summary>
 			/// Adds an input trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Input(HeimdallHtml.ActionId action) => OnInput(action);
+			public HeimdallBuilder Input(HeimdallHtml.InvocationId action) => OnInput(action);
 
 			/// <summary>
 			/// Adds a submit trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Submit(HeimdallHtml.ActionId action) => OnSubmit(action);
+			public HeimdallBuilder Submit(HeimdallHtml.InvocationId action) => OnSubmit(action);
 
 			/// <summary>
 			/// Adds a keydown trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder KeyDown(HeimdallHtml.ActionId action) => OnKeyDown(action);
+			public HeimdallBuilder KeyDown(HeimdallHtml.InvocationId action) => OnKeyDown(action);
 
 			/// <summary>
 			/// Adds a blur trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Blur(HeimdallHtml.ActionId action) => OnBlur(action);
+			public HeimdallBuilder Blur(HeimdallHtml.InvocationId action) => OnBlur(action);
 
 			/// <summary>
 			/// Adds a hover trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Hover(HeimdallHtml.ActionId action) => OnHover(action);
+			public HeimdallBuilder Hover(HeimdallHtml.InvocationId action) => OnHover(action);
 
 			/// <summary>
 			/// Adds a visible trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Visible(HeimdallHtml.ActionId action) => OnVisible(action);
+			public HeimdallBuilder Visible(HeimdallHtml.InvocationId action) => OnVisible(action);
 
 			/// <summary>
 			/// Adds a document-visible trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder DocumentVisible(HeimdallHtml.ActionId action) => OnDocumentVisible(action);
+			public HeimdallBuilder DocumentVisible(HeimdallHtml.InvocationId action) => OnDocumentVisible(action);
 
 			/// <summary>
 			/// Adds an online trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Online(HeimdallHtml.ActionId action) => OnOnline(action);
+			public HeimdallBuilder Online(HeimdallHtml.InvocationId action) => OnOnline(action);
 
 			/// <summary>
 			/// Adds a scroll trigger to the element.
 			/// </summary>
 			/// <param name="action">The action identifier to emit.</param>
 			/// <returns>The current builder instance.</returns>
-			public HeimdallBuilder Scroll(HeimdallHtml.ActionId action) => OnScroll(action);
+			public HeimdallBuilder Scroll(HeimdallHtml.InvocationId action) => OnScroll(action);
 
 			/// <summary>
 			/// Sets the DOM target that will receive the response content.

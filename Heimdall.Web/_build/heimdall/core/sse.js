@@ -17,6 +17,7 @@ export function createSseRuntime({
     clearBifrostSubscribeToken,
     ensureBifrostSubscribeToken,
     matchesTriggerAttr,
+    plugins,
     defaultBifrostEndpoint
 }) {
     const _sseByElement = new WeakMap();
@@ -145,6 +146,9 @@ export function createSseRuntime({
     function closeSseState(state, reason) {
         if (!state || state.closed)
             return;
+
+        state.commandController?.abort();
+        state.commandEpoch = (state.commandEpoch || 0) + 1;
 
         const connection = state.connection;
         state.url = getStateUrl(state);
@@ -342,6 +346,9 @@ export function createSseRuntime({
         for (const state of Array.from(connection.subscribers)) {
             state.paused = true;
             state.pauseReason = nextReason;
+            state.commandController?.abort();
+            state.commandController = null;
+            state.commandEpoch = (state.commandEpoch || 0) + 1;
         }
 
         if (!options.prepared) {
@@ -634,11 +641,37 @@ export function createSseRuntime({
             if (state.closed || state.paused || state.eventName !== eventName)
                 continue;
 
-            handleSsePayload(state, ev, rawData);
+            const epoch = state.commandEpoch || 0;
+            const deliver = () => {
+                if ((state.commandEpoch || 0) !== epoch) return;
+                return handleSsePayload(state, ev, rawData);
+            };
+            if (state.pluginQueue || /<heimdall-command[\s>]/i.test(String(rawData || ""))) {
+                const queueLimit = Math.max(1, Number(getConfig().pluginSseQueueLimit) || 128);
+                if ((state.pluginQueueDepth || 0) >= queueLimit) {
+                    emit("heimdall:plugin-error", {
+                        pluginId: null, extension: null, phase: "command", code: "sse-command-queue-full",
+                        sourceElement: state.el, error: new Error("The Bifrost plugin command queue is full.")
+                    });
+                    closeSseState(state, "plugin-command-queue-full");
+                    continue;
+                }
+                state.pluginQueueDepth = (state.pluginQueueDepth || 0) + 1;
+                const queued = (state.pluginQueue || Promise.resolve()).then(deliver).catch(error => {
+                    emit("heimdall:sse-error", { topic: state.topic, el: state.el, error });
+                });
+                state.pluginQueue = queued;
+                queued.finally(() => {
+                    state.pluginQueueDepth--;
+                    if (state.pluginQueue === queued) state.pluginQueue = null;
+                });
+            } else {
+                deliver()?.catch(error => emit("heimdall:sse-error", { topic: state.topic, el: state.el, error }));
+            }
         }
     }
 
-    function handleSsePayload(state, ev, rawData) {
+    async function handleSsePayload(state, ev, rawData) {
         if (state.closed || state.paused || (state.connection && state.connection.paused))
             return;
         if (!state.el || !state.el.isConnected) {
@@ -657,8 +690,22 @@ export function createSseRuntime({
         let redirectUrl = null;
         let jsAfter = [];
         let mutationTargets = [];
+        let pluginCommands = { before: [], after: [] };
+        if (!state.commandController || state.commandController.signal.aborted)
+            state.commandController = new AbortController();
+        const commandEpoch = state.commandEpoch || 0;
+        const pluginContext = {
+            sourceElement: state.el, origin: "sse", signal: state.commandController.signal,
+            isCurrent: () => !state.closed && !state.paused && state.el.isConnected &&
+                (state.commandEpoch || 0) === commandEpoch
+        };
 
         try {
+            pluginCommands = plugins.prepareCommands(html);
+            html = pluginCommands.html;
+            if (pluginCommands.before.length)
+                await plugins.runCommands(pluginCommands.before, pluginContext);
+            if (!pluginContext.isCurrent()) return;
             const oob = dom.processOob(html, state.el, {
                 phase: "before",
                 kind: "sse",
@@ -727,6 +774,11 @@ export function createSseRuntime({
         }
 
         dom.reconcileMutations(mutationTargets);
+
+        if (pluginCommands.after.length) {
+            await plugins.runCommands(pluginCommands.after, pluginContext);
+            if (!pluginContext.isCurrent()) return;
+        }
 
         dom.invokeJsInvokeVoidDirectives(jsAfter, {
             phase: "after",

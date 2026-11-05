@@ -9,7 +9,7 @@ namespace Heimdall.Server
 	public sealed class HeimdallServiceSettings
 	{
 		/// <summary>
-		/// Whether Heimdall validates antiforgery tokens for content actions and Bifrost subscribe-token requests.
+		/// Whether Heimdall validates antiforgery tokens for content invocations and Bifrost subscribe-token requests.
 		/// Defaults to <see langword="true"/>.
 		/// </summary>
 		/// <remarks>

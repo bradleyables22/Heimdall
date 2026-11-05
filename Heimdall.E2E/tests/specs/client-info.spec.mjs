@@ -4,9 +4,9 @@ import { openHarness } from "../helpers/e2e-support.mjs";
 async function testClientInfoBinding(page, baseUrl) {
   const requests = [];
   page.on("request", request => {
-    if (request.url().includes("/__heimdall/v1/content/actions")) {
+    if (request.url().includes("/__heimdall/v1/content/invocations")) {
       requests.push({
-        action: request.headers()["x-heimdall-content-action"],
+        action: request.headers()["x-heimdall-content-invocation"],
         clientInfo: request.headers()["x-heimdall-client-info"]
       });
     }

@@ -1,10 +1,10 @@
-﻿using Heimdall.Server.Registry;
+using Heimdall.Server.Registry;
 using Microsoft.AspNetCore.Http.Metadata;
 using System.Reflection;
 
 namespace Heimdall.Server
 {
-    internal sealed class ContentActionParameterDescriptor
+    internal sealed class ContentInvocationParameterDescriptor
     {
         public int Index { get; }
 
@@ -12,15 +12,15 @@ namespace Heimdall.Server
 
         public Type ParameterType { get; }
 
-        public ContentActionParameterKind Kind { get; }
+        public ContentInvocationParameterKind Kind { get; }
 
         public string BindingName { get; }
 
-        public ContentActionParameterDescriptor(
+        public ContentInvocationParameterDescriptor(
             int index,
             ParameterInfo parameter,
             Type parameterType,
-            ContentActionParameterKind kind)
+            ContentInvocationParameterKind kind)
         {
             Index = index;
             Parameter = parameter;

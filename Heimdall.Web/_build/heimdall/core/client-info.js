@@ -151,6 +151,7 @@ export function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg 
     function emitClientInfoError(requestContext, detail) {
         const eventDetail = {
             phase: "client-info",
+            invocationId: requestContext?.invocationId || requestContext?.actionId || null,
             actionId: requestContext?.actionId || null,
             requestId: requestContext?.requestId || null,
             attempt: requestContext?.attempt || 0,
@@ -542,6 +543,7 @@ export function createClientInfoRuntime({ global, getConfig, emitLifecycle, dbg 
             return null;
 
         const detail = {
+            invocationId: requestContext?.invocationId || requestContext?.actionId || null,
             actionId: requestContext?.actionId || null,
             requestId: requestContext?.requestId || null,
             attempt: requestContext?.attempt || 0,

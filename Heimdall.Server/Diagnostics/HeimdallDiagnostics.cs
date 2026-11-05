@@ -20,8 +20,11 @@ namespace Heimdall.Server
         /// <summary>Gets the name of the Heimdall meter.</summary>
         public const string MeterName = "Heimdall.Server";
 
-        /// <summary>Gets the content action activity name.</summary>
-        public const string ContentActionActivityName = "heimdall.content_action";
+        /// <summary>Gets the content invocation activity name.</summary>
+        public const string ContentInvocationActivityName = "heimdall.content_invocation";
+
+        /// <summary>Compatibility alias for the pre-invocation activity name.</summary>
+        public const string ContentActionActivityName = ContentInvocationActivityName;
 
         /// <summary>Gets the Bifrost SSE connection activity name.</summary>
         public const string BifrostConnectionActivityName = "heimdall.bifrost.connection";
@@ -29,23 +32,41 @@ namespace Heimdall.Server
         /// <summary>Gets the Bifrost publish activity name.</summary>
         public const string BifrostPublishActivityName = "heimdall.bifrost.publish";
 
-        /// <summary>Gets the content action request counter name.</summary>
-        public const string ContentActionRequestsMetricName = "heimdall.server.content_action.requests";
+        /// <summary>Gets the content invocation request counter name.</summary>
+        public const string ContentInvocationRequestsMetricName = "heimdall.server.content_invocation.requests";
 
-        /// <summary>Gets the content action duration histogram name.</summary>
-        public const string ContentActionDurationMetricName = "heimdall.server.content_action.duration";
+        /// <summary>Compatibility alias for the pre-invocation metric name.</summary>
+        public const string ContentActionRequestsMetricName = ContentInvocationRequestsMetricName;
 
-        /// <summary>Gets the content action request body size histogram name.</summary>
-        public const string ContentActionRequestBodySizeMetricName = "heimdall.server.content_action.request.body.size";
+        /// <summary>Gets the content invocation duration histogram name.</summary>
+        public const string ContentInvocationDurationMetricName = "heimdall.server.content_invocation.duration";
 
-        /// <summary>Gets the content action response body size histogram name.</summary>
-        public const string ContentActionResponseBodySizeMetricName = "heimdall.server.content_action.response.body.size";
+        /// <summary>Compatibility alias for the pre-invocation metric name.</summary>
+        public const string ContentActionDurationMetricName = ContentInvocationDurationMetricName;
 
-        /// <summary>Gets the content action exception counter name.</summary>
-        public const string ContentActionExceptionsMetricName = "heimdall.server.content_action.exceptions";
+        /// <summary>Gets the content invocation request body size histogram name.</summary>
+        public const string ContentInvocationRequestBodySizeMetricName = "heimdall.server.content_invocation.request.body.size";
 
-        /// <summary>Gets the content action cancellation counter name.</summary>
-        public const string ContentActionCancellationsMetricName = "heimdall.server.content_action.cancellations";
+        /// <summary>Compatibility alias for the pre-invocation metric name.</summary>
+        public const string ContentActionRequestBodySizeMetricName = ContentInvocationRequestBodySizeMetricName;
+
+        /// <summary>Gets the content invocation response body size histogram name.</summary>
+        public const string ContentInvocationResponseBodySizeMetricName = "heimdall.server.content_invocation.response.body.size";
+
+        /// <summary>Compatibility alias for the pre-invocation metric name.</summary>
+        public const string ContentActionResponseBodySizeMetricName = ContentInvocationResponseBodySizeMetricName;
+
+        /// <summary>Gets the content invocation exception counter name.</summary>
+        public const string ContentInvocationExceptionsMetricName = "heimdall.server.content_invocation.exceptions";
+
+        /// <summary>Compatibility alias for the pre-invocation metric name.</summary>
+        public const string ContentActionExceptionsMetricName = ContentInvocationExceptionsMetricName;
+
+        /// <summary>Gets the content invocation cancellation counter name.</summary>
+        public const string ContentInvocationCancellationsMetricName = "heimdall.server.content_invocation.cancellations";
+
+        /// <summary>Compatibility alias for the pre-invocation metric name.</summary>
+        public const string ContentActionCancellationsMetricName = ContentInvocationCancellationsMetricName;
 
         /// <summary>Gets the active Bifrost SSE connection up-down counter name.</summary>
         public const string BifrostActiveConnectionsMetricName = "heimdall.server.bifrost.connections.active";
@@ -65,8 +86,11 @@ namespace Heimdall.Server
         /// <summary>Gets the Bifrost dropped message counter name.</summary>
         public const string BifrostDroppedMessagesMetricName = "heimdall.server.bifrost.messages.dropped";
 
-        /// <summary>Gets the content action identifier tag name.</summary>
-        public const string ActionIdTagName = "heimdall.action.id";
+        /// <summary>Gets the content invocation identifier tag name.</summary>
+        public const string InvocationIdTagName = "heimdall.invocation.id";
+
+        /// <summary>Compatibility alias for the pre-invocation tag name.</summary>
+        public const string ActionIdTagName = InvocationIdTagName;
 
         /// <summary>Gets the operation outcome tag name.</summary>
         public const string OutcomeTagName = "heimdall.outcome";
@@ -89,7 +113,7 @@ namespace Heimdall.Server
 
     internal static class HeimdallTelemetry
     {
-        private const string UnresolvedActionId = "unresolved";
+        private const string UnresolvedInvocationId = "unresolved";
 
         private static readonly string? InstrumentationVersion =
             typeof(HeimdallDiagnostics).Assembly.GetName().Version?.ToString();
@@ -102,32 +126,32 @@ namespace Heimdall.Server
             HeimdallDiagnostics.MeterName,
             InstrumentationVersion);
 
-        private static readonly Counter<long> ContentActionRequests = Meter.CreateCounter<long>(
-            HeimdallDiagnostics.ContentActionRequestsMetricName,
-            description: "Number of Heimdall content action requests.");
+        private static readonly Counter<long> ContentInvocationRequests = Meter.CreateCounter<long>(
+            HeimdallDiagnostics.ContentInvocationRequestsMetricName,
+            description: "Number of Heimdall content invocation requests.");
 
-        private static readonly Histogram<double> ContentActionDuration = Meter.CreateHistogram<double>(
-            HeimdallDiagnostics.ContentActionDurationMetricName,
+        private static readonly Histogram<double> ContentInvocationDuration = Meter.CreateHistogram<double>(
+            HeimdallDiagnostics.ContentInvocationDurationMetricName,
             unit: "s",
-            description: "Duration of Heimdall content action requests.");
+            description: "Duration of Heimdall content invocation requests.");
 
-        private static readonly Histogram<long> ContentActionRequestBodySize = Meter.CreateHistogram<long>(
-            HeimdallDiagnostics.ContentActionRequestBodySizeMetricName,
+        private static readonly Histogram<long> ContentInvocationRequestBodySize = Meter.CreateHistogram<long>(
+            HeimdallDiagnostics.ContentInvocationRequestBodySizeMetricName,
             unit: "By",
-            description: "Size of Heimdall content action request bodies.");
+            description: "Size of Heimdall content invocation request bodies.");
 
-        private static readonly Histogram<long> ContentActionResponseBodySize = Meter.CreateHistogram<long>(
-            HeimdallDiagnostics.ContentActionResponseBodySizeMetricName,
+        private static readonly Histogram<long> ContentInvocationResponseBodySize = Meter.CreateHistogram<long>(
+            HeimdallDiagnostics.ContentInvocationResponseBodySizeMetricName,
             unit: "By",
-            description: "Size of rendered Heimdall content action response bodies.");
+            description: "Size of rendered Heimdall content invocation response bodies.");
 
-        private static readonly Counter<long> ContentActionExceptions = Meter.CreateCounter<long>(
-            HeimdallDiagnostics.ContentActionExceptionsMetricName,
-            description: "Number of exceptions handled by the Heimdall content action pipeline.");
+        private static readonly Counter<long> ContentInvocationExceptions = Meter.CreateCounter<long>(
+            HeimdallDiagnostics.ContentInvocationExceptionsMetricName,
+            description: "Number of exceptions handled by the Heimdall content invocation pipeline.");
 
-        private static readonly Counter<long> ContentActionCancellations = Meter.CreateCounter<long>(
-            HeimdallDiagnostics.ContentActionCancellationsMetricName,
-            description: "Number of cancelled Heimdall content action requests.");
+        private static readonly Counter<long> ContentInvocationCancellations = Meter.CreateCounter<long>(
+            HeimdallDiagnostics.ContentInvocationCancellationsMetricName,
+            description: "Number of cancelled Heimdall content invocation requests.");
 
         private static readonly UpDownCounter<long> BifrostActiveConnections = Meter.CreateUpDownCounter<long>(
             HeimdallDiagnostics.BifrostActiveConnectionsMetricName,
@@ -153,7 +177,7 @@ namespace Heimdall.Server
             HeimdallDiagnostics.BifrostDroppedMessagesMetricName,
             description: "Number of Bifrost messages dropped before delivery.");
 
-        internal static ContentActionTelemetryScope StartContentAction(HttpContext context)
+        internal static ContentInvocationTelemetryScope StartContentInvocation(HttpContext context)
             => new(context.Request.ContentLength);
 
         internal static BifrostConnectionTelemetryScope OpenBifrostConnection()
@@ -199,27 +223,27 @@ namespace Heimdall.Server
             return tags;
         }
 
-        internal sealed class ContentActionTelemetryScope : IDisposable
+        internal sealed class ContentInvocationTelemetryScope : IDisposable
         {
             private readonly long _startedTimestamp = Stopwatch.GetTimestamp();
             private long? _requestBodySize;
             private readonly Activity? _activity;
-            private string _actionId = UnresolvedActionId;
+            private string _invocationId = UnresolvedInvocationId;
             private bool _completed;
 
-            internal ContentActionTelemetryScope(long? requestBodySize)
+            internal ContentInvocationTelemetryScope(long? requestBodySize)
             {
                 _requestBodySize = requestBodySize;
                 _activity = ActivitySource.StartActivity(
-                    HeimdallDiagnostics.ContentActionActivityName,
+                    HeimdallDiagnostics.ContentInvocationActivityName,
                     ActivityKind.Internal);
-                _activity?.SetTag(HeimdallDiagnostics.ActionIdTagName, _actionId);
+                _activity?.SetTag(HeimdallDiagnostics.InvocationIdTagName, _invocationId);
             }
 
-            internal void SetActionId(string actionId)
+            internal void SetInvocationId(string invocationId)
             {
-                _actionId = string.IsNullOrWhiteSpace(actionId) ? UnresolvedActionId : actionId;
-                _activity?.SetTag(HeimdallDiagnostics.ActionIdTagName, _actionId);
+                _invocationId = string.IsNullOrWhiteSpace(invocationId) ? UnresolvedInvocationId : invocationId;
+                _activity?.SetTag(HeimdallDiagnostics.InvocationIdTagName, _invocationId);
             }
 
             internal void SetRequestBodySize(long requestBodySize)
@@ -229,10 +253,10 @@ namespace Heimdall.Server
             }
 
             internal bool ShouldMeasureRequestBodySize
-                => !_requestBodySize.HasValue && ContentActionRequestBodySize.Enabled;
+                => !_requestBodySize.HasValue && ContentInvocationRequestBodySize.Enabled;
 
             internal bool ShouldMeasureResponseBodySize
-                => ContentActionResponseBodySize.Enabled;
+                => ContentInvocationResponseBodySize.Enabled;
 
             internal void Complete(int statusCode, long? responseBodySize = null, string? outcome = null)
             {
@@ -242,17 +266,17 @@ namespace Heimdall.Server
                 _completed = true;
                 outcome ??= statusCode >= StatusCodes.Status400BadRequest ? "error" : "success";
 
-                var tags = CreateContentActionTags(statusCode, outcome);
-                ContentActionRequests.Add(1, tags);
-                ContentActionDuration.Record(
+                var tags = CreateContentInvocationTags(statusCode, outcome);
+                ContentInvocationRequests.Add(1, tags);
+                ContentInvocationDuration.Record(
                     Stopwatch.GetElapsedTime(_startedTimestamp).TotalSeconds,
                     tags);
 
                 if (_requestBodySize is >= 0)
-                    ContentActionRequestBodySize.Record(_requestBodySize.Value, tags);
+                    ContentInvocationRequestBodySize.Record(_requestBodySize.Value, tags);
 
                 if (responseBodySize is >= 0)
-                    ContentActionResponseBodySize.Record(responseBodySize.Value, tags);
+                    ContentInvocationResponseBodySize.Record(responseBodySize.Value, tags);
 
                 _activity?.SetTag(HeimdallDiagnostics.ResponseStatusCodeTagName, statusCode);
                 _activity?.SetTag(HeimdallDiagnostics.OutcomeTagName, outcome);
@@ -270,11 +294,11 @@ namespace Heimdall.Server
                 var errorType = exception.GetType().FullName ?? exception.GetType().Name;
                 var tags = new TagList
                 {
-                    { HeimdallDiagnostics.ActionIdTagName, _actionId },
+                    { HeimdallDiagnostics.InvocationIdTagName, _invocationId },
                     { HeimdallDiagnostics.ErrorTypeTagName, errorType }
                 };
 
-                ContentActionExceptions.Add(1, tags);
+                ContentInvocationExceptions.Add(1, tags);
                 _activity?.SetTag(HeimdallDiagnostics.ErrorTypeTagName, errorType);
                 _activity?.AddEvent(new ActivityEvent(
                     "exception",
@@ -289,11 +313,11 @@ namespace Heimdall.Server
             {
                 var tags = new TagList
                 {
-                    { HeimdallDiagnostics.ActionIdTagName, _actionId },
+                    { HeimdallDiagnostics.InvocationIdTagName, _invocationId },
                     { HeimdallDiagnostics.CancellationReasonTagName, reason }
                 };
 
-                ContentActionCancellations.Add(1, tags);
+                ContentInvocationCancellations.Add(1, tags);
                 _activity?.SetTag(HeimdallDiagnostics.CancellationReasonTagName, reason);
                 Complete(statusCode, outcome: reason == "timeout" ? "timeout" : "cancelled");
             }
@@ -306,11 +330,11 @@ namespace Heimdall.Server
                 _activity?.Dispose();
             }
 
-            private TagList CreateContentActionTags(int statusCode, string outcome)
+            private TagList CreateContentInvocationTags(int statusCode, string outcome)
             {
                 var tags = new TagList
                 {
-                    { HeimdallDiagnostics.ActionIdTagName, _actionId },
+                    { HeimdallDiagnostics.InvocationIdTagName, _invocationId },
                     { HeimdallDiagnostics.ResponseStatusCodeTagName, statusCode },
                     { HeimdallDiagnostics.OutcomeTagName, outcome }
                 };

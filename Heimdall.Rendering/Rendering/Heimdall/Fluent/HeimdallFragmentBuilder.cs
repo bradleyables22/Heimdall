@@ -19,6 +19,18 @@ namespace Heimdall.Server.Rendering
 		{
 			private readonly FluentHtml.FragmentBuilder _f;
 
+			/// <summary>Adds a registered browser plugin command to this response fragment.</summary>
+			public HeimdallFragmentBuilder PluginCommand(
+				string name,
+				object? args = null,
+				string? targetSelector = null,
+				HeimdallHtml.PluginCommandTiming timing = HeimdallHtml.PluginCommandTiming.After,
+				bool allTargets = false)
+			{
+				_f.Add(HeimdallHtml.PluginCommand(name, args, targetSelector, timing, allTargets));
+				return this;
+			}
+
 			/// <summary>
 			/// Initializes a new instance of the <see cref="HeimdallFragmentBuilder"/> struct.
 			/// </summary>

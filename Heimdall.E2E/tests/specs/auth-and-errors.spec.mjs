@@ -152,9 +152,9 @@ async function testDetailedActionErrors(page, baseUrl) {
 
   assert.equal(missing.ok, false);
   assert.equal(missing.status, 404);
-  assert.match(missing.error, /Unknown action 'e2e\.missing'/);
+  assert.match(missing.error, /Unknown invocation 'e2e\.missing'/);
   assert.equal(missing.event.status, 404);
-  assert.match(missing.event.body, /Unknown action 'e2e\.missing'/);
+  assert.match(missing.event.body, /Unknown invocation 'e2e\.missing'/);
   await waitForText(page.locator("#e2e-error-target"), "Error target original");
 }
 

@@ -12,7 +12,7 @@ import {
 import { REQUEST_HEADERS_FAILED_CODE } from "./request-headers.js";
 import { emitUnauthorized } from "./unauthorized.js";
 
-export function createActionInvoker({
+export function createInvocationInvoker({
     global,
     getConfig,
     ensureCsrfToken,
@@ -26,10 +26,11 @@ export function createActionInvoker({
     historyRuntime,
     coordinator,
     busyState,
+    plugins,
     resolveRequestHeaders,
     mergeRequestHeaders,
     getClientInfoHeader,
-    actionHeader,
+    invocationHeader,
     csrfHeader,
     clientInfoHeader
 }) {
@@ -141,16 +142,18 @@ export function createActionInvoker({
             ? options.syncGroup
             : (sourceElement ? getAttr(sourceElement, "heimdall-sync-group") : null);
 
+        let currentInvocationId = actionId;
         const context = {
             requestId: ++nextRequestId,
             attempt: 0,
-            actionId,
             trigger: options.triggerName || null,
             sourceElement,
             target: options.target,
             fallbackTarget: options.fallbackTarget || null,
             swap: options.swap || "inner",
-            endpoint: options.endpoint || config.endpoints.contentActions,
+            endpoint: options.endpoint ||
+                config.endpoints.contentInvocations ||
+                config.endpoints.contentActions,
             headers: Object.assign({}, options.headers || {}),
             sync: configuredSync || config.requestSync || "parallel",
             syncGroup: configuredGroup && String(configuredGroup).trim()
@@ -174,6 +177,30 @@ export function createActionInvoker({
             startedExecutionAt: null,
             finishedAt: null
         };
+
+        Object.defineProperties(context, {
+            invocationId: {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    return currentInvocationId;
+                },
+                set(value) {
+                    currentInvocationId = value;
+                }
+            },
+            // Compatibility alias for applications migrating from v1.
+            actionId: {
+                configurable: true,
+                enumerable: true,
+                get() {
+                    return currentInvocationId;
+                },
+                set(value) {
+                    currentInvocationId = value;
+                }
+            }
+        });
 
         installPayloadState(context, payload, options.payloadBinding);
         return context;
@@ -206,7 +233,8 @@ export function createActionInvoker({
         };
 
         emit("heimdall:error", {
-            actionId: context.actionId,
+            invocationId: context.invocationId,
+            actionId: context.invocationId,
             payload: context.payload,
             target: context.target,
             swap: context.swap,
@@ -267,7 +295,7 @@ export function createActionInvoker({
         context.attempt++;
 
         const url = new URL(context.endpoint, global.location?.origin || undefined);
-        url.searchParams.set("action", context.actionId);
+        url.searchParams.set("invocation", context.invocationId);
 
         const antiforgeryEnabled = getConfig().antiforgery !== false;
         let token = null;
@@ -288,7 +316,7 @@ export function createActionInvoker({
         const isFormData = typeof global.FormData === "function" &&
             context.payload instanceof global.FormData;
         let headers = {
-            [actionHeader]: context.actionId
+            [invocationHeader]: context.invocationId
         };
 
         if (antiforgeryEnabled)
@@ -306,10 +334,11 @@ export function createActionInvoker({
         if (typeof resolveRequestHeaders === "function") {
             try {
                 headers = await resolveRequestHeaders({
-                    kind: "content-action",
+                    kind: "content-invocation",
                     url: url.toString(),
                     method: "POST",
-                    actionId: context.actionId,
+                    invocationId: context.invocationId,
+                    actionId: context.invocationId,
                     requestId: context.requestId,
                     attempt: context.attempt,
                     sourceElement: context.sourceElement,
@@ -340,10 +369,11 @@ export function createActionInvoker({
             try {
                 body = context.payload == null ? "{}" : JSON.stringify(context.payload);
             } catch (e) {
-                const err = new Error(`Heimdall payload is not JSON-serializable for action '${context.actionId}'.`);
+                const err = new Error(`Heimdall payload is not JSON-serializable for invocation '${context.invocationId}'.`);
                 err.cause = e;
                 emit("heimdall:error", {
-                    actionId: context.actionId,
+                    invocationId: context.invocationId,
+                    actionId: context.invocationId,
                     payload: context.payload,
                     target: context.target,
                     swap: context.swap,
@@ -379,14 +409,15 @@ export function createActionInvoker({
 
         const attemptStarted = performance.now();
         emit("heimdall:before", {
-            actionId: context.actionId,
+            invocationId: context.invocationId,
+            actionId: context.invocationId,
             payload: context.payload,
             target: context.target,
             swap: context.swap,
             endpoint: context.request.url
         });
 
-        dbg("invoke ->", context.actionId, {
+        dbg("invoke ->", context.invocationId, {
             endpoint: context.request.url,
             swap: context.swap,
             target: context.target,
@@ -417,7 +448,8 @@ export function createActionInvoker({
                 requestId: context.requestId
             };
             emit("heimdall:error", {
-                actionId: context.actionId,
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -452,8 +484,9 @@ export function createActionInvoker({
             emitLifecycle,
             sourceElement: context.sourceElement,
             detail: {
-                kind: "content-action",
-                actionId: context.actionId,
+                kind: "content-invocation",
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 requestId: context.requestId,
                 attempt: context.attempt,
                 sourceElement: context.sourceElement,
@@ -468,7 +501,8 @@ export function createActionInvoker({
             const redirectUrl = normalizedAuthRedirectUrl;
 
             emit("heimdall:redirect", {
-                actionId: context.actionId,
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -477,7 +511,7 @@ export function createActionInvoker({
                 url: redirectUrl
             });
 
-            dbg("redirecting", { actionId: context.actionId, url: redirectUrl });
+            dbg("redirecting", { actionId: context.invocationId, url: redirectUrl });
             global.location.href = redirectUrl;
 
             return {
@@ -501,11 +535,26 @@ export function createActionInvoker({
         let jsAfter = [];
         let oobMutationTargets = [];
         let historyCommand = null;
+        let pluginCommands = { before: [], after: [] };
+        const pluginContext = {
+            sourceElement: context.sourceElement,
+            invocationId: context.invocationId,
+            origin: "invocation",
+            signal: context.signal,
+            isCurrent: () => coordinator.isCurrent(context)
+        };
 
         if (response.ok) {
+            pluginCommands = plugins.prepareCommands(html);
+            html = pluginCommands.html;
+            if (pluginCommands.before.length)
+                await plugins.runCommands(pluginCommands.before, pluginContext);
+            if (!coordinator.isCurrent(context))
+                return coordinator.getCancellationResult(context);
             const oob = dom.processOob(html, context.sourceElement, {
-                kind: "action",
-                actionId: context.actionId,
+                kind: "invocation",
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -527,7 +576,8 @@ export function createActionInvoker({
 
         if (response.ok && redirectUrl) {
             emit("heimdall:redirect", {
-                actionId: context.actionId,
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -536,7 +586,7 @@ export function createActionInvoker({
                 url: redirectUrl
             });
 
-            dbg("redirecting", { actionId: context.actionId, url: redirectUrl });
+            dbg("redirecting", { actionId: context.invocationId, url: redirectUrl });
             global.location.href = redirectUrl;
 
             return {
@@ -555,7 +605,8 @@ export function createActionInvoker({
 
         if (response.ok && abortSwap) {
             emit("heimdall:abort", {
-                actionId: context.actionId,
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -563,7 +614,7 @@ export function createActionInvoker({
                 status: response.status,
                 reason: abortReason
             });
-            dbg("swap aborted", { actionId: context.actionId, reason: abortReason, target: context.target });
+            dbg("swap aborted", { actionId: context.invocationId, reason: abortReason, target: context.target });
         }
 
         if (response.ok && !abortSwap) {
@@ -584,7 +635,7 @@ export function createActionInvoker({
                 mainTemplate.content,
                 context.swap,
                 {
-                    kind: "action",
+                    kind: "invocation",
                     swapKind: "main",
                     sourceEl: context.sourceElement,
                     requestContext: context
@@ -612,10 +663,15 @@ export function createActionInvoker({
         }
 
         if (response.ok) {
+            if (pluginCommands.after.length)
+                await plugins.runCommands(pluginCommands.after, pluginContext);
+            if (!coordinator.isCurrent(context))
+                return coordinator.getCancellationResult(context);
             dom.invokeJsInvokeVoidDirectives(jsAfter, {
                 phase: "after",
-                kind: "action",
-                actionId: context.actionId,
+                kind: "invocation",
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -642,7 +698,8 @@ export function createActionInvoker({
 
         if (!response.ok) {
             emit("heimdall:error", {
-                actionId: context.actionId,
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -651,7 +708,8 @@ export function createActionInvoker({
             });
         } else {
             emit("heimdall:after", {
-                actionId: context.actionId,
+                invocationId: context.invocationId,
+                actionId: context.invocationId,
                 payload: context.payload,
                 target: context.target,
                 swap: context.swap,
@@ -668,7 +726,7 @@ export function createActionInvoker({
         if (typeof options.onError === "function" && !response.ok)
             options.onError(result);
 
-        dbg("invoke <-", context.actionId, result);
+        dbg("invoke <-", context.invocationId, result);
         return result;
     }
 
@@ -688,13 +746,15 @@ export function createActionInvoker({
         sse: false
     };
 
-    function getCommonOptions(el, triggerName) {
+    function getCommonOptions(el, triggerName, extraOptions) {
         const target = getAttr(el, "heimdall-content-target") || el;
         const swap = getAttr(el, "heimdall-content-swap") || "inner";
         const sync = getAttr(el, "heimdall-sync");
         const syncGroup = getAttr(el, "heimdall-sync-group");
 
-        let payloadResolution = payloadBindingFromElement(el);
+        let payloadResolution = extraOptions && Object.prototype.hasOwnProperty.call(extraOptions, "payload")
+            ? { value: extraOptions.payload, binding: null }
+            : payloadBindingFromElement(el);
         let payload = payloadResolution.value;
         let payloadBinding = payloadResolution.binding;
         if ((payload == null) && triggerName === "submit") {
@@ -713,30 +773,35 @@ export function createActionInvoker({
         return { target, swap, payload, payloadBinding, sync, syncGroup };
     }
 
-    async function runActionFromElement(el, actionId, triggerName, extraOptions) {
+    async function runInvocationFromElement(el, actionId, triggerName, extraOptions) {
         if (!el || !actionId)
             return;
         if (el.hasAttribute("disabled") || el.getAttribute("aria-disabled") === "true")
             return;
 
-        const { target, swap, payload, payloadBinding, sync, syncGroup } = getCommonOptions(el, triggerName);
-
-        const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
-        const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
-        const opts = Object.assign({
-            target,
-            swap,
-            sync,
-            syncGroup,
-            fallbackTarget: el,
-            sourceEl: el,
-            triggerName,
-            payloadBinding,
-            disableElement: shouldDisable ? el : null
-        }, extraOptions || {});
-
         try {
-            await invoke(actionId, payload, opts);
+            const pending = plugins?.ready(el);
+            if (pending) {
+                await pending;
+                if (!el.isConnected) return;
+            }
+
+            const { target, swap, payload, payloadBinding, sync, syncGroup } = getCommonOptions(el, triggerName, extraOptions);
+            const defaultDisable = DEFAULT_DISABLE_BY_TRIGGER[triggerName] ?? false;
+            const shouldDisable = truthyAttr(el, "heimdall-content-disable", defaultDisable);
+            const opts = Object.assign({
+                target,
+                swap,
+                sync,
+                syncGroup,
+                fallbackTarget: el,
+                sourceEl: el,
+                triggerName,
+                payloadBinding,
+                disableElement: shouldDisable ? el : null
+            }, extraOptions || {});
+
+            return await invoke(actionId, payload, opts);
         } catch (err) {
             // eslint-disable-next-line no-console
             console.error(err);
@@ -745,6 +810,10 @@ export function createActionInvoker({
 
     return {
         invoke,
-        runActionFromElement
+        runInvocationFromElement,
+        runActionFromElement: runInvocationFromElement
     };
 }
+
+// Compatibility export for code that imported the internal factory directly.
+export const createActionInvoker = createInvocationInvoker;

@@ -1,6 +1,16 @@
 # HeimdallFramework.Web changelog
 
-## [4.0.0] - Unreleased
+## [4.0.1] - 2026-11-05
+
+### Added
+
+- Added frontend plugin API v1 with managed behaviors, custom triggers, payload sources, response commands, and TypeScript declarations.
+
+### Changed
+
+- Added invocation endpoint and identifier names with action aliases; request-header contexts now use `kind: "content-invocation"`.
+
+## [4.0.0]
 
 ### Added
 

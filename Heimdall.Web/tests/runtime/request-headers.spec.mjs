@@ -39,7 +39,7 @@ async function testAsyncRequestHeadersAcrossHeimdallRequests(page) {
         attempt: context.attempt,
         sourceId: context.sourceElement?.id || null,
         hasSignal: !!context.signal,
-        baseAction: context.headers["X-Heimdall-Content-Action"] || null,
+        baseAction: context.headers["X-Heimdall-Content-Invocation"] || null,
         baseCsrf: context.headers.RequestVerificationToken || null
       });
       context.headers["X-Provider-Mutated"] = context.kind;
@@ -86,7 +86,7 @@ async function testAsyncRequestHeadersAcrossHeimdallRequests(page) {
 
   assert.deepEqual(contexts.map(context => context.kind), [
     "csrf-token",
-    "content-action",
+    "content-invocation",
     "bifrost-token"
   ]);
   assert.equal(contexts[0].method, "GET");
@@ -105,8 +105,8 @@ async function testAsyncRequestHeadersAcrossHeimdallRequests(page) {
   assert.equal(csrf.headers["x-provider-returned"], "csrf-token");
   assert.equal(action.headers.authorization, "Bearer explicit");
   assert.equal(action.headers["x-explicit"], "yes");
-  assert.equal(action.headers["x-provider-mutated"], "content-action");
-  assert.equal(action.headers["x-provider-returned"], "content-action");
+  assert.equal(action.headers["x-provider-mutated"], "content-invocation");
+  assert.equal(action.headers["x-provider-returned"], "content-invocation");
   assert.equal(action.headers["x-provider-order"], "returned");
   assert.equal(bifrost.headers.authorization, "Bearer bifrost-token");
   assert.equal(bifrost.headers["x-provider-mutated"], "bifrost-token");
@@ -162,7 +162,7 @@ async function testRequestHeadersRerunForAntiforgeryRetry(page) {
   const attempts = await page.evaluate(async () => {
     const contentAttempts = [];
     window.Heimdall.config.requestHeaders = context => {
-      if (context.kind === "content-action")
+      if (context.kind === "content-invocation")
         contentAttempts.push(context.attempt);
       return { Authorization: `Bearer ${context.kind}-${context.attempt}` };
     };
@@ -177,8 +177,8 @@ async function testRequestHeadersRerunForAntiforgeryRetry(page) {
   assert.deepEqual(attempts.contentAttempts, [1, 2]);
   assert.equal(csrfFetches(fetches).length, 2);
   assert.equal(actions.length, 2);
-  assert.equal(actions[0].headers.authorization, "Bearer content-action-1");
-  assert.equal(actions[1].headers.authorization, "Bearer content-action-2");
+  assert.equal(actions[0].headers.authorization, "Bearer content-invocation-1");
+  assert.equal(actions[1].headers.authorization, "Bearer content-invocation-2");
 }
 
 async function testRequestHeaderShapesAndLifecyclePrecedence(page) {
@@ -324,7 +324,7 @@ async function testPendingRequestHeadersRespectReplacementAndExternalAbort(page)
     "RequestHeaders.External.Pending"
   ]);
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "RequestHeaders.Replace.Winner");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "RequestHeaders.Replace.Winner");
   assert.equal(actions[0].headers.authorization, "Bearer replacement");
 }
 
@@ -502,7 +502,7 @@ async function testContentUnauthorizedEventCanNavigateAndSuppressDefaultRedirect
   assert.equal(state.result.status, 401);
   assert.equal(state.result.redirectUrl, null);
   assert.equal(state.events.length, 1);
-  assert.equal(state.events[0].kind, "content-action");
+  assert.equal(state.events[0].kind, "content-invocation");
   assert.equal(state.events[0].actionId, "Unauthorized.Action");
   assert.ok(state.events[0].requestId > 0);
   assert.equal(state.events[0].attempt, 1);

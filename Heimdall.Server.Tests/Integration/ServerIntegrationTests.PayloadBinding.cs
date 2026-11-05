@@ -118,7 +118,7 @@ public sealed partial class ServerIntegrationTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Contains("Invalid Heimdall action request body", body);
+        Assert.Contains("Invalid Heimdall invocation request body", body);
     }
 
     [Fact]

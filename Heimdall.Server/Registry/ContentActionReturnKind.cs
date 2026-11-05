@@ -1,7 +1,7 @@
-﻿
+
 namespace Heimdall.Server.Registry
 {
-    internal enum ContentActionReturnKind
+    internal enum ContentInvocationReturnKind
     {
         Html,
         TaskHtml,

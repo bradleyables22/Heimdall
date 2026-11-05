@@ -75,7 +75,65 @@ async function testHostedFileUpload(page, baseUrl) {
   );
 }
 
+async function testHostedCollectionForms(page, baseUrl) {
+  await openHarness(page, baseUrl, "/e2e");
+
+  for (const multipart of [false, true]) {
+    for (const shape of ["properties", "parameter"]) {
+      for (const values of [["Alice"], ["Alice", "", "Alice"]]) {
+        await page.evaluate(({ multipart, shape, values }) => {
+          document.querySelector("#e2e-collection-test")?.remove();
+          const host = document.createElement("div");
+          host.id = "e2e-collection-test";
+          const form = document.createElement("form");
+          form.id = "e2e-collection-form";
+          form.setAttribute("heimdall-content-submit", `e2e.form.collections.${shape}`);
+          form.setAttribute("heimdall-payload-from", "closest-form");
+          form.setAttribute("heimdall-content-target", "#e2e-collection-result");
+
+          for (const name of shape === "properties" ? ["Names", "Aliases"] : ["Names"]) {
+            for (const value of values) {
+              const input = document.createElement("input");
+              input.type = "text";
+              input.name = name;
+              input.value = value;
+              form.append(input);
+            }
+          }
+          if (multipart) {
+            const file = document.createElement("input");
+            file.type = "file";
+            file.name = "unusedFile";
+            form.append(file);
+          }
+          const submit = document.createElement("button");
+          submit.type = "submit";
+          submit.textContent = "Submit collection";
+          form.append(submit);
+          const result = document.createElement("div");
+          result.id = "e2e-collection-result";
+          host.append(form, result);
+          document.body.append(host);
+        }, { multipart, shape, values });
+
+        const responsePromise = page.waitForResponse(response =>
+          response.request().headers()["x-heimdall-content-invocation"] === `e2e.form.collections.${shape}`);
+        await page.locator("#e2e-collection-form button").click();
+        const response = await responsePromise;
+        assert.equal(response.status(), 200, await response.text());
+        assert.ok(response.request().headers()["content-type"].startsWith(
+          multipart ? "multipart/form-data" : "application/json"));
+
+        const expected = `${values.length}:${values.join("|")}`;
+        await waitForText(page.locator("#e2e-collection-result"),
+          shape === "properties" ? `${expected};${expected}` : expected);
+      }
+    }
+  }
+}
+
 export const tests = [
   ["binds state, forms, payload refs, and programmatic invokes", testPayloadsAndState],
+  ["binds single and repeated form fields to collection properties and parameters", testHostedCollectionForms],
   ["uploads files through the hosted action pipeline", testHostedFileUpload]
 ];

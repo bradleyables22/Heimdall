@@ -30,7 +30,7 @@ async function testInitialLoadActionTime(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Time.InitialLoad");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Time.InitialLoad");
 }
 
 async function testInitialTimeLocalization(page) {

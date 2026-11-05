@@ -17,6 +17,10 @@ import { tests as client_storage } from "./specs/client-storage.spec.mjs";
 import { tests as request_headers } from "./specs/request-headers.spec.mjs";
 import { tests as auth_and_errors } from "./specs/auth-and-errors.spec.mjs";
 import { tests as blazor_rendering } from "./specs/blazor-rendering.spec.mjs";
+import { tests as plugins } from "./specs/plugins.spec.mjs";
+
+const filter = process.argv.find(argument => argument.startsWith("--filter="))?.slice("--filter=".length)
+  || process.env.HEIMDALL_E2E_FILTER;
 
 const tests = [
   ...static_site,
@@ -35,8 +39,11 @@ const tests = [
   ...client_storage,
   ...request_headers,
   ...auth_and_errors,
-  ...blazor_rendering
-];
+  ...blazor_rendering,
+  ...plugins
+].filter(([name]) => !filter || name.includes(filter));
+
+assert.ok(tests.length, `No E2E tests match '${filter}'.`);
 
 async function runTests() {
   const { chromium } = loadPlaywright();

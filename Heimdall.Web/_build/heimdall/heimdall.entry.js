@@ -1,4 +1,4 @@
-import { createActionInvoker } from "./core/actions.js";
+import { createInvocationInvoker } from "./core/actions.js";
 import { createBootTriggers } from "./core/boot-triggers.js";
 import { createBusyStateManager } from "./core/busy-state.js";
 import { createClientInfoRuntime } from "./core/client-info.js";
@@ -10,6 +10,7 @@ import { createJsInvokeVoidRuntime } from "./core/js-invoke-void.js";
 import { createMutationRuntime } from "./core/mutations.js";
 import { createPageLifecycleRuntime } from "./core/page-lifecycle.js";
 import { createPayloadResolver } from "./core/payloads.js";
+import { createPluginRuntime } from "./core/plugins.js";
 import { createRequestCoordinator } from "./core/request-coordinator.js";
 import { createRequestHeadersRuntime } from "./core/request-headers.js";
 import { createSecurityTokens } from "./core/security-tokens.js";
@@ -31,9 +32,9 @@ import {
     // ---------------------------------------------------------------------------
     // Endpoints
     // ---------------------------------------------------------------------------
-    // Content Actions:
-    //   POST /__heimdall/v1/content/actions
-    //     - Executes a server action
+    // Content Invocations:
+    //   POST /__heimdall/v1/content/invocations
+    //     - Invokes a server-side content method
     //     - Returns HTML (with optional <invocation>, <abort>, or <redirect> directives)
     //
     // CSRF Token:
@@ -48,7 +49,7 @@ import {
     //     - Protected via short-lived subscribe token (minted with CSRF)
     //
     // ---------------------------------------------------------------------------
-    // Content Action Attributes
+    // Content Invocation Attributes
     // ---------------------------------------------------------------------------
     // Triggers:
     //   - heimdall-content-load="Action.Id"
@@ -159,7 +160,7 @@ import {
     //   - Does not execute JavaScript or target the DOM
     //
     // <history>:
-    //   - Successful content actions may push or replace one same-origin URL
+    //   - Successful content invocations may push or replace one same-origin URL
     //   - Plain paths are origin-rooted, with or without a leading slash
     //   - Back and Forward perform a full load of the canonical page route
     //
@@ -195,7 +196,7 @@ import {
     //     - Protected via short-lived subscribe token (minted with CSRF)
     //
     // ---------------------------------------------------------------------------
-    // Content Action Attributes
+    // Content Invocation Attributes
     // ---------------------------------------------------------------------------
     //
     // Triggers
@@ -334,18 +335,19 @@ import {
     const API_VERSION = 1;
 
     const DEFAULT_BASE_PATH = "/__heimdall";
-    const DEFAULT_CONTENT_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/content/actions`;
+    const DEFAULT_CONTENT_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/content/invocations`;
     const DEFAULT_CSRF_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/csrf`;
     const DEFAULT_BIFROST_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/bifrost`;
     const DEFAULT_BIFROST_TOKEN_ENDPOINT = `${DEFAULT_BASE_PATH}/v${API_VERSION}/bifrost/token`;
 
-    const ACTION_HEADER = "X-Heimdall-Content-Action";
+    const INVOCATION_HEADER = "X-Heimdall-Content-Invocation";
     const CSRF_HEADER = "RequestVerificationToken";
     const CLIENT_INFO_HEADER = "X-Heimdall-Client-Info";
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
-    const { payloadBindingFromElement } = createPayloadResolver(global);
     const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
+    const plugins = createPluginRuntime({ global, getConfig: getRuntimeConfig, emitLifecycle, dbg });
+    const { payloadBindingFromElement } = createPayloadResolver(global, plugins.readPayload);
     const coordinator = createRequestCoordinator({
         global,
         dbg
@@ -382,7 +384,8 @@ import {
         emitLifecycle,
         dbg,
         boot: root => boot(root),
-        busyState
+        busyState,
+        plugins
     });
     const dom = createDomPipeline({
         global,
@@ -392,7 +395,8 @@ import {
         emitLifecycle,
         jsInvokeVoid,
         timeLocalization,
-        mutations
+        mutations,
+        plugins
     });
     const {
         clearBifrostSubscribeToken,
@@ -412,8 +416,8 @@ import {
     });
     const {
         invoke,
-        runActionFromElement
-    } = createActionInvoker({
+        runInvocationFromElement
+    } = createInvocationInvoker({
         global,
         getConfig: getRuntimeConfig,
         ensureCsrfToken,
@@ -427,10 +431,11 @@ import {
         historyRuntime,
         coordinator,
         busyState,
+        plugins,
         resolveRequestHeaders: requestHeaders.resolve,
         mergeRequestHeaders: requestHeaders.merge,
         getClientInfoHeader: clientInfo.getHeaderValue,
-        actionHeader: ACTION_HEADER,
+        invocationHeader: INVOCATION_HEADER,
         csrfHeader: CSRF_HEADER,
         clientInfoHeader: CLIENT_INFO_HEADER
     });
@@ -442,10 +447,12 @@ import {
         handleKeydown,
         handleMouseOut,
         handleMouseOver,
-        handleSubmit
+        handleSubmit,
+        resolveTriggerElement,
+        scheduleDebounced
     } = createEventDelegates({
         getConfig: getRuntimeConfig,
-        runActionFromElement
+        runInvocationFromElement
     });
     const {
         bootLoads,
@@ -456,11 +463,11 @@ import {
     } = createBootTriggers({
         global,
         getConfig: getRuntimeConfig,
-        runActionFromElement
+        runInvocationFromElement
     });
     const pageLifecycle = createPageLifecycleRuntime({
         global,
-        runActionFromElement,
+        runInvocationFromElement,
         emit
     });
     const {
@@ -479,17 +486,21 @@ import {
         clearBifrostSubscribeToken,
         ensureBifrostSubscribeToken,
         matchesTriggerAttr,
+        plugins,
         defaultBifrostEndpoint: DEFAULT_BIFROST_ENDPOINT
     });
 
     function boot(root) {
         timeLocalization.localize(root, { origin: "boot" });
+        plugins.boot(root);
         bootLoads(root);
         bootVisible(root);
         bootScroll(root);
         bootPoll(root);
         bootSse(root);
     }
+
+    plugins.configure({ invoke, runInvocationFromElement, resolveTriggerElement, scheduleDebounced, boot });
 
     const Heimdall = createHeimdallRuntime({
         global,
@@ -503,6 +514,7 @@ import {
         boot,
         onReady,
         clearCsrfToken,
+        plugins,
         sseConnect,
         sseDisconnect,
         sseDisconnectAll,

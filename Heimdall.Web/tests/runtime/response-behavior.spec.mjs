@@ -55,11 +55,11 @@ async function testSwapLifecycleContract(page) {
   assert.equal(state.appliedOk, true);
   assert.equal(state.cancelledOk, true);
   assert.deepEqual(state.events, [
-    "before:action:invocation:Swap.Events",
-    "after:action:invocation:Swap.Events",
-    "before:action:main:Swap.Events",
-    "after:action:main:Swap.Events",
-    "before:action:main:Swap.Cancel"
+    "before:invocation:invocation:Swap.Events",
+    "after:invocation:invocation:Swap.Events",
+    "before:invocation:main:Swap.Events",
+    "after:invocation:main:Swap.Events",
+    "before:invocation:main:Swap.Cancel"
   ]);
   assert.equal(state.targetHtml, '<span id="main-new">Main</span>');
   assert.equal(state.sideHtml, '<b id="side-new">Side</b>');
@@ -126,7 +126,7 @@ async function testNetworkFailure(page) {
     const originalFetch = window.fetch;
     window.fetch = async (input, init) => {
       const url = typeof input === "string" ? input : input.url;
-      if (url.includes("/__heimdall/v1/content/actions")) {
+      if (url.includes("/__heimdall/v1/content/invocations")) {
         throw new Error("network down");
       }
       return originalFetch(input, init);
@@ -190,7 +190,7 @@ async function testNonSerializablePayload(page) {
   });
 
   assert.equal(state.threw, true);
-  assert.equal(state.message, "Heimdall payload is not JSON-serializable for action 'Payload.Circular'.");
+  assert.equal(state.message, "Heimdall payload is not JSON-serializable for invocation 'Payload.Circular'.");
   assert.equal(state.causeName, "TypeError");
   assert.equal(state.errors.length, 1);
   assert.equal(state.errors[0].actionId, "Payload.Circular");
@@ -262,8 +262,8 @@ async function testCustomHeadersAndDisableState(page) {
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 2);
   assert.equal(actions[0].headers["x-custom"], "custom-value");
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Headers.Save");
-  assert.equal(actions[1].headers["x-heimdall-content-action"], "Disable.Save");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Headers.Save");
+  assert.equal(actions[1].headers["x-heimdall-content-invocation"], "Disable.Save");
 }
 
 export const tests = [

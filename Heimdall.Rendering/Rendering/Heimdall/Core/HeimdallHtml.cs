@@ -11,25 +11,40 @@ namespace Heimdall.Server.Rendering
 	public static partial class HeimdallHtml
 	{
 		/// <summary>
-		/// Represents a strongly-typed Heimdall action identifier.
+		/// Represents a strongly-typed Heimdall invocation identifier.
 		/// </summary>
-		public readonly record struct ActionId(string Value)
+		public readonly record struct InvocationId(string Value)
 		{
 			/// <summary>
-			/// Cast ActionId to string implicitly, returning the underlying value.
+			/// Cast InvocationId to string implicitly, returning the underlying value.
 			/// </summary>
 			/// <returns></returns>
 			public override string ToString() => Value ?? string.Empty;
 			/// <summary>
-			/// Allows implicit conversion from ActionId to string and vice versa for seamless integration with HTML attributes.
+			/// Allows implicit conversion from InvocationId to string and vice versa for seamless integration with HTML attributes.
 			/// </summary>
 			/// <param name="id"></param>
-			public static implicit operator string(ActionId id) => id.Value;
+			public static implicit operator string(InvocationId id) => id.Value;
 			/// <summary>
-			/// Allows implicit conversion from string to ActionId, enabling easy creation of action identifiers from string literals.
+			/// Allows implicit conversion from string to InvocationId, enabling easy creation of invocation identifiers from string literals.
 			/// </summary>
 			/// <param name="value"></param>
+			public static implicit operator InvocationId(string value) => new(value);
+		}
+
+		/// <summary>
+		/// Compatibility alias for the pre-invocation identifier type.
+		/// </summary>
+		public readonly record struct ActionId(string Value)
+		{
+			/// <summary>Returns the identifier value.</summary>
+			public override string ToString() => Value ?? string.Empty;
+			/// <summary>Converts the identifier to its string value.</summary>
+			public static implicit operator string(ActionId id) => id.Value;
+			/// <summary>Creates an identifier from a string.</summary>
 			public static implicit operator ActionId(string value) => new(value);
+			/// <summary>Converts the compatibility identifier to an invocation identifier.</summary>
+			public static implicit operator InvocationId(ActionId id) => new(id.Value);
 		}
 
 		/// <summary>

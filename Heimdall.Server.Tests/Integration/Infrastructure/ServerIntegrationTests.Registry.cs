@@ -36,14 +36,14 @@ public sealed partial class ServerIntegrationTests
     private static void AddAssemblyToContentRegistry(Assembly assembly)
     {
         var registryType = typeof(ContentInvocationAttribute).Assembly.GetType(
-            "Heimdall.Server.ContentRegistry",
+            "Heimdall.Server.ContentInvocationRegistry",
             throwOnError: true)!;
         var registry = Activator.CreateInstance(registryType, nonPublic: true)!;
         using var services = new ServiceCollection().BuildServiceProvider();
         var addFromAssembly = registryType.GetMethod(
             "AddFromAssembly",
             BindingFlags.Instance | BindingFlags.NonPublic)
-            ?? throw new InvalidOperationException("Unable to find ContentRegistry.AddFromAssembly.");
+            ?? throw new InvalidOperationException("Unable to find ContentInvocationRegistry.AddFromAssembly.");
 
         try
         {

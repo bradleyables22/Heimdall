@@ -218,8 +218,8 @@ async function testMutationLifecycleAndErrors(page) {
     "before:#valid",
     "after:#valid:1:1",
     "before:#cancel",
-    "error:invalid-scope:action",
-    "error:target-not-found:action"
+    "error:invalid-scope:invocation",
+    "error:target-not-found:invocation"
   ]);
   assert.equal(state.validValue, "customized");
   assert.equal(state.validClass, "");
@@ -421,7 +421,7 @@ async function testMutationBehaviorReconciliation(page) {
   assert.equal(state.loadAttribute, null);
   assert.equal(state.resultHtml, '<span id="second-load">Second</span>');
   assert.deepEqual(
-    actions.map(action => action.headers["x-heimdall-content-action"]),
+    actions.map(action => action.headers["x-heimdall-content-invocation"]),
     ["Setup.Add", "Load.First", "Setup.Change", "Load.Second", "Setup.Remove"]
   );
 }

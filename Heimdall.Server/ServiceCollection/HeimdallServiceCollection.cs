@@ -1,4 +1,4 @@
-﻿using Heimdall.Server.Endpoints;
+using Heimdall.Server.Endpoints;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -15,7 +15,7 @@ namespace Heimdall.Server
     /// Heimdall into ASP.NET Core applications. It supports both default and customized service registration, as well
     /// as flexible assembly discovery for content and endpoint registration. Use these methods during application
     /// startup to ensure all required Heimdall infrastructure is properly configured.</remarks>
-    public static class HeimdallServiceCollection
+    public static partial class HeimdallServiceCollection
     {
         /// <summary>
         /// Registers Heimdall services using default settings and default assembly discovery.
@@ -92,11 +92,11 @@ namespace Heimdall.Server
         }
 
         /// <summary>
-        /// Registers MVC view rendering support for Heimdall content actions.
+        /// Registers MVC view rendering support for Heimdall content invocations.
         /// </summary>
         /// <remarks>
         /// This method adds ASP.NET Core MVC view services, an HTTP context accessor, and
-        /// <see cref="IHeimdallMvcRenderer"/> so instance content actions can render MVC partial views.
+        /// <see cref="IHeimdallMvcRenderer"/> so instance content invocations can render MVC partial views.
         /// It does not map controller routes; applications should configure their MVC endpoints separately
         /// when they also need normal controllers or Razor views.
         /// </remarks>
@@ -110,7 +110,7 @@ namespace Heimdall.Server
         }
 
         /// <summary>
-        /// Registers non-interactive Blazor component rendering support for Heimdall content actions.
+        /// Registers non-interactive Blazor component rendering support for Heimdall content invocations.
         /// </summary>
         /// <remarks>
         /// This method registers the ASP.NET Core Razor component services and
@@ -177,7 +177,7 @@ namespace Heimdall.Server
         {
             var serviceInspector = services.GetService<IServiceProviderIsService>();
 
-            if (IsRegistered<ContentRegistry>(services, serviceInspector) &&
+            if (IsRegistered<ContentInvocationRegistry>(services, serviceInspector) &&
                 IsRegistered<BifrostSubscribeToken>(services, serviceInspector) &&
                 IsRegistered<Bifrost>(services, serviceInspector))
             {
@@ -214,11 +214,12 @@ namespace Heimdall.Server
             else
                 services.AddOptions<HeimdallServiceSettings>();
 
-            var scan = ResolveAssemblies(assemblies);
-
-            services.AddSingleton<ContentRegistry>(sp =>
+            services.AddSingleton<ContentInvocationRegistry>(sp =>
             {
-                var registry = new ContentRegistry();
+                var registry = new ContentInvocationRegistry();
+                var scan = ResolveAssemblies(
+                    assemblies,
+                    sp.GetServices<HeimdallInvocationAssemblyRegistration>());
 
                 foreach (var asm in scan)
                     registry.AddFromAssembly(asm, sp);
@@ -227,7 +228,7 @@ namespace Heimdall.Server
             });
 
             services.TryAddEnumerable(
-                ServiceDescriptor.Singleton<MatcherPolicy, HeimdallContentActionMatcherPolicy>());
+                ServiceDescriptor.Singleton<MatcherPolicy, HeimdallContentInvocationMatcherPolicy>());
 
             services.AddSingleton<BifrostSubscribeToken>();
             services.AddSingleton<BifrostConnectionStore>();
@@ -239,7 +240,9 @@ namespace Heimdall.Server
             return services;
         }
 
-        private static IReadOnlyCollection<Assembly> ResolveAssemblies(Assembly[]? assemblies)
+        private static IReadOnlyCollection<Assembly> ResolveAssemblies(
+            Assembly[]? assemblies,
+            IEnumerable<HeimdallInvocationAssemblyRegistration> registeredAssemblies)
         {
             var result = new HashSet<Assembly>();
 
@@ -250,24 +253,27 @@ namespace Heimdall.Server
                     if (asm != null)
                         result.Add(asm);
                 }
-
-                return result;
             }
-
-            var entry = Assembly.GetEntryAssembly();
-            if (entry != null)
-                result.Add(entry);
-
-            var calling = Assembly.GetCallingAssembly();
-            if (calling != null)
-                result.Add(calling);
-
-            if (result.Count == 0)
+            else
             {
-                var executing = Assembly.GetExecutingAssembly();
-                if (executing != null)
-                    result.Add(executing);
+                var entry = Assembly.GetEntryAssembly();
+                if (entry != null)
+                    result.Add(entry);
+
+                var calling = Assembly.GetCallingAssembly();
+                if (calling != null)
+                    result.Add(calling);
+
+                if (result.Count == 0)
+                {
+                    var executing = Assembly.GetExecutingAssembly();
+                    if (executing != null)
+                        result.Add(executing);
+                }
             }
+
+            foreach (var registration in registeredAssemblies)
+                result.Add(registration.Assembly);
 
             return result;
         }

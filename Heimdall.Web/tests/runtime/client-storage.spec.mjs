@@ -123,7 +123,7 @@ async function testStorageClientInfoBlockedReads(page) {
     return {
       errors,
       storageHeader: JSON.parse(
-        window.__heimdallFetches.find(fetch => fetch.url.includes("/content/actions"))
+        window.__heimdallFetches.find(fetch => fetch.url.includes("/content/invocations"))
           .headers["x-heimdall-client-info"]).storage,
       originalStorageAvailable: !!original
     };
@@ -175,7 +175,7 @@ async function testStorageClientInfoExtensionLimits(page) {
     return {
       errors,
       headers: window.__heimdallFetches
-        .filter(fetch => fetch.url.includes("/content/actions"))
+        .filter(fetch => fetch.url.includes("/content/invocations"))
         .map(fetch => JSON.parse(fetch.headers["x-heimdall-client-info"]).extensions)
     };
   });

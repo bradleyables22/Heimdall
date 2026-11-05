@@ -1,4 +1,4 @@
-﻿using Heimdall.Server.Registry;
+using Heimdall.Server.Registry;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
@@ -11,11 +11,11 @@ using System.Reflection;
 
 namespace Heimdall.Server
 {
-    internal sealed class ContentRegistry
+    internal sealed class ContentInvocationRegistry
     {
-        private readonly Dictionary<string, ContentActionDescriptor> _contentActions = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, ContentInvocationDescriptor> _invocations = new(StringComparer.OrdinalIgnoreCase);
 
-        internal IReadOnlyCollection<ContentActionDescriptor> Actions => _contentActions.Values;
+        internal IReadOnlyCollection<ContentInvocationDescriptor> Invocations => _invocations.Values;
 
         internal void AddFromAssembly(Assembly assembly, IServiceProvider services)
         {
@@ -32,25 +32,25 @@ namespace Heimdall.Server
                     if (attr is null)
                         continue;
 
-                    var actionId = ResolveActionId(type, method, attr);
+                    var invocationId = ResolveInvocationId(type, method, attr);
 
-                    if (_contentActions.ContainsKey(actionId))
+                    if (_invocations.ContainsKey(invocationId))
                     {
                         throw new InvalidOperationException(
-                            $"Duplicate ContentInvocation id '{actionId}'. " +
-                            "Content action identifiers must be globally unique.");
+                            $"Duplicate ContentInvocation id '{invocationId}'. " +
+                            "Content invocation identifiers must be globally unique.");
                     }
 
-                    var descriptor = CreateDescriptor(actionId, method, services);
-                    _contentActions[actionId] = descriptor;
+                    var descriptor = CreateDescriptor(invocationId, method, services);
+                    _invocations[invocationId] = descriptor;
                 }
             }
         }
 
-        public bool TryGet(string actionId, out ContentActionDescriptor descriptor)
-            => _contentActions.TryGetValue(actionId, out descriptor!);
+        public bool TryGet(string invocationId, out ContentInvocationDescriptor descriptor)
+            => _invocations.TryGetValue(invocationId, out descriptor!);
 
-        private static string ResolveActionId(
+        private static string ResolveInvocationId(
             Type type,
             MethodInfo method,
             ContentInvocationAttribute attr)
@@ -82,8 +82,8 @@ namespace Heimdall.Server
             return normalized;
         }
 
-        private static ContentActionDescriptor CreateDescriptor(
-            string actionId,
+        private static ContentInvocationDescriptor CreateDescriptor(
+            string invocationId,
             MethodInfo method,
             IServiceProvider services)
         {
@@ -110,8 +110,8 @@ namespace Heimdall.Server
                     "cannot specify a negative maximum request body size.");
             }
 
-            return new ContentActionDescriptor(
-                actionId,
+            return new ContentInvocationDescriptor(
+                invocationId,
                 method,
                 parameters,
                 returnKind,
@@ -148,18 +148,18 @@ namespace Heimdall.Server
             }
         }
 
-        private static ContentActionReturnKind ValidateAndGetReturnKind(MethodInfo method)
+        private static ContentInvocationReturnKind ValidateAndGetReturnKind(MethodInfo method)
         {
             var rt = method.ReturnType;
 
             if (typeof(IHtmlContent).IsAssignableFrom(rt))
-                return ContentActionReturnKind.Html;
+                return ContentInvocationReturnKind.Html;
 
             if (IsGenericHtmlResult(rt, typeof(Task<>)))
-                return ContentActionReturnKind.TaskHtml;
+                return ContentInvocationReturnKind.TaskHtml;
 
             if (IsGenericHtmlResult(rt, typeof(ValueTask<>)))
-                return ContentActionReturnKind.ValueTaskHtml;
+                return ContentInvocationReturnKind.ValueTaskHtml;
 
             throw new InvalidOperationException(
                 $"[ContentInvocation] must return an IHtmlContent implementation, Task<THtml>, or ValueTask<THtml> " +
@@ -172,16 +172,16 @@ namespace Heimdall.Server
                returnType.GetGenericTypeDefinition() == genericTypeDefinition &&
                typeof(IHtmlContent).IsAssignableFrom(returnType.GetGenericArguments()[0]);
 
-        private static IReadOnlyList<ContentActionParameterDescriptor> BuildParameterPlan(
+        private static IReadOnlyList<ContentInvocationParameterDescriptor> BuildParameterPlan(
             MethodInfo method,
             IServiceProvider services)
         {
             var methodParams = method.GetParameters();
 
             if (methodParams.Length == 0)
-                return Array.Empty<ContentActionParameterDescriptor>();
+                return Array.Empty<ContentInvocationParameterDescriptor>();
 
-            var descriptors = new List<ContentActionParameterDescriptor>(methodParams.Length);
+            var descriptors = new List<ContentInvocationParameterDescriptor>(methodParams.Length);
 
             var unresolved = new List<ParameterInfo>();
 
@@ -193,25 +193,25 @@ namespace Heimdall.Server
 
                 if (pt == typeof(HttpContext))
                 {
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.HttpContext));
+                    descriptors.Add(new ContentInvocationParameterDescriptor(i, p, pt, ContentInvocationParameterKind.HttpContext));
                     continue;
                 }
 
                 if (pt == typeof(CancellationToken))
                 {
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.CancellationToken));
+                    descriptors.Add(new ContentInvocationParameterDescriptor(i, p, pt, ContentInvocationParameterKind.CancellationToken));
                     continue;
                 }
 
                 if (pt == typeof(System.Security.Claims.ClaimsPrincipal))
                 {
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.ClaimsPrincipal));
+                    descriptors.Add(new ContentInvocationParameterDescriptor(i, p, pt, ContentInvocationParameterKind.ClaimsPrincipal));
                     continue;
                 }
 
                 if (pt == typeof(HeimdallClientInfo))
                 {
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.ClientInfo));
+                    descriptors.Add(new ContentInvocationParameterDescriptor(i, p, pt, ContentInvocationParameterKind.ClientInfo));
                     continue;
                 }
 
@@ -225,7 +225,7 @@ namespace Heimdall.Server
                             "[FromServices] or [ContentPayload].");
                     }
 
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.FormFile));
+                    descriptors.Add(new ContentInvocationParameterDescriptor(i, p, pt, ContentInvocationParameterKind.FormFile));
                     continue;
                 }
 
@@ -297,14 +297,14 @@ namespace Heimdall.Server
 
                 if (serviceCandidates.Contains(p))
                 {
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, ContentActionParameterKind.Service));
+                    descriptors.Add(new ContentInvocationParameterDescriptor(i, p, pt, ContentInvocationParameterKind.Service));
                 }
                 else if (payloadParam == p)
                 {
                     var kind = IsExplicitFormParameter(p)
-                        ? ContentActionParameterKind.FormPayload
-                        : ContentActionParameterKind.Payload;
-                    descriptors.Add(new ContentActionParameterDescriptor(i, p, pt, kind));
+                        ? ContentInvocationParameterKind.FormPayload
+                        : ContentInvocationParameterKind.Payload;
+                    descriptors.Add(new ContentInvocationParameterDescriptor(i, p, pt, kind));
                 }
                 else
                 {

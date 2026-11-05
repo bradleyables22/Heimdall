@@ -4,7 +4,7 @@ import {
     resolveTarget
 } from "./utils.js";
 
-export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations }) {
+export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle, jsInvokeVoid, timeLocalization, mutations, plugins }) {
     function stripScripts(rootNode) {
         if (!rootNode || !rootNode.querySelectorAll)
             return;
@@ -41,7 +41,7 @@ export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle,
         stripScripts(fragment);
 
         const detail = {
-            origin: lifecycleContext.kind || "action",
+            origin: lifecycleContext.kind || "invocation",
             kind: lifecycleContext.swapKind || "main",
             target: targetEl,
             fragment,
@@ -67,6 +67,7 @@ export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle,
             return { didApply: false, appliedRoot: null, target: targetEl, swap: mode, cancelled: false };
 
         stripScripts(fragment);
+        plugins?.stripCommands(fragment);
 
         if (timeLocalization && typeof timeLocalization.localize === "function") {
             const contextElement = mode === "outer"
@@ -80,6 +81,12 @@ export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle,
         }
 
         const nodes = fragmentToNodesArray(fragment);
+        if (plugins) {
+            if (mode === "outer") plugins.dispose(targetEl, nodes);
+            else if (mode !== "beforeend" && mode !== "afterbegin") {
+                for (const child of Array.from(targetEl.children)) plugins.dispose(child, nodes);
+            }
+        }
         const firstElement = nodes.find(n => n && n.nodeType === 1) || null;
         const appliedRoot = firstElement || targetEl;
         let result;
@@ -109,6 +116,10 @@ export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle,
                 targetEl.replaceChildren(...nodes);
                 result = { didApply: true, appliedRoot, target: targetEl, swap: mode, cancelled: false };
                 break;
+        }
+
+        for (const node of nodes) {
+            if (node.nodeType === 1) plugins?.boot(node);
         }
 
         if (emitLifecycle) {
@@ -399,8 +410,9 @@ export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle,
         const hasMutation = containsTag(html, "mutation");
         const hasHistory = containsTag(html, "history");
         const hasStorage = containsTag(html, "storage");
+        const hasPluginCommand = containsTag(html, "heimdall-command");
 
-        if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage)
+        if (!hasScript && !hasInv && !hasAbort && !hasRedirect && !hasJsInvokeVoid && !hasMutation && !hasHistory && !hasStorage && !hasPluginCommand)
             return html;
 
         const tpl = parseHtmlToTemplate(html);
@@ -411,6 +423,7 @@ export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle,
         stripMutationsFromFragment(tpl.content);
         stripHistoryFromFragment(tpl.content);
         stripStorageFromFragment(tpl.content);
+        plugins?.stripCommands(tpl.content);
         return fragmentToHtml(tpl.content);
     }
 
@@ -553,6 +566,7 @@ export function createDomPipeline({ global, getConfig, boot, dbg, emitLifecycle,
                 stripInvocationsFromFragment(payloadFrag);
                 stripMutationsFromFragment(payloadFrag);
                 stripHistoryFromFragment(payloadFrag);
+                plugins?.stripCommands(payloadFrag);
 
                 const swapResult = applySwap(targetEl, payloadFrag, swap, Object.assign({}, context || {}, {
                     sourceEl,

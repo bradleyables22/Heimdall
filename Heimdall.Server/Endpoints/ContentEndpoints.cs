@@ -1,4 +1,4 @@
-﻿using Heimdall.Server.Helpers;
+using Heimdall.Server.Helpers;
 using Heimdall.Server.Registry;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authorization;
@@ -21,9 +21,21 @@ namespace Heimdall.Server
 {
     internal static class ContentEndpoints
     {
-        private const string ActionHeader = "X-Heimdall-Content-Action";
+        internal const string InvocationEndpoint = "__heimdall/v1/content/invocations";
+        internal const string LegacyInvocationEndpoint = "__heimdall/v1/content/actions";
+        internal const string InvocationHeader = "X-Heimdall-Content-Invocation";
+        internal const string LegacyInvocationHeader = "X-Heimdall-Content-Action";
         private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
         private static readonly RequestDelegate EmptyAuthorizationPipeline = _ => Task.CompletedTask;
+
+        internal static string GetInvocationId(HttpRequest request)
+        {
+            var invocationId = request.Headers[InvocationHeader].ToString();
+            if (!string.IsNullOrWhiteSpace(invocationId))
+                return invocationId;
+
+            return request.Headers[LegacyInvocationHeader].ToString();
+        }
 
         private static JsonSerializerOptions CreateJsonOptions()
         {
@@ -44,6 +56,9 @@ namespace Heimdall.Server
             o.Converters.Add(new BoolFromStringConverter());
             o.Converters.Add(new NullableBoolFromStringConverter());
 
+            // A form field occurs once as a scalar and repeatedly as an array.
+            o.Converters.Add(new SingleValueCollectionConverterFactory());
+
             return o;
         }
 
@@ -55,21 +70,20 @@ namespace Heimdall.Server
 
             Func<HttpContext, Task<IResult>> handler = async ctx =>
             {
-                var registry = ctx.RequestServices.GetRequiredService<ContentRegistry>();
+                var registry = ctx.RequestServices.GetRequiredService<ContentInvocationRegistry>();
                 var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
 
-                using var telemetry = HeimdallTelemetry.StartContentAction(ctx);
+                using var telemetry = HeimdallTelemetry.StartContentInvocation(ctx);
                 var settings = options.Value;
 
-                var hasActionHeader = ctx.Request.Headers.TryGetValue(ActionHeader, out var actionValues) &&
-                    !string.IsNullOrWhiteSpace(actionValues);
-                var actionId = hasActionHeader ? actionValues.ToString() : string.Empty;
-                ContentActionDescriptor? action = null;
+                var invocationId = GetInvocationId(ctx.Request);
+                var hasInvocationHeader = !string.IsNullOrWhiteSpace(invocationId);
+                ContentInvocationDescriptor? action = null;
 
-                if (hasActionHeader && registry.TryGet(actionId, out var resolvedAction))
+                if (hasInvocationHeader && registry.TryGet(invocationId, out var resolvedAction))
                 {
                     action = resolvedAction;
-                    telemetry.SetActionId(action.ActionId);
+                    telemetry.SetInvocationId(action.InvocationId);
 
                     var requestLimitResult = ApplyRequestLimits(ctx, action, settings);
                     if (requestLimitResult is not null)
@@ -93,7 +107,7 @@ namespace Heimdall.Server
                         telemetry.RecordException(ex, StatusCodes.Status413PayloadTooLarge);
                         logger?.LogWarning(
                             ex,
-                            "Heimdall content action request body exceeded an ASP.NET Core request or form limit for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                            "Heimdall content invocation request body exceeded an ASP.NET Core request or form limit for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
                             ctx.Request.Method,
                             ctx.Request.Path,
                             ctx.TraceIdentifier);
@@ -105,7 +119,7 @@ namespace Heimdall.Server
                         telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
                         logger?.LogWarning(
                             ex,
-                            "Heimdall content action request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                            "Heimdall content invocation request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
                             ctx.Request.Method,
                             ctx.Request.Path,
                             ctx.TraceIdentifier);
@@ -122,21 +136,21 @@ namespace Heimdall.Server
                     }
                 }
 
-                if (!hasActionHeader)
+                if (!hasInvocationHeader)
                 {
-                    telemetry.SetActionId("missing");
+                    telemetry.SetInvocationId("missing");
                     telemetry.Complete(StatusCodes.Status400BadRequest);
-                    return Results.BadRequest($"Missing {ActionHeader} header.");
+                    return Results.BadRequest($"Missing {InvocationHeader} header.");
                 }
 
                 if (action is null)
                 {
-                    telemetry.SetActionId("unknown");
+                    telemetry.SetInvocationId("unknown");
                     telemetry.Complete(StatusCodes.Status404NotFound);
-                    return Results.NotFound($"Unknown action '{actionId}'.");
+                    return Results.NotFound($"Unknown invocation '{invocationId}'.");
                 }
 
-                telemetry.SetActionId(action.ActionId);
+                telemetry.SetInvocationId(action.InvocationId);
 
                 IResult? authorizationResult;
                 try
@@ -158,7 +172,7 @@ namespace Heimdall.Server
                     return authorizationResult;
                 }
 
-                ContentActionTimeoutScope timeoutScope;
+                ContentInvocationTimeoutScope timeoutScope;
                 try
                 {
                     timeoutScope = CreateRequestTimeoutScope(ctx, action);
@@ -197,8 +211,8 @@ namespace Heimdall.Server
                 {
                     var statusCode = timeoutScope.Policy?.TimeoutStatusCode ?? StatusCodes.Status504GatewayTimeout;
                     logger?.LogWarning(
-                        "Heimdall action {ActionId} timed out for {Method} {Path}; returning status {StatusCode}. TraceIdentifier: {TraceIdentifier}.",
-                        actionId,
+                        "Heimdall invocation {InvocationId} timed out for {Method} {Path}; returning status {StatusCode}. TraceIdentifier: {TraceIdentifier}.",
+                        invocationId,
                         ctx.Request.Method,
                         ctx.Request.Path,
                         statusCode,
@@ -208,20 +222,20 @@ namespace Heimdall.Server
                     telemetry.RecordCancellation("timeout", statusCode);
                     return result;
                 }
-                catch (ContentActionBindingException ex)
+                catch (ContentInvocationBindingException ex)
                 {
                     telemetry.RecordException(ex, ex.StatusCode);
                     logger?.LogWarning(
                         ex,
-                        "Invalid request body for Heimdall action {ActionId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        actionId,
+                        "Invalid request body for Heimdall invocation {InvocationId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        invocationId,
                         ctx.Request.Method,
                         ctx.Request.Path,
                         ctx.TraceIdentifier);
 
                     var title = ex.StatusCode == StatusCodes.Status413PayloadTooLarge
-                        ? "Heimdall action request body is too large"
-                        : "Invalid Heimdall action request body";
+                        ? "Heimdall invocation request body is too large"
+                        : "Invalid Heimdall invocation request body";
 
                     if (settings.EnableDetailedErrors)
                     {
@@ -241,8 +255,8 @@ namespace Heimdall.Server
                     telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
                     logger?.LogWarning(
                         ex,
-                        "Invalid JSON body for Heimdall action {ActionId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        actionId,
+                        "Invalid JSON body for Heimdall invocation {InvocationId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        invocationId,
                         ctx.Request.Method,
                         ctx.Request.Path,
                         ctx.TraceIdentifier);
@@ -251,7 +265,7 @@ namespace Heimdall.Server
                     {
                         return Results.Problem(
                             detail: ex.ToString(),
-                            title: "Invalid Heimdall action request body",
+                            title: "Invalid Heimdall invocation request body",
                             statusCode: StatusCodes.Status400BadRequest);
                     }
 
@@ -278,8 +292,8 @@ namespace Heimdall.Server
 
                     logger?.LogError(
                         loggedException,
-                        "Heimdall action {ActionId} invocation failed for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        actionId,
+                        "Heimdall invocation {InvocationId} failed for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        invocationId,
                         ctx.Request.Method,
                         ctx.Request.Path,
                         ctx.TraceIdentifier);
@@ -288,12 +302,12 @@ namespace Heimdall.Server
                     {
                         return Results.Problem(
                             detail: loggedException.ToString(),
-                            title: "Heimdall action invocation failed",
+                            title: "Heimdall invocation failed",
                             statusCode: StatusCodes.Status500InternalServerError);
                     }
 
                     return Results.Problem(
-                        title: "Heimdall action invocation failed",
+                        title: "Heimdall invocation failed",
                         statusCode: StatusCodes.Status500InternalServerError);
                 }
                 finally
@@ -302,27 +316,36 @@ namespace Heimdall.Server
                 }
             };
 
-            var registry = app.ServiceProvider.GetRequiredService<ContentRegistry>();
-            foreach (var action in registry.Actions)
+            var registry = app.ServiceProvider.GetRequiredService<ContentInvocationRegistry>();
+            foreach (var action in registry.Invocations)
             {
-                var endpoint = app.MapPost(
-                    "__heimdall/v1/content/actions",
-                    handler);
+                MapInvocationEndpoint(InvocationEndpoint, action, handler);
+                MapInvocationEndpoint(LegacyInvocationEndpoint, action, handler);
+            }
 
-                endpoint.WithMetadata(new HeimdallContentActionEndpointMetadata(action.ActionId));
+            MapFallbackInvocationEndpoint(InvocationEndpoint, handler);
+            MapFallbackInvocationEndpoint(LegacyInvocationEndpoint, handler);
+
+            return app;
+
+            void MapInvocationEndpoint(
+                string pattern,
+                ContentInvocationDescriptor action,
+                Func<HttpContext, Task<IResult>> invocationHandler)
+            {
+                var endpoint = app.MapPost(pattern, invocationHandler);
+                endpoint.WithMetadata(new HeimdallContentInvocationEndpointMetadata(action.InvocationId));
                 foreach (var metadata in action.RateLimitingMetadata)
                     endpoint.WithMetadata(metadata);
-
                 endpoint.ExcludeFromDescription();
             }
 
-            app.MapPost(
-                    "__heimdall/v1/content/actions",
-                    handler)
-                .WithMetadata(new HeimdallContentActionEndpointMetadata(actionId: null))
-                .ExcludeFromDescription();
-
-            return app;
+            void MapFallbackInvocationEndpoint(
+                string pattern,
+                Func<HttpContext, Task<IResult>> invocationHandler)
+                => app.MapPost(pattern, invocationHandler)
+                    .WithMetadata(new HeimdallContentInvocationEndpointMetadata(invocationId: null))
+                    .ExcludeFromDescription();
         }
 
         private static Exception UnwrapInvocationException(Exception ex)
@@ -332,7 +355,7 @@ namespace Heimdall.Server
 
         private static IResult? ApplyRequestLimits(
             HttpContext context,
-            ContentActionDescriptor action,
+            ContentInvocationDescriptor action,
             HeimdallServiceSettings settings)
         {
             var requestSizeLimit = action.RequestSizeLimit;
@@ -407,13 +430,13 @@ namespace Heimdall.Server
                 detail: settings.EnableDetailedErrors && exception is not null
                     ? exception.ToString()
                     : "The request body exceeded the configured ASP.NET Core request or form limits.",
-                title: "Heimdall action request body is too large",
+                title: "Heimdall invocation request body is too large",
                 statusCode: StatusCodes.Status413PayloadTooLarge);
 
         private static async Task<object?[]> BindArgumentsAsync(
             HttpContext ctx,
-            ContentActionDescriptor action,
-            HeimdallTelemetry.ContentActionTelemetryScope telemetry,
+            ContentInvocationDescriptor action,
+            HeimdallTelemetry.ContentInvocationTelemetryScope telemetry,
             HeimdallClientInfoLimits clientInfoLimits)
         {
             if (action.Parameters.Count == 0)
@@ -431,16 +454,16 @@ namespace Heimdall.Server
             {
                 args[parameter.Index] = parameter.Kind switch
                 {
-                    ContentActionParameterKind.HttpContext => ctx,
-                    ContentActionParameterKind.CancellationToken => ctx.RequestAborted,
-                    ContentActionParameterKind.ClaimsPrincipal => ctx.User,
-                    ContentActionParameterKind.ClientInfo => BindClientInfo(ctx, clientInfoLimits),
-                    ContentActionParameterKind.Service => ResolveRequiredService(ctx, action, parameter),
-                    ContentActionParameterKind.Payload => await BindPayloadParameterAsync(ctx, parameter),
-                    ContentActionParameterKind.FormPayload => await BindFormPayloadParameterAsync(ctx, parameter),
-                    ContentActionParameterKind.FormFile => await BindFormFileParameterAsync(ctx, parameter),
+                    ContentInvocationParameterKind.HttpContext => ctx,
+                    ContentInvocationParameterKind.CancellationToken => ctx.RequestAborted,
+                    ContentInvocationParameterKind.ClaimsPrincipal => ctx.User,
+                    ContentInvocationParameterKind.ClientInfo => BindClientInfo(ctx, clientInfoLimits),
+                    ContentInvocationParameterKind.Service => ResolveRequiredService(ctx, action, parameter),
+                    ContentInvocationParameterKind.Payload => await BindPayloadParameterAsync(ctx, parameter),
+                    ContentInvocationParameterKind.FormPayload => await BindFormPayloadParameterAsync(ctx, parameter),
+                    ContentInvocationParameterKind.FormFile => await BindFormFileParameterAsync(ctx, parameter),
                     _ => throw new InvalidOperationException(
-                        $"Unsupported parameter kind '{parameter.Kind}' in action '{action.ActionId}'.")
+                        $"Unsupported parameter kind '{parameter.Kind}' in invocation '{action.InvocationId}'.")
                 };
             }
 
@@ -459,7 +482,7 @@ namespace Heimdall.Server
 
                 if (values.Count != 1 || string.IsNullOrWhiteSpace(values[0]))
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status400BadRequest,
                         $"The {HeimdallClientInfo.HeaderName} header must contain one JSON object.");
                 }
@@ -467,7 +490,7 @@ namespace Heimdall.Server
                 var raw = values[0]!;
                 if (raw.Length > HeimdallClientInfo.MaxHeaderLength)
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status400BadRequest,
                         $"The {HeimdallClientInfo.HeaderName} header exceeds the " +
                         $"{HeimdallClientInfo.MaxHeaderLength}-character limit.");
@@ -483,7 +506,7 @@ namespace Heimdall.Server
                 }
                 catch (JsonException ex)
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status400BadRequest,
                         $"The {HeimdallClientInfo.HeaderName} header does not contain valid client information.",
                         ex);
@@ -492,7 +515,7 @@ namespace Heimdall.Server
 
             async Task<object?> BindPayloadParameterAsync(
                 HttpContext httpContext,
-                ContentActionParameterDescriptor parameter)
+                ContentInvocationParameterDescriptor parameter)
             {
                 if (httpContext.Request.HasFormContentType)
                 {
@@ -518,16 +541,16 @@ namespace Heimdall.Server
                     }
                 }
 
-                return BindPayloadValue(bodyJson!.Value, parameter.Parameter);
+                return BindPayloadValue(bodyJson!.Value, parameter.Parameter, parameter.BindingName);
             }
 
             async Task<object?> BindFormPayloadParameterAsync(
                 HttpContext httpContext,
-                ContentActionParameterDescriptor parameter)
+                ContentInvocationParameterDescriptor parameter)
             {
                 if (!httpContext.Request.HasFormContentType)
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status415UnsupportedMediaType,
                         $"Form parameter '{parameter.Parameter.Name}' requires a form content type.");
                 }
@@ -538,11 +561,11 @@ namespace Heimdall.Server
 
             async Task<object?> BindFormFileParameterAsync(
                 HttpContext httpContext,
-                ContentActionParameterDescriptor parameter)
+                ContentInvocationParameterDescriptor parameter)
             {
                 if (!httpContext.Request.HasFormContentType)
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status415UnsupportedMediaType,
                         $"File parameter '{parameter.Parameter.Name}' requires a multipart/form-data request.");
                 }
@@ -565,7 +588,7 @@ namespace Heimdall.Server
                         var statusCode = IsRequestTooLargeException(ex)
                             ? StatusCodes.Status413PayloadTooLarge
                             : StatusCodes.Status400BadRequest;
-                        throw new ContentActionBindingException(
+                        throw new ContentInvocationBindingException(
                             statusCode,
                             statusCode == StatusCodes.Status413PayloadTooLarge
                                 ? "The multipart form body exceeded the configured ASP.NET Core form limits."
@@ -590,7 +613,7 @@ namespace Heimdall.Server
             var storageChars = JsonSerializer.Serialize(clientInfo.Storage, JsonOptions).Length;
             if (storageChars > Math.Max(0, limits.MaxStorageChars))
             {
-                throw new ContentActionBindingException(
+                throw new ContentInvocationBindingException(
                     StatusCodes.Status400BadRequest,
                     $"The {HeimdallClientInfo.HeaderName} storage value exceeds the configured " +
                     $"{Math.Max(0, limits.MaxStorageChars)}-character limit.");
@@ -598,7 +621,7 @@ namespace Heimdall.Server
 
             if (clientInfo.Extensions.Count > Math.Max(0, limits.MaxExtensionEntries))
             {
-                throw new ContentActionBindingException(
+                throw new ContentInvocationBindingException(
                     StatusCodes.Status400BadRequest,
                     $"The {HeimdallClientInfo.HeaderName} extensions value exceeds the configured " +
                     $"{Math.Max(0, limits.MaxExtensionEntries)}-entry limit.");
@@ -607,7 +630,7 @@ namespace Heimdall.Server
             var extensionChars = JsonSerializer.Serialize(clientInfo.Extensions, JsonOptions).Length;
             if (extensionChars > Math.Max(0, limits.MaxExtensionChars))
             {
-                throw new ContentActionBindingException(
+                throw new ContentInvocationBindingException(
                     StatusCodes.Status400BadRequest,
                     $"The {HeimdallClientInfo.HeaderName} extensions value exceeds the configured " +
                     $"{Math.Max(0, limits.MaxExtensionChars)}-character limit.");
@@ -618,7 +641,7 @@ namespace Heimdall.Server
             {
                 if (GetJsonDepth(extension.Value) > maxDepth)
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status400BadRequest,
                         $"The {HeimdallClientInfo.HeaderName} extension '{extension.Key}' exceeds the configured " +
                         $"JSON depth limit of {maxDepth}.");
@@ -634,7 +657,7 @@ namespace Heimdall.Server
             var maxKeys = Math.Max(0, limits.MaxStorageKeysPerArea);
             if (values.Count > maxKeys)
             {
-                throw new ContentActionBindingException(
+                throw new ContentInvocationBindingException(
                     StatusCodes.Status400BadRequest,
                     $"The {HeimdallClientInfo.HeaderName} {area} storage value exceeds the configured " +
                     $"{maxKeys}-key limit.");
@@ -646,7 +669,7 @@ namespace Heimdall.Server
             {
                 if (pair.Key.Length > maxKeyLength)
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status400BadRequest,
                         $"The {HeimdallClientInfo.HeaderName} {area} storage key exceeds the configured " +
                         $"{maxKeyLength}-character limit.");
@@ -654,7 +677,7 @@ namespace Heimdall.Server
 
                 if (pair.Value is null || pair.Value.Length > maxValueLength)
                 {
-                    throw new ContentActionBindingException(
+                    throw new ContentInvocationBindingException(
                         StatusCodes.Status400BadRequest,
                         $"The {HeimdallClientInfo.HeaderName} {area} storage value exceeds the configured " +
                         $"{maxValueLength}-character limit.");
@@ -680,7 +703,7 @@ namespace Heimdall.Server
 
         private static async Task<IResult?> AuthorizeActionAsync(
             HttpContext ctx,
-            ContentActionDescriptor action)
+            ContentInvocationDescriptor action)
         {
             if (!action.RequiresAuthorization)
                 return null;
@@ -709,31 +732,31 @@ namespace Heimdall.Server
         {
             return ctx.RequestServices.GetService<T>()
                 ?? throw new InvalidOperationException(
-                    $"Heimdall content action authorization requires '{typeof(T).FullName}'. " +
+                    $"Heimdall content invocation authorization requires '{typeof(T).FullName}'. " +
                     "Register authorization services with services.AddAuthorization(...).");
         }
 
-        private static ContentActionTimeoutScope CreateRequestTimeoutScope(
+        private static ContentInvocationTimeoutScope CreateRequestTimeoutScope(
             HttpContext ctx,
-            ContentActionDescriptor action)
+            ContentInvocationDescriptor action)
         {
             if (action.DisableRequestTimeout)
             {
                 ctx.Features.Get<IHttpRequestTimeoutFeature>()?.DisableTimeout();
-                return ContentActionTimeoutScope.None(ctx);
+                return ContentInvocationTimeoutScope.None(ctx);
             }
 
             var policy = ResolveRequestTimeoutPolicy(ctx, action);
             if (policy is null)
-                return ContentActionTimeoutScope.None(ctx);
+                return ContentInvocationTimeoutScope.None(ctx);
 
             ctx.Features.Get<IHttpRequestTimeoutFeature>()?.DisableTimeout();
-            return ContentActionTimeoutScope.Start(ctx, policy);
+            return ContentInvocationTimeoutScope.Start(ctx, policy);
         }
 
         private static RequestTimeoutPolicy? ResolveRequestTimeoutPolicy(
             HttpContext ctx,
-            ContentActionDescriptor action)
+            ContentInvocationDescriptor action)
         {
             var attr = action.RequestTimeout;
             if (attr is null)
@@ -750,14 +773,14 @@ namespace Heimdall.Server
             if (string.IsNullOrWhiteSpace(attr.PolicyName))
             {
                 throw new InvalidOperationException(
-                    $"Request timeout metadata for Heimdall action '{action.ActionId}' does not specify a timeout or policy name.");
+                    $"Request timeout metadata for Heimdall invocation '{action.InvocationId}' does not specify a timeout or policy name.");
             }
 
             var options = ctx.RequestServices.GetService<IOptions<RequestTimeoutOptions>>()?.Value;
             if (options is null || !options.Policies.TryGetValue(attr.PolicyName, out var policy))
             {
                 throw new InvalidOperationException(
-                    $"Request timeout policy '{attr.PolicyName}' was not found for Heimdall action '{action.ActionId}'. " +
+                    $"Request timeout policy '{attr.PolicyName}' was not found for Heimdall invocation '{action.InvocationId}'. " +
                     "Register it with services.AddRequestTimeouts(...).");
             }
 
@@ -783,7 +806,7 @@ namespace Heimdall.Server
             return Results.StatusCode(statusCode);
         }
 
-        private static object? BindPayloadValue(JsonElement bodyJson, ParameterInfo parameter)
+        private static object? BindPayloadValue(JsonElement bodyJson, ParameterInfo parameter, string bindingName)
         {
             var targetType = parameter.ParameterType;
 
@@ -793,15 +816,15 @@ namespace Heimdall.Server
             if (bodyJson.ValueKind != JsonValueKind.Object)
                 return DeserializeRequired(bodyJson, targetType, parameter);
 
-            if (IsSimplePayloadType(targetType))
+            if (IsSimplePayloadType(targetType) || SingleValueCollectionConverterFactory.IsSupportedCollection(targetType))
             {
-                if (TryGetPropertyCaseInsensitive(bodyJson, parameter.Name!, out var propertyJson))
+                if (TryGetPropertyCaseInsensitive(bodyJson, bindingName, out var propertyJson))
                     return DeserializeRequired(propertyJson, targetType, parameter);
 
                 return GetMissingValue(parameter, targetType);
             }
 
-            if (TryGetPropertyCaseInsensitive(bodyJson, parameter.Name!, out var nestedPropertyJson) &&
+            if (TryGetPropertyCaseInsensitive(bodyJson, bindingName, out var nestedPropertyJson) &&
                 nestedPropertyJson.ValueKind == JsonValueKind.Object)
             {
                 return DeserializeRequired(nestedPropertyJson, targetType, parameter);
@@ -847,7 +870,7 @@ namespace Heimdall.Server
             }
 
             var formJson = JsonSerializer.SerializeToElement(values, JsonOptions);
-            return BindPayloadValue(formJson, parameter);
+            return BindPayloadValue(formJson, parameter, bindingName);
         }
 
         private static bool TryBindEmbeddedJsonFormValue(
@@ -867,6 +890,12 @@ namespace Heimdall.Server
             try
             {
                 using var document = JsonDocument.Parse(raw);
+                if (SingleValueCollectionConverterFactory.IsSupportedCollection(parameter.ParameterType) &&
+                    document.RootElement.ValueKind != JsonValueKind.Array)
+                {
+                    return false;
+                }
+
                 value = DeserializeRequired(document.RootElement, parameter.ParameterType, parameter);
                 return true;
             }
@@ -899,7 +928,7 @@ namespace Heimdall.Server
                 if (AllowsNull(parameter))
                     return null;
 
-                throw new ContentActionBindingException(
+                throw new ContentInvocationBindingException(
                     StatusCodes.Status400BadRequest,
                     $"Missing required uploaded file for parameter '{parameter.Name}'.");
             }
@@ -1007,7 +1036,7 @@ namespace Heimdall.Server
             return false;
         }
 
-        private sealed class ContentActionTimeoutScope : IDisposable
+        private sealed class ContentInvocationTimeoutScope : IDisposable
         {
             private readonly HttpContext _ctx;
             private readonly CancellationToken _originalRequestAborted;
@@ -1015,7 +1044,7 @@ namespace Heimdall.Server
             private readonly CancellationTokenSource? _linkedCts;
             private bool _disposed;
 
-            private ContentActionTimeoutScope(
+            private ContentInvocationTimeoutScope(
                 HttpContext ctx,
                 CancellationToken originalRequestAborted,
                 RequestTimeoutPolicy? policy,
@@ -1035,16 +1064,16 @@ namespace Heimdall.Server
                 _timeoutCts?.IsCancellationRequested == true &&
                 !_originalRequestAborted.IsCancellationRequested;
 
-            public static ContentActionTimeoutScope None(HttpContext ctx)
+            public static ContentInvocationTimeoutScope None(HttpContext ctx)
                 => new(ctx, ctx.RequestAborted, policy: null, timeoutCts: null, linkedCts: null);
 
-            public static ContentActionTimeoutScope Start(HttpContext ctx, RequestTimeoutPolicy policy)
+            public static ContentInvocationTimeoutScope Start(HttpContext ctx, RequestTimeoutPolicy policy)
             {
                 var originalRequestAborted = ctx.RequestAborted;
                 var timeout = policy.Timeout;
 
                 if (!timeout.HasValue || timeout.Value == System.Threading.Timeout.InfiniteTimeSpan)
-                    return new ContentActionTimeoutScope(ctx, originalRequestAborted, policy, timeoutCts: null, linkedCts: null);
+                    return new ContentInvocationTimeoutScope(ctx, originalRequestAborted, policy, timeoutCts: null, linkedCts: null);
 
                 var timeoutCts = new CancellationTokenSource();
                 timeoutCts.CancelAfter(timeout.Value);
@@ -1055,7 +1084,7 @@ namespace Heimdall.Server
 
                 ctx.RequestAborted = linkedCts.Token;
 
-                return new ContentActionTimeoutScope(
+                return new ContentInvocationTimeoutScope(
                     ctx,
                     originalRequestAborted,
                     policy,
@@ -1077,8 +1106,8 @@ namespace Heimdall.Server
 
         private static object ResolveRequiredService(
             HttpContext ctx,
-            ContentActionDescriptor action,
-            ContentActionParameterDescriptor parameter)
+            ContentInvocationDescriptor action,
+            ContentInvocationParameterDescriptor parameter)
         {
             var service = ctx.RequestServices.GetService(parameter.ParameterType);
             if (service is not null)
@@ -1090,9 +1119,9 @@ namespace Heimdall.Server
                 $"parameter '{parameter.Parameter.Name}'.");
         }
 
-        private sealed class ContentActionBindingException : Exception
+        private sealed class ContentInvocationBindingException : Exception
         {
-            public ContentActionBindingException(int statusCode, string message, Exception? innerException = null)
+            public ContentInvocationBindingException(int statusCode, string message, Exception? innerException = null)
                 : base(message, innerException)
             {
                 StatusCode = statusCode;

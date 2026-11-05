@@ -2,7 +2,7 @@ import { getAttr } from "./utils.js";
 
 export function createPageLifecycleRuntime({
     global,
-    runActionFromElement,
+    runInvocationFromElement,
     emit
 }) {
     function invokeMatching(attr, triggerName) {
@@ -12,7 +12,7 @@ export function createPageLifecycleRuntime({
             if (!actionId)
                 continue;
 
-            runActionFromElement(el, actionId, triggerName).catch(() => { /* logged */ });
+            runInvocationFromElement(el, actionId, triggerName).catch(() => { /* logged */ });
         }
     }
 

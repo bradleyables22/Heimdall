@@ -136,27 +136,27 @@ async function testHostedMutations(page, baseUrl) {
   assert.equal(finalState.inputValue, "client edited");
   assert.deepEqual(finalState.events, [
     {
-      phase: "before", origin: "action", target: "#e2e-mutation-order-created",
+      phase: "before", origin: "invocation", target: "#e2e-mutation-order-created",
       source: "e2e-mutation-button"
     },
     {
-      phase: "after", origin: "action", target: "#e2e-mutation-order-created",
+      phase: "after", origin: "invocation", target: "#e2e-mutation-order-created",
       source: "e2e-mutation-button", targets: 1, operations: 2
     },
     {
-      phase: "before", origin: "action", target: "#e2e-mutation-panel",
+      phase: "before", origin: "invocation", target: "#e2e-mutation-panel",
       source: "e2e-mutation-button"
     },
     {
-      phase: "after", origin: "action", target: "#e2e-mutation-panel",
+      phase: "after", origin: "invocation", target: "#e2e-mutation-panel",
       source: "e2e-mutation-button", targets: 1, operations: 5
     },
     {
-      phase: "before", origin: "action", target: "#e2e-mutation-panel",
+      phase: "before", origin: "invocation", target: "#e2e-mutation-panel",
       source: "e2e-mutation-button"
     },
     {
-      phase: "after", origin: "action", target: "#e2e-mutation-panel",
+      phase: "after", origin: "invocation", target: "#e2e-mutation-panel",
       source: "e2e-mutation-button", targets: 2, operations: 1
     },
     {

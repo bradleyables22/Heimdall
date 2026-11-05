@@ -106,10 +106,10 @@ async function testRequestAndSwapLifecycle(page, baseUrl) {
   assert.deepEqual(state.order, [
     "request-config",
     "request-before",
-    "swap-before:action:invocation",
-    "swap-after:action:invocation",
-    "swap-before:action:main",
-    "swap-after:action:main",
+    "swap-before:invocation:invocation",
+    "swap-after:invocation:invocation",
+    "swap-before:invocation:main",
+    "swap-after:invocation:main",
     "request-after",
     "request-finally"
   ]);
@@ -135,7 +135,7 @@ async function testRequestAndSwapLifecycle(page, baseUrl) {
 async function testLifecycleCancellation(page, baseUrl) {
   const actionRequests = [];
   page.on("request", request => {
-    const actionId = new URL(request.url()).searchParams.get("action");
+    const actionId = new URL(request.url()).searchParams.get("invocation");
     if (actionId?.startsWith("e2e.lifecycle") || actionId === "e2e.sync")
       actionRequests.push(actionId);
   });

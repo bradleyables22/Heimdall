@@ -2,7 +2,7 @@
 
 `HeimdallFramework.Rendering` provides the standalone server-side HTML and Heimdall markup-authoring foundation for [Heimdall](https://heimdall-framework.org).
 
-It contains the lower-level `Html` helpers, the `FluentHtml` builder API, the typed `HeimdallHtml` and `FluentHeimdall` helpers, synchronous and asynchronous HTML composition, Heimdall attributes and response directives, and `ToHtmlString()` / `ToHtmlStringAsync()` materialization helpers. It does not include Heimdall middleware, content actions, pages, Bifrost, or the browser runtime.
+It contains the lower-level `Html` helpers, the `FluentHtml` builder API, the typed `HeimdallHtml` and `FluentHeimdall` helpers, synchronous and asynchronous HTML composition, Heimdall attributes and response directives, and `ToHtmlString()` / `ToHtmlStringAsync()` materialization helpers. It does not include Heimdall middleware, content invocations, pages, Bifrost, or the browser runtime.
 
 ## Install
 

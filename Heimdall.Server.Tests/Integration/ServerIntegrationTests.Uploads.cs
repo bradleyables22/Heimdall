@@ -214,7 +214,7 @@ public sealed partial class ServerIntegrationTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
-        Assert.Contains("Heimdall action request body is too large", body);
+        Assert.Contains("Heimdall invocation request body is too large", body);
     }
 
     [Fact]
@@ -265,7 +265,7 @@ public sealed partial class ServerIntegrationTests
         var body = await response.Content.ReadAsStringAsync();
 
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, response.StatusCode);
-        Assert.Contains("Heimdall action request body is too large", body);
+        Assert.Contains("Heimdall invocation request body is too large", body);
     }
 
     [Fact]

@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Heimdall.Bootstrap\Heimdall.Bootstrap.csproj" />
+    <ProjectReference Include="..\Heimdall.E2E.TestPlugin\Heimdall.E2E.TestPlugin.csproj" />
     <ProjectReference Include="..\Heimdall.Server\Heimdall.Server.csproj" />
     <ProjectReference Include="..\Heimdall.Web\Heimdall.Web.csproj" />
   </ItemGroup>

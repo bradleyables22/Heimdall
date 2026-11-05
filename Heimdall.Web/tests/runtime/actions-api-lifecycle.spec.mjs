@@ -14,7 +14,7 @@ async function testPublicApi(page) {
     onReady: typeof window.Heimdall.onReady,
     clearCsrfToken: typeof window.Heimdall.clearCsrfToken,
     sseConnect: typeof window.Heimdall.sse.connect,
-    contentEndpoint: window.Heimdall.config.endpoints.contentActions,
+    contentEndpoint: window.Heimdall.config.endpoints.contentInvocations,
     antiforgery: window.Heimdall.config.antiforgery,
     clientInfo: window.Heimdall.config.clientInfo,
     clientInfoMaxAgeMs: window.Heimdall.config.clientInfoMaxAgeMs,
@@ -29,7 +29,7 @@ async function testPublicApi(page) {
   assert.equal(api.onReady, "function");
   assert.equal(api.clearCsrfToken, "function");
   assert.equal(api.sseConnect, "function");
-  assert.equal(api.contentEndpoint, "/__heimdall/v1/content/actions");
+  assert.equal(api.contentEndpoint, "/__heimdall/v1/content/invocations");
   assert.equal(api.antiforgery, true);
   assert.equal(api.clientInfo, false);
   assert.equal(api.clientInfoMaxAgeMs, 60000);
@@ -57,8 +57,8 @@ async function testProgrammaticInvoke(page) {
   assert.equal(csrfFetches(fetches).length, 1);
   assert.equal(actions.length, 1);
   assert.equal(actions[0].method, "POST");
-  assert.equal(new URL(actions[0].url).searchParams.get("action"), "Notes.Save");
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Notes.Save");
+  assert.equal(new URL(actions[0].url).searchParams.get("invocation"), "Notes.Save");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Notes.Save");
   assert.equal(actions[0].headers.requestverificationtoken, "csrf-token");
   assert.deepEqual(actions[0].jsonBody, { id: 42 });
 }
@@ -156,8 +156,8 @@ async function testRequestLifecycleContract(page) {
     "request-config",
     "request-before",
     "before",
-    "swap-before:action:main",
-    "swap-after:action:main",
+    "swap-before:invocation:main",
+    "swap-after:invocation:main",
     "after",
     "request-after",
     "request-finally"

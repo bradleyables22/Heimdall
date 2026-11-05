@@ -1,9 +1,9 @@
 import { getAttr, isElement } from "./utils.js";
 
-export function createMutationRuntime({ global, emitLifecycle, dbg, boot, busyState }) {
+export function createMutationRuntime({ global, emitLifecycle, dbg, boot, busyState, plugins }) {
     function mutationError(sourceEl, directive, context, code, message, error) {
         const detail = {
-            origin: context && context.kind ? context.kind : "action",
+            origin: context && context.kind ? context.kind : "invocation",
             sourceElement: sourceEl || null,
             requestContext: context && context.requestContext ? context.requestContext : null,
             directive,
@@ -167,7 +167,7 @@ export function createMutationRuntime({ global, emitLifecycle, dbg, boot, busySt
             return mutationError(sourceEl, directive, context, "target-not-found", `Mutation target '${targetSelector}' was not found.`);
 
         const detail = {
-            origin: context.kind || "action",
+            origin: context.kind || "invocation",
             sourceElement: sourceEl || null,
             requestContext: context.requestContext || null,
             directive,
@@ -221,7 +221,7 @@ export function createMutationRuntime({ global, emitLifecycle, dbg, boot, busySt
         if (durationMs > 16)
             dbg("long mutation batch", { targetSelector, targetCount: targets.length, operationCount: operations.length, durationMs });
 
-        const reconcileTargets = operations.some(requiresBehaviorReconciliation) ? targets : [];
+        const reconcileTargets = plugins?.hasPlugins() || operations.some(requiresBehaviorReconciliation) ? targets : [];
         return { applied: true, cancelled: false, targets, reconcileTargets, detail };
     }
 

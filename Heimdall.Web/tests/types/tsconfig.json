@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "/_content/Heimdall.E2E.TestPlugin/js/test-plugin.js": ["../../../Heimdall.E2E.TestPlugin/wwwroot/js/test-plugin.js"]
+    },
+    "strict": true,
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "../../wwwroot/heimdall-plugins.d.ts",
+    "../../examples/editor-plugin.js",
+    "../../../Heimdall.E2E.TestPlugin/wwwroot/js/test-plugin.js",
+    "../../../Heimdall.E2E/wwwroot/js/e2e-test-plugin.js",
+    "./plugin-contract.ts"
+  ]
+}

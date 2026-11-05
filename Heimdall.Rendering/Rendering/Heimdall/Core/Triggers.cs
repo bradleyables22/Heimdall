@@ -13,7 +13,7 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Emits a Heimdall trigger attribute for the specified trigger and action.
 		/// </summary>
-		public static Html.HtmlAttr On(Trigger trigger, ActionId action)
+		public static Html.HtmlAttr On(Trigger trigger, InvocationId action)
 			=> Html.Attr(TriggerToAttr(trigger), action.Value);
 
 		private static string TriggerToAttr(Trigger trigger) => trigger switch
@@ -44,69 +44,69 @@ namespace Heimdall.Server.Rendering
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnLoad(ActionId action) => Html.Attr(Attrs.Load, action.Value);
+		public static Html.HtmlAttr OnLoad(InvocationId action) => Html.Attr(Attrs.Load, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnClick(ActionId action) => Html.Attr(Attrs.Click, action.Value);
+		public static Html.HtmlAttr OnClick(InvocationId action) => Html.Attr(Attrs.Click, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnChange(ActionId action) => Html.Attr(Attrs.Change, action.Value);
+		public static Html.HtmlAttr OnChange(InvocationId action) => Html.Attr(Attrs.Change, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnInput(ActionId action) => Html.Attr(Attrs.Input, action.Value);
+		public static Html.HtmlAttr OnInput(InvocationId action) => Html.Attr(Attrs.Input, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnSubmit(ActionId action) => Html.Attr(Attrs.Submit, action.Value);
+		public static Html.HtmlAttr OnSubmit(InvocationId action) => Html.Attr(Attrs.Submit, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnKeyDown(ActionId action) => Html.Attr(Attrs.KeyDown, action.Value);
+		public static Html.HtmlAttr OnKeyDown(InvocationId action) => Html.Attr(Attrs.KeyDown, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnBlur(ActionId action) => Html.Attr(Attrs.Blur, action.Value);
+		public static Html.HtmlAttr OnBlur(InvocationId action) => Html.Attr(Attrs.Blur, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnHover(ActionId action) => Html.Attr(Attrs.Hover, action.Value);
+		public static Html.HtmlAttr OnHover(InvocationId action) => Html.Attr(Attrs.Hover, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnVisible(ActionId action) => Html.Attr(Attrs.Visible, action.Value);
+		public static Html.HtmlAttr OnVisible(InvocationId action) => Html.Attr(Attrs.Visible, action.Value);
 		/// <summary>
 		/// Invokes the action whenever the document transitions from hidden to visible.
 		/// </summary>
-		public static Html.HtmlAttr OnDocumentVisible(ActionId action) => Html.Attr(Attrs.DocumentVisible, action.Value);
+		public static Html.HtmlAttr OnDocumentVisible(InvocationId action) => Html.Attr(Attrs.DocumentVisible, action.Value);
 		/// <summary>
 		/// Invokes the action when the browser reports that network connectivity has returned.
 		/// </summary>
-		public static Html.HtmlAttr OnOnline(ActionId action) => Html.Attr(Attrs.Online, action.Value);
+		public static Html.HtmlAttr OnOnline(InvocationId action) => Html.Attr(Attrs.Online, action.Value);
 		/// <summary>
 		/// Specifies a trigger that will cause the element to send a request to the server, and the associated action to invoke on the server when that trigger occurs.
 		/// </summary>
 		/// <param name="action"></param>
 		/// <returns></returns>
-		public static Html.HtmlAttr OnScroll(ActionId action) => Html.Attr(Attrs.Scroll, action.Value);
+		public static Html.HtmlAttr OnScroll(InvocationId action) => Html.Attr(Attrs.Scroll, action.Value);
 
 	}
 }

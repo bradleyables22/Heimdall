@@ -1,7 +1,7 @@
-﻿
+
 namespace Heimdall.Server.Registry
 {
-    internal enum ContentActionParameterKind
+    internal enum ContentInvocationParameterKind
     {
         HttpContext,
         CancellationToken,

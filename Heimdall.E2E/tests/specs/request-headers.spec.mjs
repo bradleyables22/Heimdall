@@ -16,7 +16,7 @@ async function testAsyncRequestHeadersReachHostedAction(page, baseUrl) {
         hasSignal: !!context.signal
       });
 
-      if (context.kind !== "content-action")
+      if (context.kind !== "content-invocation")
         return {};
 
       context.headers.Authorization = "Bearer hosted-jwt";
@@ -38,7 +38,7 @@ async function testAsyncRequestHeadersReachHostedAction(page, baseUrl) {
   assert.equal(state.ok, true);
   assert.equal(state.status, 200);
   assert.equal(state.text, "Bearer hosted-jwt|async-provider");
-  const actionContext = state.contexts.find(context => context.kind === "content-action");
+  const actionContext = state.contexts.find(context => context.kind === "content-invocation");
   assert.ok(actionContext);
   assert.equal(actionContext.actionId, "e2e.request-headers");
   assert.ok(actionContext.requestId > 0);
@@ -78,7 +78,7 @@ async function testHostedUnauthorizedEventCanTakeControl(page, baseUrl) {
   assert.equal(state.ok, false);
   assert.equal(state.status, 401);
   assert.equal(state.events.length, 1);
-  assert.equal(state.events[0].kind, "content-action");
+  assert.equal(state.events[0].kind, "content-invocation");
   assert.equal(state.events[0].actionId, "e2e.unauthorized");
   assert.equal(state.events[0].status, 401);
   assert.match(state.events[0].body, /Authentication required/);

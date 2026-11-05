@@ -18,7 +18,7 @@ async function testRequestSynchronization(page, baseUrl) {
   const actionPayloads = [];
   page.on("request", request => {
     const url = new URL(request.url());
-    if (url.searchParams.get("action") !== "e2e.sync")
+    if (url.searchParams.get("invocation") !== "e2e.sync")
       return;
 
     try {
@@ -167,7 +167,7 @@ async function testRequestSynchronization(page, baseUrl) {
 async function testQueuedStateAndTargetRefresh(page, baseUrl) {
   const requests = [];
   page.on("request", request => {
-    const actionId = new URL(request.url()).searchParams.get("action");
+    const actionId = new URL(request.url()).searchParams.get("invocation");
     if (actionId !== "e2e.sync.state" &&
         actionId !== "e2e.sync.outer-target" &&
         actionId !== "e2e.sync")

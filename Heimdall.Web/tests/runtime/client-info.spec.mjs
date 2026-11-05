@@ -211,7 +211,7 @@ async function testClientInfoLifecycleCustomization(page) {
 
   const actions = actionFetches(await getFetches(page));
   const byAction = new Map(actions.map(action => [
-    action.headers["x-heimdall-content-action"],
+    action.headers["x-heimdall-content-invocation"],
     action.headers["x-heimdall-client-info"]
   ]));
   const mutated = JSON.parse(byAction.get("ClientInfo.Mutated"));

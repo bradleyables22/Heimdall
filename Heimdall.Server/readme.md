@@ -2,7 +2,7 @@
 
 `HeimdallFramework.Server` is the ASP.NET Core server runtime for [Heimdall](https://heimdall-framework.org), an HTML-first framework for server-driven applications.
 
-The package provides the server-side building blocks for Heimdall applications, including request handling, content actions, real-time updates, MVC and static Razor component integration, and static site generation. Its HTML rendering foundation is provided by the transitive `HeimdallFramework.Rendering` dependency. Interactive applications normally pair it with `HeimdallFramework.Web`, which supplies the browser runtime.
+The package provides the server-side building blocks for Heimdall applications, including request handling, content invocations, real-time updates, MVC and static Razor component integration, and static site generation. Its HTML rendering foundation is provided by the transitive `HeimdallFramework.Rendering` dependency. Interactive applications normally pair it with `HeimdallFramework.Web`, which supplies the browser runtime.
 
 > [heimdall-framework.org](https://heimdall-framework.org) is the source of truth for installation, setup, features, APIs, configuration, security, and deployment. This package README intentionally avoids duplicating details that change as the framework evolves.
 
@@ -23,11 +23,47 @@ dotnet add package HeimdallFramework.Bootstrap
 
 Continue with the current guide and examples at [heimdall-framework.org](https://heimdall-framework.org).
 
+## Library content discovery
+
+Reusable libraries can contribute Heimdall content without taking ownership of the application's core setup. The
+application calls `AddHeimdall()` once, while a library's own registration extension can add the assembly containing
+its content invocation methods:
+
+```csharp
+public static IServiceCollection AddCompanyAdmin(
+    this IServiceCollection services)
+{
+    services.AddHeimdallInvocationAssembly<CompanyAdminHeimdallMarker>();
+    services.AddScoped<IAdminRepository, AdminRepository>();
+    return services;
+}
+```
+
+The consuming application only needs to opt into the library:
+
+```csharp
+builder.Services
+    .AddHeimdall()
+    .AddCompanyAdmin();
+```
+
+`AddHeimdallInvocationAssembly<TMarker>()` registers the assembly containing `TMarker` for discovery. The registration is
+additive, deduplicated, and can be made before or after `AddHeimdall()`. Heimdall scans the registered assemblies when
+the content registry is created; it does not instantiate or change the lifetime of discovered types. Use another marker
+when a library keeps its Heimdall content in a separate assembly.
+
+## Content invocation transport
+
+The canonical browser-to-server endpoint is `POST /__heimdall/v1/content/invocations`. It selects the registered
+method with the `X-Heimdall-Content-Invocation` header; the invocation ID is also included as the `invocation` query
+parameter by the browser runtime. The previous `/__heimdall/v1/content/actions` route and
+`X-Heimdall-Content-Action` header remain accepted as compatibility aliases during migration.
+
 ## HTML return types
 
-Content actions, pages, static-site pages, and Bifrost accept any ASP.NET Core `IHtmlContent` implementation, not only methods declared with the interface return type. That includes concrete types such as `HtmlString` and `HtmlContentBuilder`, as well as `IHtmlAsyncContent` implementations.
+Content invocations, pages, static-site pages, and Bifrost accept any ASP.NET Core `IHtmlContent` implementation, not only methods declared with the interface return type. That includes concrete types such as `HtmlString` and `HtmlContentBuilder`, as well as `IHtmlAsyncContent` implementations.
 
-Asynchronous actions can return `Task<THtml>` or `ValueTask<THtml>` when `THtml` implements `IHtmlContent`. Heimdall detects `IHtmlAsyncContent` and awaits its `WriteToAsync` method before sending the HTML response, generating a static page, or publishing a Bifrost message. Use `ToHtmlStringAsync()` when application code needs to materialize HTML explicitly.
+Asynchronous invocations can return `Task<THtml>` or `ValueTask<THtml>` when `THtml` implements `IHtmlContent`. Heimdall detects `IHtmlAsyncContent` and awaits its `WriteToAsync` method before sending the HTML response, generating a static page, or publishing a Bifrost message. Use `ToHtmlStringAsync()` when application code needs to materialize HTML explicitly.
 
 `FluentHtml` also provides async callback overloads for its element, fragment, and nested builder helpers. Await the returned content and use an async lambda when a builder needs to await application work:
 
@@ -187,13 +223,13 @@ Disconnecting through the store or `Bifrost.DisconnectSubscribers(selector, reas
 
 ## Diagnostics
 
-The server runtime emits dependency-free `ActivitySource` traces and `System.Diagnostics.Metrics` instruments for content actions and Bifrost. Register `HeimdallDiagnostics.ActivitySourceName` and `HeimdallDiagnostics.MeterName` with your OpenTelemetry providers. Public activity, metric, and tag names are available as constants on `HeimdallDiagnostics`.
+The server runtime emits dependency-free `ActivitySource` traces and `System.Diagnostics.Metrics` instruments for content invocations and Bifrost. Register `HeimdallDiagnostics.ActivitySourceName` and `HeimdallDiagnostics.MeterName` with your OpenTelemetry providers. Public activity, metric, and tag names are available as constants on `HeimdallDiagnostics`; canonical names use `ContentInvocation...` and `InvocationIdTagName`.
 
-Diagnostics include action outcomes, durations, exceptions, cancellations, request and rendered response sizes, active SSE connections and subscribers, and Bifrost message delivery outcomes. Action payloads, user identities, and Bifrost topic names are not included.
+Diagnostics include invocation outcomes, durations, exceptions, cancellations, request and rendered response sizes, active SSE connections and subscribers, and Bifrost message delivery outcomes. Invocation payloads, user identities, and Bifrost topic names are not included.
 
 ## Antiforgery configuration
 
-Antiforgery validation is enabled by default. A specific content action—or every action on a declaring type—can opt out using ASP.NET Core's native metadata:
+Antiforgery validation is enabled by default. A specific content invocation—or every invocation on a declaring type—can opt out using ASP.NET Core's native metadata:
 
 ```csharp
 using Microsoft.AspNetCore.Antiforgery;
@@ -206,7 +242,7 @@ public static IHtmlContent Receive(WebhookPayload payload)
 }
 ```
 
-Method metadata overrides declaring-type metadata. Disable validation globally for all Heimdall content actions and Bifrost subscribe-token requests through service configuration:
+Method metadata overrides declaring-type metadata. Disable validation globally for all Heimdall content invocations and Bifrost subscribe-token requests through service configuration:
 
 ```csharp
 builder.Services.AddHeimdall(options =>
@@ -215,13 +251,25 @@ builder.Services.AddHeimdall(options =>
 });
 ```
 
-The global switch is authoritative and defaults to `true`. When disabling it, also set `Heimdall.config.antiforgery = false` in the browser before actions or SSE subscriptions start so the runtime does not request or send CSRF tokens. Disabling antiforgery is appropriate only when another protection makes cross-site requests harmless, such as an API that does not use ambient cookie authentication.
+The global switch is authoritative and defaults to `true`. When disabling it, also set `Heimdall.config.antiforgery = false` in the browser before invocations or SSE subscriptions start so the runtime does not request or send CSRF tokens. Disabling antiforgery is appropriate only when another protection makes cross-site requests harmless, such as an API that does not use ambient cookie authentication.
 
 When Heimdall antiforgery is globally disabled, Heimdall itself does not require `AddAntiforgery()` or `UseAntiforgery()`. Keep those registrations when other application endpoints still use ASP.NET Core antiforgery. Bifrost's signed subscribe tokens continue to use data protection independently.
 
+## Collection payloads
+
+Inputs sharing a `name` submit multiple values under that field name. Arrays, `List<T>`, `IEnumerable<T>`, `ICollection<T>`, `IList<T>`, `IReadOnlyCollection<T>`, and `IReadOnlyList<T>` accept either a single value or an array, both as payload properties and as the invocation's payload parameter:
+
+```csharp
+[ContentInvocation("people.save")]
+public static IHtmlContent Save([ContentPayload] string[] names)
+    => Html.Span(string.Join(", ", names));
+```
+
+For inputs named `names`, `{ "names": "Alice" }` binds to a one-item array and `{ "names": ["Alice", "Bob"] }` binds to a two-item array. JSON, multipart, and URL-encoded forms support this binding; `[FromForm(Name = "...")]` can alias the field name for form-only parameters. Repeated values retain their order, duplicates, and empty strings. Missing and explicitly null values retain the normal payload defaults. Dictionaries keep their object representation, and `byte[]` keeps its base64 string representation.
+
 ## Client browser information
 
-Applications can opt in to a bounded browser-capability snapshot on content-action requests. Declare `HeimdallClientInfo` like another framework-provided action parameter; it does not consume the action's payload slot:
+Applications can opt in to a bounded browser-capability snapshot on content-invocation requests. Declare `HeimdallClientInfo` like another framework-provided invocation parameter; it does not consume the invocation's payload slot:
 
 ```csharp
 [ContentInvocation("dashboard.render")]
@@ -238,11 +286,11 @@ public static IHtmlContent Render(
 
 Enable collection in the browser with `Heimdall.config.clientInfo = true`. The model includes locale/languages, IANA timezone and current UTC offset, viewport and screen dimensions, pixel ratio, orientation, color/motion/contrast preferences, forced colors, online state, and pointer/touch/hover capabilities. `DeviceCategory` is only a mobile/tablet/desktop heuristic.
 
-When an action binds `HeimdallClientInfo`, the serialized `X-Heimdall-Client-Info` header is capped at 4096 characters; malformed or oversized values receive `400 Bad Request`. Every property is untrusted client input and must never control authorization, pricing, auditing, or other security-sensitive behavior. Cross-origin applications must allow this header in their CORS policy.
+When an invocation binds `HeimdallClientInfo`, the serialized `X-Heimdall-Client-Info` header is capped at 4096 characters; malformed or oversized values receive `400 Bad Request`. Every property is untrusted client input and must never control authorization, pricing, auditing, or other security-sensitive behavior. Cross-origin applications must allow this header in their CORS policy.
 
 ## File uploads
 
-Content actions accept uploaded files as `IFormFile`, `IFormFileCollection`, `IFormFile[]`, or the common generic file collection interfaces. File parameters bind by parameter name and can be combined with the action's normal payload parameter:
+Content invocations accept uploaded files as `IFormFile`, `IFormFileCollection`, `IFormFile[]`, or the common generic file collection interfaces. File parameters bind by parameter name and can be combined with the invocation's normal payload parameter:
 
 ```csharp
 var form = FluentHtml.Form(form =>
@@ -276,13 +324,13 @@ Forms containing file inputs are sent as `multipart/form-data` by the Heimdall b
 
 `[FromForm]` is optional for the usual multipart payload, but makes the form-only contract explicit and prevents a registered payload type from being mistaken for a service. Its standard `Name` property aliases payload prefixes and file field names. A form-only payload rejects JSON with `415 Unsupported Media Type`.
 
-Heimdall honors ASP.NET Core's native `[RequestSizeLimit]`, `[DisableRequestSizeLimit]`, and `[RequestFormLimits]` metadata on content-action methods and declaring types. Method metadata overrides type metadata, while the application's configured `FormOptions` remains the baseline. Limit violations return `413 Payload Too Large`. The request-size limit covers the complete encoded request; the multipart body limit applies to each multipart section, so leave room for form fields and multipart framing when setting both.
+Heimdall honors ASP.NET Core's native `[RequestSizeLimit]`, `[DisableRequestSizeLimit]`, and `[RequestFormLimits]` metadata on content-invocation methods and declaring types. Method metadata overrides type metadata, while the application's configured `FormOptions` remains the baseline. Limit violations return `413 Payload Too Large`. The request-size limit covers the complete encoded request; the multipart body limit applies to each multipart section, so leave room for form fields and multipart framing when setting both.
 
 Uploads are parsed through ASP.NET Core's buffered `IFormFile` pipeline. Keep the limits finite, validate file signatures rather than trusting extensions or `Content-Type`, generate storage names instead of using `FileName`, and use a dedicated streaming endpoint for files that are too large to buffer safely.
 
-## Content-action rate limiting
+## Content-invocation rate limiting
 
-Heimdall content actions support ASP.NET Core's native `[EnableRateLimiting]` and `[DisableRateLimiting]` metadata at the method or declaring-type level. Register the native rate-limiter services and middleware in the normal ASP.NET Core pipeline:
+Heimdall content invocations support ASP.NET Core's native `[EnableRateLimiting]` and `[DisableRateLimiting]` metadata at the method or declaring-type level. Register the native rate-limiter services and middleware in the normal ASP.NET Core pipeline:
 
 ```csharp
 builder.Services.AddRateLimiter(options =>
@@ -310,7 +358,7 @@ public static IHtmlContent Save(ProfilePayload payload)
 }
 ```
 
-Method-level metadata overrides declaring-type metadata. `[DisableRateLimiting]` skips both global and endpoint-specific rate limiting for that invocation. Heimdall preserves the existing shared content-action URL and selects the invocation endpoint before ASP.NET Core's rate-limiter middleware runs, so native policy registration, rejection handling, and metrics remain available.
+Method-level metadata overrides declaring-type metadata. `[DisableRateLimiting]` skips both global and endpoint-specific rate limiting for that invocation. Heimdall selects the invocation endpoint before ASP.NET Core's rate-limiter middleware runs, so native policy registration, rejection handling, and metrics remain available on both the canonical and compatibility routes.
 
 ## Browser-local time
 

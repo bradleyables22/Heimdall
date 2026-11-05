@@ -30,8 +30,8 @@ async function testClientStoragePayloadAndResponses(page, baseUrl) {
 async function testClientStorageAllowlist(page, baseUrl) {
   const requests = [];
   page.on("request", request => {
-    if (request.url().includes("/__heimdall/v1/content/actions") &&
-        request.headers()["x-heimdall-content-action"] === "e2e.client-info") {
+    if (request.url().includes("/__heimdall/v1/content/invocations") &&
+        request.headers()["x-heimdall-content-invocation"] === "e2e.client-info") {
       requests.push(request.headers()["x-heimdall-client-info"]);
     }
   });

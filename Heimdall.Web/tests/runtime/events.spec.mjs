@@ -27,7 +27,7 @@ async function testClickTrigger(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Buttons.Save");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Buttons.Save");
 }
 
 async function testDelegatedScopeAndIgnore(page) {
@@ -74,7 +74,7 @@ async function testDelegatedScopeAndIgnore(page) {
   await page.click("#outer-ignored");
 
   const actions = actionFetches(await getFetches(page));
-  assert.deepEqual(actions.map(action => action.headers["x-heimdall-content-action"]), [
+  assert.deepEqual(actions.map(action => action.headers["x-heimdall-content-invocation"]), [
     "Scope.Self",
     "Ignore.Inside"
   ]);
@@ -101,7 +101,7 @@ async function testDelegatedKeydown(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Keys.Enter");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Keys.Enter");
 }
 
 async function testInputDebounce(page) {
@@ -134,7 +134,7 @@ async function testInputDebounce(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Search.Query");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Search.Query");
   assert.deepEqual(actions[0].jsonBody, { q: "ab" });
 }
 
@@ -170,7 +170,7 @@ async function testHoverDelayCancel(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Hover.Show");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Hover.Show");
 }
 
 async function testBootRootLoadTrigger(page) {
@@ -193,7 +193,7 @@ async function testBootRootLoadTrigger(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Load.Root");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Load.Root");
 }
 
 async function testMutationObserverBoot(page) {
@@ -213,7 +213,7 @@ async function testMutationObserverBoot(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.equal(actions.length, 1);
-  assert.equal(actions[0].headers["x-heimdall-content-action"], "Load.Dynamic");
+  assert.equal(actions[0].headers["x-heimdall-content-invocation"], "Load.Dynamic");
 }
 
 export const tests = [

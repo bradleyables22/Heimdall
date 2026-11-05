@@ -8,7 +8,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Rendering</PackageId>
-		<Version>4.0.1</Version>
+		<Version>5.0.0</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Standalone server-side HTML and Heimdall markup rendering primitives and FluentHtml builders.</Description>

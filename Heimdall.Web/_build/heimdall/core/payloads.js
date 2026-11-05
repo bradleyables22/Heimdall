@@ -5,7 +5,7 @@ import {
     safeJsonParse
 } from "./utils.js";
 
-export function createPayloadResolver(global) {
+export function createPayloadResolver(global, resolvePluginPayload) {
     function findClosestStateElement(el, key) {
         let cur = el;
         while (cur && cur.nodeType === 1) {
@@ -103,6 +103,11 @@ export function createPayloadResolver(global) {
 
         const fromRaw = (getAttr(el, "heimdall-payload-from") || "").trim();
         const from = fromRaw.toLowerCase();
+
+        if (from.startsWith("plugin:")) {
+            if (!resolvePluginPayload) throw new Error("Plugin payload sources are unavailable.");
+            return resolvePluginPayload(fromRaw.substring("plugin:".length).trim(), el);
+        }
 
         // closest-state[:key]
         if (from === "closest-state" || from.startsWith("closest-state:")) {

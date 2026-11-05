@@ -170,7 +170,7 @@ async function testFilePayloadSources(page) {
 
   const actions = actionFetches(await getFetches(page));
   assert.deepEqual(
-    actions.map(action => action.headers["x-heimdall-content-action"]),
+    actions.map(action => action.headers["x-heimdall-content-invocation"]),
     ["Files.Selector", "Files.Closest"]
   );
   for (const action of actions) {

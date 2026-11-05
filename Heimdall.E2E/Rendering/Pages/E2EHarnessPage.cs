@@ -171,6 +171,7 @@ document.addEventListener("heimdall:offline", function(event) {
 					p.Class(Bs.Text.BodySecondary)
 					.Text("Stable browser scenarios for Heimdall server/runtime integration tests.");
 				})
+				.A(link => link.Href("/e2e/plugins").Text("Open the standalone plugin workbench"))
 				.Add(
 					blazorComponent,
 					RenderLoadSection(),

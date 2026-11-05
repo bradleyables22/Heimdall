@@ -1,0 +1,15 @@
+.plugin-workbench {
+    --test-plugin-stylesheet: loaded;
+    max-width: 64rem;
+    margin: 2rem auto;
+    font-family: system-ui, sans-serif;
+}
+
+.plugin-workbench h2 { margin-top: 1.5rem; }
+.plugin-controls { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
+.plugin-controls button { padding: .4rem .75rem; }
+.plugin-editor { display: block; width: 100%; min-height: 6rem; padding: .75rem; border: 2px solid #64748b; }
+.plugin-editor[data-plugin-ready="true"] { border-color: #0e7490; }
+.plugin-status { padding: .5rem 0; }
+#plugin-extra-slot { display: grid; gap: .75rem; }
+#plugin-command-log { max-height: 12rem; overflow: auto; font-family: monospace; }

@@ -143,28 +143,28 @@ async function testFluentLocalTime(page, baseUrl) {
     id: "e2e-local-time-load-result",
     connected: false,
     locale: "en",
-    origin: "action",
+    origin: "invocation",
     kind: "main"
   });
   assert.deepEqual(eventFor("e2e-local-time-action-composite"), {
     id: "e2e-local-time-action-composite",
     connected: false,
     locale: "en",
-    origin: "action",
+    origin: "invocation",
     kind: "main"
   });
   assert.deepEqual(eventFor("e2e-local-time-oob-side-result"), {
     id: "e2e-local-time-oob-side-result",
     connected: false,
     locale: "fr-FR",
-    origin: "action",
+    origin: "invocation",
     kind: "invocation"
   });
   assert.deepEqual(eventFor("e2e-local-time-oob-main-result"), {
     id: "e2e-local-time-oob-main-result",
     connected: false,
     locale: "en",
-    origin: "action",
+    origin: "invocation",
     kind: "main"
   });
   assert.ok(eventFor(

@@ -10,6 +10,7 @@ export function createHeimdallRuntime({
     boot,
     onReady,
     clearCsrfToken,
+    plugins,
     sseConnect,
     sseDisconnect,
     sseDisconnectAll,
@@ -62,6 +63,7 @@ export function createHeimdallRuntime({
         ];
 
         const obs = new MutationObserver((mutations) => {
+            plugins.observe(mutations);
             for (const m of mutations) {
                 if (m.type === "attributes") {
                     if (m.target && m.target.nodeType === 1)
@@ -78,13 +80,14 @@ export function createHeimdallRuntime({
             if (pending.size) scheduleFlush();
         });
 
-        obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter });
-        if (document.documentElement && document.documentElement !== document.body) {
+        function observe() {
             obs.observe(document.documentElement, {
-                attributes: true,
-                attributeFilter: ["lang"]
+                childList: true, subtree: true, attributes: true,
+                ...(plugins.hasPlugins() ? {} : { attributeFilter })
             });
         }
+        observe();
+        plugins.onRegistryChanged(observe);
         Heimdall._observer = obs;
 
         dbg("MutationObserver installed");
@@ -97,6 +100,13 @@ export function createHeimdallRuntime({
         boot,
         onReady,
         clearCsrfToken,
+        pluginApiVersion: plugins.pluginApiVersion,
+        use(plugin, options) {
+            plugins.use(plugin, options);
+            return Heimdall;
+        },
+        plugins: Object.freeze({ list: plugins.list, remove: plugins.remove }),
+        dispose: plugins.dispose,
 
         sse: {
             connect: sseConnect,
@@ -111,7 +121,7 @@ export function createHeimdallRuntime({
             apiVersion,
 
             endpoints: {
-                contentActions: defaultContentEndpoint,
+                contentInvocations: defaultContentEndpoint,
                 csrf: defaultCsrfEndpoint,
                 bifrostToken: defaultBifrostTokenEndpoint,
                 bifrost: defaultBifrostEndpoint
@@ -140,6 +150,11 @@ export function createHeimdallRuntime({
             scrollMinIntervalMs: 250,
             requestSync: "parallel",
             requestTimeoutMs: 0,
+            pluginMountTimeoutMs: 10000,
+            pluginCommandTimeoutMs: 10000,
+            pluginCommandMaxArgsChars: 65536,
+            pluginCommandMaxCount: 256,
+            pluginSseQueueLimit: 128,
 
             // NOTE: visibleRootMargin and visibleThreshold are read once when
             // the IntersectionObserver is first created. Set these values before
@@ -158,6 +173,19 @@ export function createHeimdallRuntime({
             ssePauseWhenHidden: false
         }
     };
+
+    // Keep the old endpoint property as a source-compatible alias. Both names
+    // always point at the same configured endpoint.
+    Object.defineProperty(Heimdall.config.endpoints, "contentActions", {
+        configurable: true,
+        enumerable: true,
+        get() {
+            return Heimdall.config.endpoints.contentInvocations;
+        },
+        set(value) {
+            Heimdall.config.endpoints.contentInvocations = value;
+        }
+    });
 
     if (typeof onRuntimeCreated === "function")
         onRuntimeCreated(Heimdall);
@@ -178,6 +206,7 @@ export function createHeimdallRuntime({
             document.addEventListener("mouseout", handlers.handleMouseOut, false);
         }
 
+        plugins.start();
         boot(document);
         installObserver();
         installPageLifecycle();

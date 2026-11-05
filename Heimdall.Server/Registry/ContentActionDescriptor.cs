@@ -1,4 +1,4 @@
-﻿using Heimdall.Server.Registry;
+using Heimdall.Server.Registry;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Html;
 using Microsoft.AspNetCore.Http.Metadata;
@@ -9,20 +9,20 @@ using System.Reflection;
 
 namespace Heimdall.Server
 {
-    internal sealed class ContentActionDescriptor
+    internal sealed class ContentInvocationDescriptor
     {
         private readonly Func<object?, object?[], object?> _invoker;
         private readonly Func<object, ValueTask<IHtmlContent?>>? _asyncResultAwaiter;
         private readonly ObjectFactory? _instanceFactory;
         private readonly Type? _instanceType;
 
-        public string ActionId { get; }
+        public string InvocationId { get; }
 
         public MethodInfo Method { get; }
 
-        public IReadOnlyList<ContentActionParameterDescriptor> Parameters { get; }
+        public IReadOnlyList<ContentInvocationParameterDescriptor> Parameters { get; }
 
-        public ContentActionReturnKind ReturnKind { get; }
+        public ContentInvocationReturnKind ReturnKind { get; }
 
         public RequestTimeoutAttribute? RequestTimeout { get; }
 
@@ -44,15 +44,15 @@ namespace Heimdall.Server
 
         public bool HasPayload => PayloadParameter is not null;
 
-        public ContentActionParameterDescriptor? PayloadParameter { get; }
+        public ContentInvocationParameterDescriptor? PayloadParameter { get; }
 
         public Type? PayloadType => PayloadParameter?.ParameterType;
 
-        public ContentActionDescriptor(
-            string actionId,
+        public ContentInvocationDescriptor(
+            string invocationId,
             MethodInfo method,
-            IReadOnlyList<ContentActionParameterDescriptor> parameters,
-            ContentActionReturnKind returnKind,
+            IReadOnlyList<ContentInvocationParameterDescriptor> parameters,
+            ContentInvocationReturnKind returnKind,
             RequestTimeoutAttribute? requestTimeout,
             bool disableRequestTimeout,
             IReadOnlyList<IAuthorizeData> authorizeData,
@@ -62,7 +62,7 @@ namespace Heimdall.Server
             bool requiresAntiforgery,
             IReadOnlyList<object> rateLimitingMetadata)
         {
-            ActionId = actionId;
+            InvocationId = invocationId;
             Method = method;
             Parameters = parameters;
             ReturnKind = returnKind;
@@ -75,14 +75,14 @@ namespace Heimdall.Server
             RequiresAntiforgery = requiresAntiforgery;
             RateLimitingMetadata = rateLimitingMetadata;
             PayloadParameter = parameters.FirstOrDefault(x =>
-                x.Kind is ContentActionParameterKind.Payload or ContentActionParameterKind.FormPayload);
+                x.Kind is ContentInvocationParameterKind.Payload or ContentInvocationParameterKind.FormPayload);
             _invoker = CompileInvoker(method);
             _asyncResultAwaiter = returnKind switch
             {
-                ContentActionReturnKind.TaskHtml => CreateAsyncResultAwaiter(
+                ContentInvocationReturnKind.TaskHtml => CreateAsyncResultAwaiter(
                     method.ReturnType.GetGenericArguments()[0],
                     valueTask: false),
-                ContentActionReturnKind.ValueTaskHtml => CreateAsyncResultAwaiter(
+                ContentInvocationReturnKind.ValueTaskHtml => CreateAsyncResultAwaiter(
                     method.ReturnType.GetGenericArguments()[0],
                     valueTask: true),
                 _ => null
@@ -105,7 +105,7 @@ namespace Heimdall.Server
             if (result is null)
                 return null;
 
-            if (ReturnKind == ContentActionReturnKind.Html)
+            if (ReturnKind == ContentInvocationReturnKind.Html)
                 return (IHtmlContent)result;
 
             if (_asyncResultAwaiter is not null)
@@ -128,7 +128,7 @@ namespace Heimdall.Server
             var factoryName = valueTask
                 ? nameof(CreateValueTaskAwaiter)
                 : nameof(CreateTaskAwaiter);
-            var factory = typeof(ContentActionDescriptor).GetMethod(
+            var factory = typeof(ContentInvocationDescriptor).GetMethod(
                 factoryName,
                 BindingFlags.Static | BindingFlags.NonPublic)
                 ?? throw new InvalidOperationException($"Unable to resolve the '{factoryName}' method.");
