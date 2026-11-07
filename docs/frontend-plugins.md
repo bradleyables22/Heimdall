@@ -1,5 +1,7 @@
 # Frontend plugins
 
+Attribute naming is shared with core through the [attribute registry and optional shortcuts plugin](attribute-shortcuts.md).
+
 Heimdall's plugin API extends browser interaction through managed element behaviors, custom triggers,
 payload sources, and registered response commands. Install plugins explicitly:
 
@@ -131,7 +133,9 @@ api.payloads.register({
 ```
 
 Default trigger attributes replace dots in the qualified name with hyphens. A plugin can provide an
-explicit `attribute`, but cannot override built-in trigger attributes. Native `events` are individual DOM
+explicit `attribute` and an `aliases` array; their names are registered in the shared core attribute
+registry. Plugins cannot claim original built-in names or conflicting aliases. Plugin-scoped
+`api.attributes.alias` can also provide shortcuts for existing attributes. Native `events` are individual DOM
 event names; `event` is shorthand for one name. Use `subscribe({ element, emit, signal })` instead for an SDK,
 legacy library, timer, or other event source. It can return a synchronous cleanup function. Call
 `emit(event)` to use markup payloads or `emit(null, { payload })` to submit an explicit snapshot.

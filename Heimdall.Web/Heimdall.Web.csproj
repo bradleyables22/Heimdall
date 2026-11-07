@@ -12,11 +12,13 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Web</PackageId>
-		<Version>5.0.0</Version>
+		<Version>5.1.0</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
-		<Description>Heimdall JavaScript library.</Description>
-		<PackageTags>heimdall framework;html;ssr;MVC;javascript;aspnetcore;rcl</PackageTags>
+		<Description>Heimdall browser runtime, frontend plugin SDK, shared attribute aliases, and optional hd attribute shortcuts as Razor Class Library assets.</Description>
+		<PackageTags>heimdall framework;html;ssr;MVC;javascript;aspnetcore;rcl;plugins;attributes;shortcuts</PackageTags>
+		<PackageProjectUrl>https://heimdall-framework.org</PackageProjectUrl>
+		<PackageReleaseNotes>Adds the shared attribute alias registry, optional hd.shortcuts scripts, plugin trigger aliases, and plugin-owned alias lifecycle support. Canonical attributes and response directives remain supported. See https://heimdall-framework.org/attribute-shortcuts.</PackageReleaseNotes>
 
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
@@ -86,7 +88,7 @@
 			BeforeTargets="PrepareForBuild;GenerateNuspec;ComputeFilesToPublish"
 			Condition="'$(RunHeimdallJavaScriptBuild)' == 'true'"
 			Inputs="@(HeimdallJavaScriptInput)"
-			Outputs="$(IntermediateOutputPath)heimdall-js-build.stamp;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.js;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.min.js">
+			Outputs="$(IntermediateOutputPath)heimdall-js-build.stamp;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.js;$(MSBuildProjectDirectory)\wwwroot\heimdall-bundle.min.js;$(MSBuildProjectDirectory)\wwwroot\heimdall-shortcuts.js;$(MSBuildProjectDirectory)\wwwroot\heimdall-shortcuts.min.js">
 		<Message Text="Building Heimdall JavaScript bundle..." Importance="high" />
 		<Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="node build.mjs" />
 		<Touch Files="$(IntermediateOutputPath)heimdall-js-build.stamp" AlwaysCreate="true" />

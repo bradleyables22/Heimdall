@@ -367,3 +367,10 @@ FodyWeavers.xsd
 /.dotnet/
 /.dotnet-cli-home/
 /.templateengine/
+
+# Local validation projects, previews, and generated documentation artifacts
+/tmp/
+
+# Keep versioned release notes in source control.
+!/docs/releases/
+!/docs/releases/*.md

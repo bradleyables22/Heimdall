@@ -1,5 +1,11 @@
 # HeimdallFramework.Server changelog
 
+## [5.1.0] - 2026-11-07
+
+### Changed
+
+- Updated the transitive `HeimdallFramework.Rendering` dependency to 5.1.0 so Server applications receive the shared fluent attribute API, Razor Tag Helper, and typed Blazor content adapters.
+
 ## [4.0.1] - 2026-11-05
 
 ### Added

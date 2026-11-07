@@ -4,6 +4,26 @@ Notable changes to the Heimdall solution are recorded here. Package-specific det
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released packages use semantic versioning.
 
+## [5.1.0] - 2026-11-07
+
+### Added
+
+- Added the complete `Heimdall` fluent API for Blazor `@attributes` and a shared `heimdall` Razor Tag Helper in `HeimdallFramework.Rendering`, with canonical output, immutable reuse, local-time fallbacks, fragment helpers, and typed Blazor content adapters.
+- Added the public `Heimdall.attributes` registry for built-in and plugin trigger attributes, including application aliases, explicit overrides, undo, and plugin-owned cleanup.
+- Added optional `heimdall-shortcuts.js` and `heimdall-shortcuts.min.js` assets that automatically enable the `hd-*` preset.
+- Added plugin trigger aliases and shared plugin attribute readers/registration, including atomic rollback and cleanup.
+
+### Changed
+
+- Coordinated `HeimdallFramework.Rendering`, `HeimdallFramework.Server`, and `HeimdallFramework.Web` at version 5.1.0; Server depends on Rendering 5.1.0. Bootstrap remains 5.0.1.
+- Updated the documentation website with complete fluent-authoring and attribute-shortcut references and related integration guidance.
+
+### Fixed
+
+- Preserved explicit `false` values for `PreventDefault`, `VisibleOnce`, and `SseDisable` so rendering adapters and repeated fluent setters can override defaults.
+
+See [5.1.0 release notes](docs/releases/5.1.0.md) for package contents, setup, and upgrade guidance.
+
 ## [4.0.1] - 2026-11-05
 
 ### Added
@@ -57,8 +77,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Re-resolved selector targets after queued or OOB DOM replacement, cancelled requests whose direct target or state source disappeared, and preserved lifecycle target overrides.
 - Kept disabled/busy UI state active until the current replacement request actually finishes.
 
-## Published package baseline
+## Package versions for 5.1.0
 
-- `HeimdallFramework.Server` 3.0.9 — 2026-08-30
-- `HeimdallFramework.Web` 3.0.9 — 2026-08-30
-- `HeimdallFramework.Bootstrap` 5.0.1 — 2026-06-24
+- `HeimdallFramework.Rendering` 5.1.0
+- `HeimdallFramework.Server` 5.1.0
+- `HeimdallFramework.Web` 5.1.0
+- `HeimdallFramework.Bootstrap` 5.0.1 (unchanged)

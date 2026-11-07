@@ -1,12 +1,12 @@
-import { getAttr } from "./utils.js";
-
 export function createPageLifecycleRuntime({
     global,
+    attributes,
     runInvocationFromElement,
     emit
 }) {
+    const getAttr = attributes.get;
     function invokeMatching(attr, triggerName) {
-        const elements = document.querySelectorAll(`[${attr}]`);
+        const elements = document.querySelectorAll(attributes.selector(attr));
         for (const el of elements) {
             const actionId = (getAttr(el, attr) || "").trim();
             if (!actionId)

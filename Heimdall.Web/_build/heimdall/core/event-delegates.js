@@ -1,13 +1,9 @@
-import {
-    getAttr,
-    intAttr,
-    truthyAttr
-} from "./utils.js";
-
 export function createEventDelegates({
+    attributes,
     getConfig,
     runInvocationFromElement
 }) {
+    const { get: getAttr, int: intAttr, truthy: truthyAttr } = attributes;
     function parseTokenList(value) {
         return String(value || "")
             .split(/\s+/)
@@ -57,7 +53,7 @@ export function createEventDelegates({
         if (!target || !target.closest)
             return null;
 
-        const actionEl = target.closest(`[${triggerAttr}]`);
+        const actionEl = target.closest(attributes.selector(triggerAttr));
         if (!actionEl)
             return null;
 
@@ -114,6 +110,7 @@ export function createEventDelegates({
         const ms = intAttr(el, "heimdall-debounce", 0);
         if (ms > 0) {
             scheduleDebounced(el, "change", ms, () => {
+                if (!el.isConnected || getAttr(el, "heimdall-content-change") !== actionId) return;
                 runInvocationFromElement(el, actionId, "change").catch(() => { /* logged */ });
             });
             return;
@@ -162,6 +159,7 @@ export function createEventDelegates({
 
         if (ms > 0) {
             scheduleDebounced(el, "input", ms, () => {
+                if (!el.isConnected || getAttr(el, "heimdall-content-input") !== actionId) return;
                 runInvocationFromElement(el, actionId, "input").catch(() => { /* logged */ });
             });
             return;
@@ -281,6 +279,7 @@ export function createEventDelegates({
         if (delay > 0) {
             const tid = setTimeout(() => {
                 _hoverTimers.delete(el);
+                if (!el.isConnected || getAttr(el, "heimdall-content-hover") !== actionId) return;
                 runInvocationFromElement(el, actionId, "hover").catch(() => { /* logged */ });
             }, delay);
             _hoverTimers.set(el, tid);

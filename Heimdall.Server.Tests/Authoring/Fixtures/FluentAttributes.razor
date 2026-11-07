@@ -1,0 +1,18 @@
+@namespace Heimdall.Server.Tests.Authoring
+@using Heimdall.Server.Rendering
+@using Microsoft.AspNetCore.Components
+
+<form id="fluent-form" @attributes='Heimdall.OnSubmit(Save).PayloadFromClosestForm().Target("#result").SwapInner()'>
+    <input name="Name" value="@Name" @attributes='Heimdall.OnInput("orders.search").DebounceMs(300).SyncReplace()' />
+    <button id="fluent-button" @attributes="Button" heimdall-content-target="#explicit">Save</button>
+</form>
+<ForwardAttributes @attributes='Heimdall.OnClick(Save).Payload(new { Name }).Disable(false)' />
+<span id="fluent-time" @attributes="Time">@Time.FallbackText</span>
+<div id="fluent-content">@Heimdall.Markup(Heimdall.Fragment(fragment => fragment.Add(Html.Text(Name))))</div>
+
+@code {
+    private static readonly HeimdallHtml.InvocationId Save = "orders.save";
+    [Parameter] public string Name { get; set; } = "Ada";
+    [Parameter] public FluentHeimdall.HeimdallBuilder Button { get; set; } = Heimdall.OnClick(Save).Target("#default");
+    private static FluentHeimdall.HeimdallBuilder Time => Heimdall.LocalizeTime(new DateTimeOffset(2026, 8, 26, 18, 30, 5, TimeSpan.Zero), "yyyy-MM-dd");
+}

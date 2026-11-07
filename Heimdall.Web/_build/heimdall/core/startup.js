@@ -1,5 +1,7 @@
 export function createHeimdallRuntime({
     global,
+    attributes,
+    reconcileAttributes,
     apiVersion,
     defaultBasePath,
     defaultContentEndpoint,
@@ -20,6 +22,7 @@ export function createHeimdallRuntime({
     dbg,
     onRuntimeCreated
 }) {
+    let started = false;
     function installObserver() {
         if (!Heimdall.config.observeDom)
             return;
@@ -45,27 +48,11 @@ export function createHeimdallRuntime({
             Promise.resolve().then(flush);
         }
 
-        const attributeFilter = [
-            "heimdall-content-load",
-            "heimdall-content-visible",
-            "heimdall-content-scroll",
-            "heimdall-poll",
-            "heimdall-visible-once",
-            "heimdall-sse",
-            "heimdall-sse-topic",
-            "heimdall-sse-target",
-            "heimdall-sse-swap",
-            "heimdall-sse-event",
-            "heimdall-sse-disable",
-            "heimdall-time",
-            "heimdall-time-format",
-            "lang"
-        ];
-
         const obs = new MutationObserver((mutations) => {
             plugins.observe(mutations);
             for (const m of mutations) {
                 if (m.type === "attributes") {
+                    if (m.attributeName !== "lang" && !attributes.recognizes(m.attributeName)) continue;
                     if (m.target && m.target.nodeType === 1)
                         pending.add(m.target);
                     continue;
@@ -81,9 +68,9 @@ export function createHeimdallRuntime({
         });
 
         function observe() {
+            if (!Heimdall.config.observeDom) return;
             obs.observe(document.documentElement, {
-                childList: true, subtree: true, attributes: true,
-                ...(plugins.hasPlugins() ? {} : { attributeFilter })
+                childList: true, subtree: true, attributes: true
             });
         }
         observe();
@@ -100,6 +87,7 @@ export function createHeimdallRuntime({
         boot,
         onReady,
         clearCsrfToken,
+        attributes: attributes.publicApi,
         pluginApiVersion: plugins.pluginApiVersion,
         use(plugin, options) {
             plugins.use(plugin, options);
@@ -192,6 +180,11 @@ export function createHeimdallRuntime({
 
     global.Heimdall = Heimdall;
 
+    attributes.onChange(() => {
+        if (!started) return;
+        reconcileAttributes();
+    });
+
     onReady(() => {
         if (!document.__heimdallDelegatesInstalled) {
             document.__heimdallDelegatesInstalled = true;
@@ -207,6 +200,7 @@ export function createHeimdallRuntime({
         }
 
         plugins.start();
+        started = true;
         boot(document);
         installObserver();
         installPageLifecycle();

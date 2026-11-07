@@ -1,20 +1,20 @@
 import {
     formDataToPayload,
-    getAttr,
     getByPath,
     safeJsonParse
 } from "./utils.js";
 
-export function createPayloadResolver(global, resolvePluginPayload) {
+export function createPayloadResolver(global, resolvePluginPayload, attributes) {
+    const getAttr = attributes.get;
     function findClosestStateElement(el, key) {
         let cur = el;
         while (cur && cur.nodeType === 1) {
             if (key) {
                 const attr = `data-heimdall-state-${key}`;
-                if (cur.hasAttribute && cur.hasAttribute(attr))
+                if (cur.hasAttribute && attributes.has(cur, attr))
                     return cur;
             } else {
-                if (cur.hasAttribute && cur.hasAttribute("data-heimdall-state"))
+                if (cur.hasAttribute && attributes.has(cur, "data-heimdall-state"))
                     return cur;
             }
             cur = cur.parentElement;
@@ -23,10 +23,10 @@ export function createPayloadResolver(global, resolvePluginPayload) {
     }
 
     function readStateAttribute(host, attr) {
-        if (!host || !host.hasAttribute || !host.hasAttribute(attr))
+        if (!host || !host.hasAttribute || !attributes.has(host, attr))
             return null;
 
-        const raw = host.getAttribute(attr);
+        const raw = getAttr(host, attr);
         if (!raw)
             return null;
 
@@ -45,7 +45,7 @@ export function createPayloadResolver(global, resolvePluginPayload) {
             attribute,
             value: readStateAttribute(host, attribute),
             resolve() {
-                if (host.isConnected === false || !host.hasAttribute(attribute)) {
+                if (host.isConnected === false || !attributes.has(host, attribute)) {
                     return {
                         available: false,
                         value: null

@@ -28,6 +28,7 @@ import { tests as sseDelivery } from "./runtime/sse-delivery.spec.mjs";
 import { tests as sseReconnect } from "./runtime/sse-reconnect.spec.mjs";
 import { tests as sseLifecycle } from "./runtime/sse-lifecycle.spec.mjs";
 import { tests as plugins } from "./runtime/plugins.spec.mjs";
+import { tests as attributes } from "./runtime/attributes.spec.mjs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const runtimes = [
@@ -60,7 +61,8 @@ const tests = [
   ...sseDelivery,
   ...sseReconnect,
   ...sseLifecycle,
-  ...plugins
+  ...plugins,
+  ...attributes
 ].filter(([name]) => !process.env.HEIMDALL_TEST_FILTER || name.includes(process.env.HEIMDALL_TEST_FILTER));
 
 function withTimeout(promise, label, ms = 8000) {

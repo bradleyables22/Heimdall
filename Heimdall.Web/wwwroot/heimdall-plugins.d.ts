@@ -1,3 +1,26 @@
+/** A canonical behavior attribute or a named-state prefix (ending in -*). */
+export interface AttributeDefinition {
+    readonly name: string;
+    readonly owner: string;
+    readonly category: "trigger" | "content" | "payload" | "modifier" | "sse" | "time" | "state" | "plugin-trigger";
+    readonly kind: "attribute" | "prefix";
+    readonly aliases: readonly string[];
+}
+
+export interface AttributeRegistry {
+    list(): readonly AttributeDefinition[];
+    /** Originals remain valid. Returns an idempotent function that removes this registration. */
+    alias(mappings: Readonly<Record<string, string | readonly string[]>>, options?: {
+        /** Explicitly reassign an existing alias; disposing restores its previous live mapping. */
+        replace?: boolean;
+    }): () => void;
+    /** Original first, then its active aliases. Named state accepts a concrete key suffix. */
+    names(original: string): readonly string[];
+    get(element: Element, original: string): string | null;
+    has(element: Element, original: string): boolean;
+    selector(original: string): string;
+}
+
 /** Public frontend extension contract. Plugin API versions are independent of the HTTP API version. */
 export interface HeimdallPlugin<TOptions = void> {
     readonly id: string;
@@ -12,6 +35,8 @@ export interface PluginApi {
     readonly pluginApiVersion: 1;
     /** Aborted when installation rolls back or the plugin is removed. */
     readonly signal: AbortSignal;
+    /** Aliases registered here are owned by this plugin and removed on rollback/disposal. */
+    readonly attributes: AttributeRegistry;
     readonly behaviors: { register(definition: BehaviorDefinition): string };
     readonly triggers: { register(definition: TriggerDefinition): string };
     readonly payloads: { register(definition: PayloadDefinition): string };
@@ -54,6 +79,8 @@ export interface TriggerDefinition {
     name: string;
     /** Defaults to heimdall-content-{plugin-id}-{local-name}, with dots replaced by hyphens. */
     attribute?: string;
+    /** Additional spellings for this trigger, registered in the shared core registry. */
+    aliases?: readonly string[];
     event?: string;
     events?: readonly string[];
     subscribe?(context: TriggerContext): void | (() => void);
@@ -138,6 +165,7 @@ export interface InvokeResult {
 export interface PluginHost {
     readonly pluginApiVersion: 1;
     readonly apiVersion: number;
+    readonly attributes: AttributeRegistry;
     use<TOptions>(plugin: HeimdallPlugin<TOptions>, ...options: TOptions extends void ? [options?: TOptions] : [options: TOptions]): this;
     readonly plugins: {
         list(): readonly InstalledPlugin[];

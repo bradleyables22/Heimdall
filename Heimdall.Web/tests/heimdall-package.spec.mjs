@@ -91,12 +91,16 @@ try {
   assert.ok(packageEntries.includes("staticwebassets/heimdall-bundle.js"), "Package should contain generated runtime.");
   assert.ok(packageEntries.includes("staticwebassets/heimdall-bundle.min.js"), "Package should contain minified generated runtime.");
   assert.ok(packageEntries.includes("staticwebassets/heimdall-plugins.d.ts"), "Package should contain the public plugin types.");
+  assert.ok(packageEntries.includes("staticwebassets/heimdall-shortcuts.js"), "Package should contain the optional shortcuts plugin.");
+  assert.ok(packageEntries.includes("staticwebassets/heimdall-shortcuts.min.js"), "Package should contain the minified shortcuts plugin.");
   assertNoInternalFiles(packageEntries, "Package");
 
   const publishEntries = listFilesRecursive(publishDir);
   assert.ok(publishEntries.includes("wwwroot/heimdall-bundle.js"), "Publish output should contain generated runtime.");
   assert.ok(publishEntries.includes("wwwroot/heimdall-bundle.min.js"), "Publish output should contain minified generated runtime.");
   assert.ok(publishEntries.includes("wwwroot/heimdall-plugins.d.ts"), "Publish output should contain the public plugin types.");
+  assert.ok(publishEntries.includes("wwwroot/heimdall-shortcuts.js"), "Publish output should contain the optional shortcuts plugin.");
+  assert.ok(publishEntries.includes("wwwroot/heimdall-shortcuts.min.js"), "Publish output should contain the minified shortcuts plugin.");
   assertNoInternalFiles(publishEntries, "Publish output");
 
   console.log("Heimdall package shape tests passed.");

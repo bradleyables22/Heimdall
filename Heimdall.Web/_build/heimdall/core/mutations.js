@@ -1,6 +1,6 @@
 import { getAttr, isElement } from "./utils.js";
 
-export function createMutationRuntime({ global, emitLifecycle, dbg, boot, busyState, plugins }) {
+export function createMutationRuntime({ global, attributes, emitLifecycle, dbg, boot, busyState, plugins }) {
     function mutationError(sourceEl, directive, context, code, message, error) {
         const detail = {
             origin: context && context.kind ? context.kind : "invocation",
@@ -134,7 +134,7 @@ export function createMutationRuntime({ global, emitLifecycle, dbg, boot, busySt
             return false;
 
         const name = String(operation.name || "").toLowerCase();
-        return name === "lang" || name.startsWith("heimdall-");
+        return name === "lang" || attributes.recognizes(name);
     }
 
     function apply(directive, sourceEl, context) {

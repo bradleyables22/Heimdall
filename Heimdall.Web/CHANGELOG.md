@@ -1,5 +1,17 @@
 # HeimdallFramework.Web changelog
 
+## [5.1.0] - 2026-11-07
+
+### Added
+
+- Added a shared, public attribute registry for all 38 built-in element attribute names, named-state prefixes, and registered plugin triggers. Aliases support late registration, explicit reassignment, undo, and plugin-owned cleanup while keeping original names valid.
+- Added optional `heimdall-shortcuts.js` and `heimdall-shortcuts.min.js` plugins that automatically install the `hd-*` and `data-hd-state*` shortcuts.
+- Added trigger `aliases` and plugin-scoped `api.attributes` registration, with atomic rollback and shared collision validation. Custom plugin trigger attributes can use their own names.
+
+### Changed
+
+- Element discovery, payloads, trigger modifiers, time localization, SSE, DOM observation, and mutation reconciliation resolve registered aliases. Response directives retain their canonical attribute names.
+
 ## [4.0.1] - 2026-11-05
 
 ### Added

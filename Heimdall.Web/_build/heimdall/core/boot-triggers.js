@@ -1,17 +1,16 @@
 import {
-    getAttr,
-    intAttr,
-    isElement,
-    truthyAttr
+    isElement
 } from "./utils.js";
 
 export function createBootTriggers({
     global,
+    attributes,
     getConfig,
     runInvocationFromElement
 }) {
+    const { get: getAttr, int: intAttr, truthy: truthyAttr } = attributes;
     function matchesTriggerAttr(el, attr) {
-        return isElement(el) && el.hasAttribute(attr);
+        return isElement(el) && attributes.has(el, attr);
     }
 
     function candidates(root, selector) {
@@ -56,7 +55,7 @@ export function createBootTriggers({
     }
 
     function bootLoads(root) {
-        for (const el of candidates(root, "[heimdall-content-load]"))
+        for (const el of candidates(root, attributes.selector("heimdall-content-load")))
             reconcileLoad(el);
     }
 
@@ -142,7 +141,7 @@ export function createBootTriggers({
     }
 
     function bootVisible(root) {
-        for (const el of candidates(root, "[heimdall-content-visible]"))
+        for (const el of candidates(root, attributes.selector("heimdall-content-visible")))
             reconcileVisible(el);
     }
 
@@ -218,7 +217,7 @@ export function createBootTriggers({
     }
 
     function bootScroll(root) {
-        for (const el of candidates(root, "[heimdall-content-scroll]"))
+        for (const el of candidates(root, attributes.selector("heimdall-content-scroll")))
             reconcileScroll(el);
     }
 
@@ -300,8 +299,19 @@ export function createBootTriggers({
     }
 
     function bootPoll(root) {
-        for (const el of candidates(root, "[heimdall-poll]"))
+        for (const el of candidates(root, attributes.selector("heimdall-poll")))
             reconcilePoll(el);
+    }
+
+    function reconcileAttributes(root) {
+        // Registry edits are infrequent. Walk once to include elements whose old
+        // aliases no longer match, without retaining strong references to them.
+        for (const el of candidates(root, "*")) {
+            if (_loadActions.has(el) || attributes.has(el, "heimdall-content-load")) reconcileLoad(el);
+            if (_visibleStates.has(el) || attributes.has(el, "heimdall-content-visible")) reconcileVisible(el);
+            if (_scrollStates.has(el) || attributes.has(el, "heimdall-content-scroll")) reconcileScroll(el);
+            if (_pollStates.has(el) || attributes.has(el, "heimdall-poll")) reconcilePoll(el);
+        }
     }
 
     return {
@@ -309,6 +319,7 @@ export function createBootTriggers({
         bootPoll,
         bootScroll,
         bootVisible,
+        reconcileAttributes,
         matchesTriggerAttr
     };
 }

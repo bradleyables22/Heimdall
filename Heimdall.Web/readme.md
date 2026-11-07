@@ -14,6 +14,23 @@ dotnet add package HeimdallFramework.Web
 
 Use the package through its Razor Class Library asset. See [the current documentation](https://heimdall-framework.org) for the supported asset reference and application setup.
 
+## Attribute shortcuts
+
+Load the optional shortcuts script after the core runtime to enable all built-in `hd-*` attributes and
+the `data-hd-state*` state mappings automatically:
+
+```html
+<script src="/_content/HeimdallFramework.Web/heimdall-bundle.min.js"></script>
+<script src="/_content/HeimdallFramework.Web/heimdall-shortcuts.min.js"></script>
+```
+
+For example, `hd-click`, `hd-target`, and `hd-from` resolve to the canonical click, target, and payload-source
+attributes. Original names remain valid. `Heimdall.attributes` exposes the shared alias catalog and readers;
+applications and plugins can register their own shortcuts with explicit override and cleanup support.
+Readable scripts and `heimdall-plugins.d.ts` are included. Response directives retain their canonical names.
+See [Attribute Shortcuts and Aliases](https://heimdall-framework.org/attribute-shortcuts) for every mapping
+and the plugin registration contract.
+
 Forms containing file inputs are submitted as `multipart/form-data`; other declarative form payloads remain JSON. `Heimdall.invoke` also accepts a browser `FormData` instance for programmatic uploads.
 
 Antiforgery token requests and headers are enabled by default. Applications whose Heimdall server has antiforgery validation disabled can turn off the corresponding browser work before invocations or SSE subscriptions start:

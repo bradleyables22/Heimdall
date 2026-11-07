@@ -1,9 +1,7 @@
 import {
     formDataToPayload,
-    getAttr,
     resolveTarget,
-    safeText,
-    truthyAttr
+    safeText
 } from "./utils.js";
 import {
     getAuthRedirectUrlFromResponse,
@@ -14,6 +12,7 @@ import { emitUnauthorized } from "./unauthorized.js";
 
 export function createInvocationInvoker({
     global,
+    attributes,
     getConfig,
     ensureCsrfToken,
     clearCsrfToken,
@@ -34,6 +33,7 @@ export function createInvocationInvoker({
     csrfHeader,
     clientInfoHeader
 }) {
+    const { get: getAttr, truthy: truthyAttr } = attributes;
     let nextRequestId = 0;
     const payloadStates = new WeakMap();
     const targetStates = new WeakMap();

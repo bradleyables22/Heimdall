@@ -1,4 +1,5 @@
 import { createInvocationInvoker } from "./core/actions.js";
+import { createAttributeRegistry } from "./core/attributes.js";
 import { createBootTriggers } from "./core/boot-triggers.js";
 import { createBusyStateManager } from "./core/busy-state.js";
 import { createClientInfoRuntime } from "./core/client-info.js";
@@ -346,8 +347,9 @@ import {
     const runtimeRef = { current: null };
     const getRuntimeConfig = () => runtimeRef.current && runtimeRef.current.config;
     const { emit, emitLifecycle, dbg } = createDiagnostics(getRuntimeConfig);
-    const plugins = createPluginRuntime({ global, getConfig: getRuntimeConfig, emitLifecycle, dbg });
-    const { payloadBindingFromElement } = createPayloadResolver(global, plugins.readPayload);
+    const attributes = createAttributeRegistry();
+    const plugins = createPluginRuntime({ global, attributes, getConfig: getRuntimeConfig, emitLifecycle, dbg });
+    const { payloadBindingFromElement } = createPayloadResolver(global, plugins.readPayload, attributes);
     const coordinator = createRequestCoordinator({
         global,
         dbg
@@ -364,6 +366,7 @@ import {
     });
     const timeLocalization = createTimeLocalization({
         global,
+        attributes,
         emitLifecycle,
         dbg
     });
@@ -381,6 +384,7 @@ import {
     });
     const mutations = createMutationRuntime({
         global,
+        attributes,
         emitLifecycle,
         dbg,
         boot: root => boot(root),
@@ -419,6 +423,7 @@ import {
         runInvocationFromElement
     } = createInvocationInvoker({
         global,
+        attributes,
         getConfig: getRuntimeConfig,
         ensureCsrfToken,
         clearCsrfToken,
@@ -451,6 +456,7 @@ import {
         resolveTriggerElement,
         scheduleDebounced
     } = createEventDelegates({
+        attributes,
         getConfig: getRuntimeConfig,
         runInvocationFromElement
     });
@@ -459,25 +465,30 @@ import {
         bootPoll,
         bootScroll,
         bootVisible,
+        reconcileAttributes: reconcileBootAttributes,
         matchesTriggerAttr
     } = createBootTriggers({
         global,
+        attributes,
         getConfig: getRuntimeConfig,
         runInvocationFromElement
     });
     const pageLifecycle = createPageLifecycleRuntime({
         global,
+        attributes,
         runInvocationFromElement,
         emit
     });
     const {
         bootSse,
+        reconcileAttributes: reconcileSseAttributes,
         installSseSweeper,
         sseConnect,
         sseDisconnect,
         sseDisconnectAll
     } = createSseRuntime({
         global,
+        attributes,
         getConfig: getRuntimeConfig,
         emit,
         dbg,
@@ -504,6 +515,13 @@ import {
 
     const Heimdall = createHeimdallRuntime({
         global,
+        attributes,
+        reconcileAttributes() {
+            timeLocalization.localize(document, { origin: "boot" });
+            plugins.boot(document);
+            reconcileBootAttributes(document);
+            reconcileSseAttributes(document);
+        },
         apiVersion: API_VERSION,
         defaultBasePath: DEFAULT_BASE_PATH,
         defaultContentEndpoint: DEFAULT_CONTENT_ENDPOINT,

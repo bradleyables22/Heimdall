@@ -52,6 +52,6 @@ namespace Heimdall.Server.Rendering
 		/// <param name="on"></param>
 		/// <returns></returns>
 		public static Html.HtmlAttr SseDisable(bool on = true)
-			=> Html.Bool(Attrs.SseDisable, on);
+			=> on ? Html.Bool(Attrs.SseDisable, true) : Html.Attr(Attrs.SseDisable, "false");
 	}
 }

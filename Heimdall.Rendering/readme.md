@@ -12,6 +12,27 @@ dotnet add package HeimdallFramework.Rendering
 
 Applications using `HeimdallFramework.Server` receive this package transitively. Install it directly when you want to author complete server-rendered Heimdall markup without the Heimdall server execution pipeline.
 
+## Blazor and Razor attributes
+
+Import `Heimdall.Server.Rendering` to use the complete `Heimdall` fluent API. Blazor components can apply
+its reusable attribute configurations directly:
+
+```razor
+<button @attributes='Heimdall.OnClick("orders.refresh").Target("#orders")'>Refresh</button>
+```
+
+MVC/Razor Pages views can use the same chain through the `heimdall` Tag Helper. Register it in
+`_ViewImports.cshtml` with `@addTagHelper *, Heimdall.Rendering`:
+
+```cshtml
+<button heimdall='Heimdall.OnClick("orders.refresh").Target("#orders")'>Refresh</button>
+```
+
+Both produce canonical long-form attributes. The API includes triggers, payloads/state, modifiers,
+synchronization, SSE, plugin helpers, local time, and renderable fragment/directive helpers.
+See [Fluent Attributes in Blazor and Razor](https://heimdall-framework.org/fluent-attributes) for the full
+API, immutable configurations, precedence, time fallbacks, and synchronous/asynchronous content adapters.
+
 ## FluentHtml
 
 ```csharp

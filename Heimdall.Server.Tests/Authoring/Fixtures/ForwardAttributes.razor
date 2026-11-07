@@ -1,0 +1,9 @@
+@namespace Heimdall.Server.Tests.Authoring
+@using Microsoft.AspNetCore.Components
+
+<button id="forwarded" @attributes="AdditionalAttributes">Forwarded</button>
+
+@code {
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
+}

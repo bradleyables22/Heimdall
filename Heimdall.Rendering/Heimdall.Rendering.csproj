@@ -8,11 +8,13 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Rendering</PackageId>
-		<Version>5.0.0</Version>
+		<Version>5.1.0</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
-		<Description>Standalone server-side HTML and Heimdall markup rendering primitives and FluentHtml builders.</Description>
-		<PackageTags>heimdall framework;html;fluent;SSR;aspnetcore;rendering;attributes;directives</PackageTags>
+		<Description>Server-side HTML and FluentHtml builders, shared Heimdall fluent attributes for Blazor and Razor, Tag Helpers, and typed response directives.</Description>
+		<PackageTags>heimdall framework;html;fluent;SSR;aspnetcore;rendering;attributes;directives;Blazor;Razor;TagHelpers</PackageTags>
+		<PackageProjectUrl>https://heimdall-framework.org</PackageProjectUrl>
+		<PackageReleaseNotes>Adds the complete Heimdall fluent API for Blazor attributes and MVC/Razor Tag Helpers, immutable configurations, time fallbacks, fragment helpers, and typed content adapters. Preserves explicit false flags. See https://heimdall-framework.org/fluent-attributes.</PackageReleaseNotes>
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>

@@ -2,7 +2,7 @@
 
 This directory contains the maintainable source for the Heimdall browser runtime. Product usage belongs in the [Heimdall documentation](https://heimdall-framework.org); this README covers only the local contributor workflow.
 
-The build uses `heimdall.entry.js` as its entry point and writes the readable and minified browser bundles under `Heimdall.Web/wwwroot`. Files in `wwwroot` are generated output and should not be edited directly.
+The build uses `heimdall.entry.js` for the runtime and `heimdall-shortcuts.js` for the optional shortcuts plugin. It writes readable and minified browser assets under `Heimdall.Web/wwwroot`. Generated JavaScript in `wwwroot` should not be edited directly; `heimdall-plugins.d.ts` is the maintained public type contract.
 
 ## Build
 

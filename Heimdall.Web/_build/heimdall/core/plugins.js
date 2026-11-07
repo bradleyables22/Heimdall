@@ -1,11 +1,5 @@
-import { intAttr, truthyAttr } from "./utils.js";
-
 const PLUGIN_API_VERSION = 1;
 const validName = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$/;
-const reservedTriggers = new Set([
-    "load", "click", "change", "input", "submit", "keydown", "blur", "hover",
-    "visible", "scroll", "document-visible", "online", "target", "swap", "disable"
-]);
 
 function abortError() {
     return new DOMException("Plugin operation was cancelled.", "AbortError");
@@ -53,7 +47,8 @@ function snapshot(value, global) {
     return value == null ? value : JSON.parse(JSON.stringify(value));
 }
 
-export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
+export function createPluginRuntime({ global, attributes, getConfig, emitLifecycle, dbg }) {
+    const { int: intAttr, truthy: truthyAttr } = attributes;
     const installed = new Map();
     const registries = {
         behaviors: new Map(), triggers: new Map(), payloads: new Map(), commands: new Map()
@@ -105,14 +100,17 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
             if (other.requires.includes(id))
                 throw new Error(`Plugin '${id}' is required by '${other.id}'.`);
         }
-        installed.delete(id);
-        owner.controller.abort();
-        for (const definition of owner.definitions) {
-            registries[definition.kind].delete(definition.name);
-            for (const [element, record] of definition.instances || [])
-                disposeRecord(definition, element, record);
-        }
-        for (const callback of owner.cleanup.reverse()) invokeCleanup(owner, callback);
+        attributes.transaction(() => {
+            installed.delete(id);
+            owner.controller.abort();
+            for (const definition of owner.definitions) {
+                registries[definition.kind].delete(definition.name);
+                for (const [element, record] of definition.instances || [])
+                    disposeRecord(definition, element, record);
+            }
+            for (const callback of owner.cleanup.reverse()) invokeCleanup(owner, callback);
+            attributes.removeOwner(owner);
+        });
         registryChanged();
         return true;
     }
@@ -141,7 +139,7 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
         }
         const owner = {
             id, plugin, options, version: plugin.version || null, requires: [...requires],
-            controller: new AbortController(), definitions: [], cleanup: []
+            controller: new AbortController(), definitions: [], cleanup: [], attributes: new Set()
         };
         let installing = true;
         const assertInstalling = () => {
@@ -167,13 +165,6 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
                 definition.observedAttributes = [...(descriptor.observedAttributes || [])];
             } else if (kind === "triggers") {
                 const attribute = descriptor.attribute || `heimdall-content-${name.replace(/\./g, "-")}`;
-                if (!/^heimdall-content-[a-z][a-z0-9-]*$/.test(attribute) ||
-                    reservedTriggers.has(attribute.substring("heimdall-content-".length)))
-                    throw new Error(`Trigger attribute '${attribute}' is invalid or reserved.`);
-                for (const other of [...registries.triggers.values(), ...owner.definitions]) {
-                    if (other.kind === "triggers" && other.attribute === attribute)
-                        throw new Error(`Trigger attribute '${attribute}' is already registered.`);
-                }
                 const events = descriptor.events || (descriptor.event ? [descriptor.event] : []);
                 if (!Array.isArray(events) || events.some(e => typeof e !== "string" || !e || /\s/.test(e)))
                     throw new TypeError("Trigger events must be an array of individual DOM event names.");
@@ -183,6 +174,9 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
                 if (descriptor.filter != null && typeof descriptor.filter !== "function")
                     throw new TypeError("A trigger filter must be a function.");
                 definition.events = [...events];
+                if (descriptor.aliases != null && !Array.isArray(descriptor.aliases))
+                    throw new TypeError("Trigger aliases must be an array of attribute names.");
+                attributes.register(attribute, owner, descriptor.aliases || []);
             } else if (kind === "payloads") {
                 if (typeof descriptor.read !== "function" ||
                     !["trigger", "execution"].includes(descriptor.timing || "trigger"))
@@ -198,6 +192,7 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
         const api = {
             pluginId: id, pluginApiVersion: PLUGIN_API_VERSION,
             signal: owner.controller.signal,
+            attributes: attributes.scoped(owner, assertInstalling),
             invoke: (invocationId, payload, options = {}) => {
                 if (owner.controller.signal.aborted) return Promise.reject(abortError());
                 if (installed.get(id) !== owner)
@@ -228,14 +223,21 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
         for (const kind of Object.keys(registries))
             api[kind] = Object.freeze({ register: descriptor => register(kind, descriptor) });
         try {
-            const result = plugin.install(Object.freeze(api), options);
-            if (result && typeof result.then === "function") {
-                Promise.resolve(result).catch(() => {});
-                throw new TypeError("Plugin install must be synchronous. Async work belongs in element behaviors.");
-            }
-            if (result !== undefined && typeof result !== "function")
-                throw new TypeError("Plugin install may return a cleanup function or undefined.");
-            if (result) owner.cleanup.push(result);
+            attributes.transaction(() => {
+                const result = plugin.install(Object.freeze(api), options);
+                if (result && typeof result.then === "function") {
+                    Promise.resolve(result).catch(() => {});
+                    throw new TypeError("Plugin install must be synchronous. Async work belongs in element behaviors.");
+                }
+                if (result !== undefined && typeof result !== "function")
+                    throw new TypeError("Plugin install may return a cleanup function or undefined.");
+                if (result) owner.cleanup.push(result);
+                // Reconciliation after committing attributes may mount plugin code.
+                // Its registration API must already be sealed at that point.
+                installing = false;
+                installed.set(id, owner);
+                for (const definition of owner.definitions) registries[definition.kind].set(definition.name, definition);
+            });
         } catch (error) {
             owner.controller.abort();
             for (const callback of owner.cleanup.reverse()) invokeCleanup(owner, callback);
@@ -244,14 +246,12 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
         } finally {
             installing = false;
         }
-        installed.set(id, owner);
-        for (const definition of owner.definitions) registries[definition.kind].set(definition.name, definition);
         registryChanged();
         if (started) host.boot(global.document);
     }
 
     function signature(definition, element) {
-        return JSON.stringify((definition.observedAttributes || []).map(a => element.getAttribute(a)));
+        return JSON.stringify((definition.observedAttributes || []).map(a => attributes.get(element, a)));
     }
 
     function mountBehavior(definition, element) {
@@ -334,7 +334,7 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
             if (truthyAttr(element, "heimdall-prevent-default", !!definition.preventDefault)) event?.preventDefault?.();
             const invoke = () => {
                 if (record.controller.signal.aborted || !element.isConnected) return;
-                return host.runInvocationFromElement(element, element.getAttribute(definition.attribute),
+                return host.runInvocationFromElement(element, attributes.get(element, definition.attribute),
                     definition.name, { ...submitted, event });
             };
             const delay = intAttr(element, "heimdall-debounce", Number(definition.debounceMs || 0));
@@ -374,7 +374,7 @@ export function createPluginRuntime({ global, getConfig, emitLifecycle, dbg }) {
         if (!root || (root.nodeType === 1 && !root.isConnected)) return;
         for (const kind of ["behaviors", "triggers"]) {
             for (const definition of registries[kind].values()) {
-                const selector = kind === "behaviors" ? definition.selector : `[${definition.attribute}]`;
+                const selector = kind === "behaviors" ? definition.selector : attributes.selector(definition.attribute);
                 for (const [element, record] of definition.instances) {
                     if (!element.isConnected || !element.matches(selector))
                         disposeRecord(definition, element, record);

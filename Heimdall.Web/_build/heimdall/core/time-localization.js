@@ -7,7 +7,7 @@ const MAXIMUM_FORMAT_LENGTH = 256;
 const MAXIMUM_CACHE_ENTRIES = 128;
 const STANDARD_FORMATS = new Set(["d", "D", "t", "T", "g", "G"]);
 
-export function createTimeLocalization({ global, emitLifecycle, dbg }) {
+export function createTimeLocalization({ global, attributes, emitLifecycle, dbg }) {
     const processedElements = new WeakMap();
     const formatterCache = new Map();
     const numberFormatterCache = new Map();
@@ -385,11 +385,11 @@ export function createTimeLocalization({ global, emitLifecycle, dbg }) {
 
     function collectCandidates(root) {
         const candidates = [];
-        if (isElement(root) && root.hasAttribute(TIME_ATTRIBUTE))
+        if (isElement(root) && attributes.has(root, TIME_ATTRIBUTE))
             candidates.push(root);
 
         if (root && typeof root.querySelectorAll === "function") {
-            for (const element of root.querySelectorAll(`[${TIME_ATTRIBUTE}]`))
+            for (const element of root.querySelectorAll(attributes.selector(TIME_ATTRIBUTE)))
                 candidates.push(element);
         }
 
@@ -397,8 +397,8 @@ export function createTimeLocalization({ global, emitLifecycle, dbg }) {
     }
 
     function localizeElement(element, options) {
-        const rawValue = element.getAttribute(TIME_ATTRIBUTE);
-        const rawFormat = element.getAttribute(FORMAT_ATTRIBUTE) || DEFAULT_FORMAT;
+        const rawValue = attributes.get(element, TIME_ATTRIBUTE);
+        const rawFormat = attributes.get(element, FORMAT_ATTRIBUTE) || DEFAULT_FORMAT;
         let timeZone;
         let locale;
         let signature;

@@ -1,14 +1,13 @@
 import {
-    getAttr,
     isElement,
-    resolveTarget,
-    truthyAttr
+    resolveTarget
 } from "./utils.js";
 
 const SERVER_DISCONNECT_EVENT = "heimdall:disconnect";
 
 export function createSseRuntime({
     global,
+    attributes,
     getConfig,
     emit,
     dbg,
@@ -20,6 +19,7 @@ export function createSseRuntime({
     plugins,
     defaultBifrostEndpoint
 }) {
+    const { get: getAttr, truthy: truthyAttr } = attributes;
     const _sseByElement = new WeakMap();
     const _sseStates = new Set();
     const _sseConnections = new Map();
@@ -922,8 +922,15 @@ export function createSseRuntime({
             attachSse(root);
         }
 
-        for (const el of scope.querySelectorAll("[heimdall-sse],[heimdall-sse-topic]"))
+        for (const el of scope.querySelectorAll(`${attributes.selector("heimdall-sse")},${attributes.selector("heimdall-sse-topic")}`))
             attachSse(el);
+    }
+
+    function reconcileAttributes(root) {
+        for (const state of Array.from(_sseStates)) {
+            if (!state.programmatic) attachSse(state.el);
+        }
+        bootSse(root);
     }
 
     let _sseSweepInstalled = false;
@@ -1039,6 +1046,7 @@ export function createSseRuntime({
 
     return {
         bootSse,
+        reconcileAttributes,
         installSseSweeper,
         sseConnect,
         sseDisconnect,

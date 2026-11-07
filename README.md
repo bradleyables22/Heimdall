@@ -19,7 +19,7 @@ Pages render as normal documents, interactions invoke server-side actions, and r
 | Package | Purpose |
 | --- | --- |
 | [`HeimdallFramework.Server`](https://www.nuget.org/packages/HeimdallFramework.Server) | ASP.NET Core server runtime, actions, pages, Bifrost, and static generation |
-| [`HeimdallFramework.Rendering`](https://www.nuget.org/packages/HeimdallFramework.Rendering) | Server-side HTML helpers and FluentHtml builders |
+| [`HeimdallFramework.Rendering`](https://www.nuget.org/packages/HeimdallFramework.Rendering) | HTML builders, shared Blazor/Razor fluent attributes, Tag Helpers, and typed fragments |
 | [`HeimdallFramework.Web`](https://www.nuget.org/packages/HeimdallFramework.Web) | Browser runtime distributed as Razor Class Library assets |
 | [`HeimdallFramework.Bootstrap`](https://www.nuget.org/packages/HeimdallFramework.Bootstrap) | Optional strongly typed Bootstrap class helpers |
 

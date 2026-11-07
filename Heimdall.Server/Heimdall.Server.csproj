@@ -8,11 +8,13 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Server</PackageId>
-		<Version>5.0.0</Version>
+		<Version>5.1.0</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall server-side middleware, endpoints, and action pipeline for HTML-first server invocations.</Description>
 		<PackageTags>heimdall framework;html;SSR;MVC;Razor;Blazor;Razor Components;rpc;aspnetcore;middleware;sse</PackageTags>
+		<PackageProjectUrl>https://heimdall-framework.org</PackageProjectUrl>
+		<PackageReleaseNotes>Updates the transitive HeimdallFramework.Rendering dependency to 5.1.0, including the shared Heimdall fluent API, Razor Tag Helper, and Blazor content adapters. See https://heimdall-framework.org/fluent-attributes.</PackageReleaseNotes>
 		<RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>

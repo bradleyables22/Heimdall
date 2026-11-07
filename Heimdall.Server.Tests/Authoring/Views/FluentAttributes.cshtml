@@ -1,0 +1,12 @@
+@model global::Heimdall.Server.Tests.Authoring.AuthoringModel
+
+<form id="razor-form" asp-controller="AuthoringFixture" asp-action="Save" method="post"
+      heimdall='Heimdall.OnSubmit("orders.save").PayloadFromClosestForm().Target("#result").SwapInner()'>
+    <input asp-for="Name" heimdall='Heimdall.OnInput("orders.search").DebounceMs(300).SyncReplace()' />
+    <button id="razor-button" heimdall='Heimdall.OnClick("orders.refresh").Target("#default").Payload(new { Model.Name }).Disable(false)'
+            heimdall-content-target="#explicit">Save</button>
+</form>
+<span id="razor-time" heimdall='Heimdall.LocalizeTime(Model.CreatedAt, "yyyy-MM-dd")'></span>
+<span id="razor-time-content" heimdall='Heimdall.LocalizeTime(Model.CreatedAt, "yyyy-MM-dd")'>Explicit fallback</span>
+<button id="razor-conditional" heimdall='Model.EnableBehavior ? Heimdall.OnClick("orders.optional") : null'>Optional</button>
+<div id="razor-content">@Heimdall.Fragment(fragment => fragment.Add(FluentHtml.Span(span => span.Text(Model.Name))))</div>

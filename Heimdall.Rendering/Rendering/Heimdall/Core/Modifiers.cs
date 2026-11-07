@@ -23,7 +23,8 @@ namespace Heimdall.Server.Rendering
 		/// <summary>
 		/// Prevents default browser behavior for the element.
 		/// </summary>
-		public static Html.HtmlAttr PreventDefault(bool on = true) => Html.Bool(Attrs.PreventDefault, on);
+		public static Html.HtmlAttr PreventDefault(bool on = true)
+			=> on ? Html.Bool(Attrs.PreventDefault, true) : Html.Attr(Attrs.PreventDefault, "false");
 
 		/// <summary>
 		/// Prevents Heimdall delegated trigger resolution from crossing this element for the specified triggers.
@@ -88,7 +89,7 @@ namespace Heimdall.Server.Rendering
 		/// Ensures a visible trigger runs only once.
 		/// </summary>
 		public static Html.HtmlAttr VisibleOnce(bool on = true)
-			=> Html.Bool(Attrs.VisibleOnce, on);
+			=> on ? Html.Bool(Attrs.VisibleOnce, true) : Html.Attr(Attrs.VisibleOnce, "false");
 
 		/// <summary>
 		/// Sets the scroll trigger threshold.

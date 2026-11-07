@@ -10,16 +10,29 @@ const staticAssetRoot = path.join(projectRoot, "wwwroot");
 const outputs = [
   {
     label: "readable",
+    entryFile: "heimdall.entry.js",
     minify: false,
     path: path.join(staticAssetRoot, "heimdall-bundle.js")
   },
   {
     label: "minified",
+    entryFile: "heimdall.entry.js",
     minify: true,
     path: path.join(staticAssetRoot, "heimdall-bundle.min.js")
+  },
+  {
+    label: "shortcuts",
+    entryFile: "heimdall-shortcuts.js",
+    minify: false,
+    path: path.join(staticAssetRoot, "heimdall-shortcuts.js")
+  },
+  {
+    label: "minified shortcuts",
+    entryFile: "heimdall-shortcuts.js",
+    minify: true,
+    path: path.join(staticAssetRoot, "heimdall-shortcuts.min.js")
   }
 ];
-const entryFile = "heimdall.entry.js";
 
 const verify = process.argv.includes("--verify");
 
@@ -37,7 +50,7 @@ function bytesEqual(a, b) {
   return true;
 }
 
-async function readRuntimeSource() {
+async function readRuntimeSource(entryFile) {
   const entryPath = path.join(sourceDir, entryFile);
   if (!existsSync(entryPath)) {
     throw new Error(`Missing Heimdall entrypoint: ${entryPath}`);
@@ -46,7 +59,7 @@ async function readRuntimeSource() {
   return readFile(entryPath, "utf8");
 }
 
-async function buildBundle(source, { minify }) {
+async function buildBundle(source, { minify, entryFile }) {
   const result = await esbuild.build({
     absWorkingDir: sourceDir,
     bundle: true,
@@ -67,10 +80,9 @@ async function buildBundle(source, { minify }) {
   return result.outputFiles[0].contents;
 }
 
-const source = await readRuntimeSource();
 const bundles = await Promise.all(outputs.map(async output => ({
   ...output,
-  bytes: await buildBundle(source, output)
+  bytes: await buildBundle(await readRuntimeSource(output.entryFile), output)
 })));
 
 if (verify) {
