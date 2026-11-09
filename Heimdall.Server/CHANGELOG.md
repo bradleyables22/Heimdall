@@ -1,5 +1,11 @@
 # HeimdallFramework.Server changelog
 
+## [5.2.0-preview.2] - Unreleased
+
+- Extracted content, antiforgery, and Bifrost HTTP handlers from ASP.NET Core endpoint registration.
+- Added `HeimdallRequestPipeline` for hosts supplying a live `HttpContext`, including the new isolated-worker Functions adapter.
+- Direct host dispatch rejects endpoint rate-limit policies that require ASP.NET Core endpoint middleware.
+
 ## [5.1.0] - 2026-11-07
 
 ### Changed

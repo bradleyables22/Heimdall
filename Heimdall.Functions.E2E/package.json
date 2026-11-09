@@ -1,0 +1,18 @@
+{
+  "name": "heimdall-functions-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "func start --port 7079",
+    "test": "node tests/e2e.mjs",
+    "test:keys": "node tests/e2e.mjs --keys",
+    "test:starter": "node tests/starter.mjs",
+    "prepare:starters": "pwsh -NoProfile -File tests/prepare-starters.ps1",
+    "test:starter:oidc": "node tests/starter.mjs --oidc",
+    "test:soak": "node tests/e2e.mjs --soak"
+  },
+  "devDependencies": {
+    "azure-functions-core-tools": "4.16.0",
+    "playwright": "1.59.1"
+  }
+}

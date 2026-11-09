@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <IsPackable>true</IsPackable>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+    <PackageId>HeimdallFramework.Functions</PackageId>
+    <Version>1.0.0-preview</Version>
+    <Authors>Bradley Ables</Authors>
+    <Description>Azure Functions isolated-worker hosting for the Heimdall HTML-first request pipeline.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>heimdall framework;html;ssr;aspnetcore;azure;azure functions;isolated worker;serverless;sse</PackageTags>
+    <PackageProjectUrl>https://heimdall-framework.org</PackageProjectUrl>
+    <PackageReleaseNotes>Initial 1.0.0 preview of the isolated-worker Azure Functions adapter, including the Heimdall HTTP pipeline, page routing, static web assets, authentication helpers, and Bifrost SSE dispatch.</PackageReleaseNotes>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageIcon>favicon.png</PackageIcon>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <ProjectReference Include="../Heimdall.Server/Heimdall.Server.csproj" />
+    <ProjectReference Include="../Heimdall.Web/Heimdall.Web.csproj" />
+    <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Favicon.png" Pack="true" PackagePath="favicon.png" />
+    <None Include="..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+    <None Include="CHANGELOG.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>

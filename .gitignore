@@ -121,6 +121,8 @@ ipch/
 # Visual Studio Trace Files
 *.e2e
 !Heimdall.E2E/
+!Heimdall.Functions.E2E/
+**/local.settings.json
 
 # TFS 2012 Local Workspace
 $tf/

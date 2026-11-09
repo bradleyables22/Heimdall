@@ -64,257 +64,7 @@ namespace Heimdall.Server
 
         internal static IEndpointRouteBuilder MapHeimdallContentEndpoints(this IEndpointRouteBuilder app)
         {
-            var logger = app.ServiceProvider
-                .GetService<ILoggerFactory>()
-                ?.CreateLogger("Heimdall.Server.ContentEndpoints");
-
-            Func<HttpContext, Task<IResult>> handler = async ctx =>
-            {
-                var registry = ctx.RequestServices.GetRequiredService<ContentInvocationRegistry>();
-                var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
-
-                using var telemetry = HeimdallTelemetry.StartContentInvocation(ctx);
-                var settings = options.Value;
-
-                var invocationId = GetInvocationId(ctx.Request);
-                var hasInvocationHeader = !string.IsNullOrWhiteSpace(invocationId);
-                ContentInvocationDescriptor? action = null;
-
-                if (hasInvocationHeader && registry.TryGet(invocationId, out var resolvedAction))
-                {
-                    action = resolvedAction;
-                    telemetry.SetInvocationId(action.InvocationId);
-
-                    var requestLimitResult = ApplyRequestLimits(ctx, action, settings);
-                    if (requestLimitResult is not null)
-                    {
-                        telemetry.Complete(StatusCodes.Status413PayloadTooLarge);
-                        return requestLimitResult;
-                    }
-                }
-
-                var requiresAntiforgery = settings.EnableAntiforgery &&
-                    (action?.RequiresAntiforgery ?? true);
-                if (requiresAntiforgery)
-                {
-                    var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-                    try
-                    {
-                        await antiforgery.ValidateRequestAsync(ctx);
-                    }
-                    catch (Exception ex) when (IsRequestTooLargeException(ex))
-                    {
-                        telemetry.RecordException(ex, StatusCodes.Status413PayloadTooLarge);
-                        logger?.LogWarning(
-                            ex,
-                            "Heimdall content invocation request body exceeded an ASP.NET Core request or form limit for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                            ctx.Request.Method,
-                            ctx.Request.Path,
-                            ctx.TraceIdentifier);
-
-                        return CreateRequestTooLargeResult(settings, ex);
-                    }
-                    catch (AntiforgeryValidationException ex)
-                    {
-                        telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
-                        logger?.LogWarning(
-                            ex,
-                            "Heimdall content invocation request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                            ctx.Request.Method,
-                            ctx.Request.Path,
-                            ctx.TraceIdentifier);
-
-                        if (settings.EnableDetailedErrors)
-                        {
-                            return Results.Problem(
-                                detail: ex.ToString(),
-                                title: "Invalid Heimdall antiforgery token",
-                                statusCode: StatusCodes.Status400BadRequest);
-                        }
-
-                        return Results.BadRequest("Invalid Heimdall antiforgery token.");
-                    }
-                }
-
-                if (!hasInvocationHeader)
-                {
-                    telemetry.SetInvocationId("missing");
-                    telemetry.Complete(StatusCodes.Status400BadRequest);
-                    return Results.BadRequest($"Missing {InvocationHeader} header.");
-                }
-
-                if (action is null)
-                {
-                    telemetry.SetInvocationId("unknown");
-                    telemetry.Complete(StatusCodes.Status404NotFound);
-                    return Results.NotFound($"Unknown invocation '{invocationId}'.");
-                }
-
-                telemetry.SetInvocationId(action.InvocationId);
-
-                IResult? authorizationResult;
-                try
-                {
-                    authorizationResult = await AuthorizeActionAsync(ctx, action);
-                }
-                catch (Exception ex)
-                {
-                    telemetry.RecordException(ex, StatusCodes.Status500InternalServerError);
-                    throw;
-                }
-
-                if (authorizationResult is not null)
-                {
-                    var authorizationStatusCode = ctx.Response.StatusCode;
-                    telemetry.Complete(
-                        authorizationStatusCode,
-                        outcome: authorizationStatusCode is >= 300 and < 400 ? "redirect" : null);
-                    return authorizationResult;
-                }
-
-                ContentInvocationTimeoutScope timeoutScope;
-                try
-                {
-                    timeoutScope = CreateRequestTimeoutScope(ctx, action);
-                }
-                catch (Exception ex)
-                {
-                    telemetry.RecordException(ex, StatusCodes.Status500InternalServerError);
-                    throw;
-                }
-
-                try
-                {
-                    var args = await BindArgumentsAsync(
-                        ctx,
-                        action,
-                        telemetry,
-                        settings.ClientInfoLimits ?? new());
-                    var raw = await action.InvokeAsync(ctx.RequestServices, args);
-
-                    if (raw is null)
-                    {
-                        telemetry.Complete(StatusCodes.Status204NoContent, responseBodySize: 0);
-                        return Results.NoContent();
-                    }
-
-                    var html = await raw.RenderHtmlAsync(ctx.RequestAborted).ConfigureAwait(false);
-                    long? responseBodySize = telemetry.ShouldMeasureResponseBodySize
-                        ? Encoding.UTF8.GetByteCount(html)
-                        : null;
-                    telemetry.Complete(
-                        StatusCodes.Status200OK,
-                        responseBodySize);
-                    return Results.Content(html, "text/html; charset=utf-8");
-                }
-                catch (OperationCanceledException) when (timeoutScope.TimedOut)
-                {
-                    var statusCode = timeoutScope.Policy?.TimeoutStatusCode ?? StatusCodes.Status504GatewayTimeout;
-                    logger?.LogWarning(
-                        "Heimdall invocation {InvocationId} timed out for {Method} {Path}; returning status {StatusCode}. TraceIdentifier: {TraceIdentifier}.",
-                        invocationId,
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        statusCode,
-                        ctx.TraceIdentifier);
-
-                    var result = await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
-                    telemetry.RecordCancellation("timeout", statusCode);
-                    return result;
-                }
-                catch (ContentInvocationBindingException ex)
-                {
-                    telemetry.RecordException(ex, ex.StatusCode);
-                    logger?.LogWarning(
-                        ex,
-                        "Invalid request body for Heimdall invocation {InvocationId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        invocationId,
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        ctx.TraceIdentifier);
-
-                    var title = ex.StatusCode == StatusCodes.Status413PayloadTooLarge
-                        ? "Heimdall invocation request body is too large"
-                        : "Invalid Heimdall invocation request body";
-
-                    if (settings.EnableDetailedErrors)
-                    {
-                        return Results.Problem(
-                            detail: ex.ToString(),
-                            title: title,
-                            statusCode: ex.StatusCode);
-                    }
-
-                    return Results.Problem(
-                        title: title,
-                        detail: ex.Message,
-                        statusCode: ex.StatusCode);
-                }
-                catch (JsonException ex)
-                {
-                    telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
-                    logger?.LogWarning(
-                        ex,
-                        "Invalid JSON body for Heimdall invocation {InvocationId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        invocationId,
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        ctx.TraceIdentifier);
-
-                    if (settings.EnableDetailedErrors)
-                    {
-                        return Results.Problem(
-                            detail: ex.ToString(),
-                            title: "Invalid Heimdall invocation request body",
-                            statusCode: StatusCodes.Status400BadRequest);
-                    }
-
-                    return Results.BadRequest("Invalid JSON request body.");
-                }
-                catch (Exception ex)
-                {
-                    var loggedException = UnwrapInvocationException(ex);
-                    if (loggedException is OperationCanceledException)
-                    {
-                        var cancellationReason = ctx.RequestAborted.IsCancellationRequested
-                            ? "request_aborted"
-                            : "operation_cancelled";
-                        telemetry.RecordCancellation(
-                            cancellationReason,
-                            StatusCodes.Status500InternalServerError);
-                    }
-                    else
-                    {
-                        telemetry.RecordException(
-                            loggedException,
-                            StatusCodes.Status500InternalServerError);
-                    }
-
-                    logger?.LogError(
-                        loggedException,
-                        "Heimdall invocation {InvocationId} failed for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                        invocationId,
-                        ctx.Request.Method,
-                        ctx.Request.Path,
-                        ctx.TraceIdentifier);
-
-                    if (settings.EnableDetailedErrors)
-                    {
-                        return Results.Problem(
-                            detail: loggedException.ToString(),
-                            title: "Heimdall invocation failed",
-                            statusCode: StatusCodes.Status500InternalServerError);
-                    }
-
-                    return Results.Problem(
-                        title: "Heimdall invocation failed",
-                        statusCode: StatusCodes.Status500InternalServerError);
-                }
-                finally
-                {
-                    timeoutScope.Dispose();
-                }
-            };
+            Func<HttpContext, Task<IResult>> handler = InvokeAsync;
 
             var registry = app.ServiceProvider.GetRequiredService<ContentInvocationRegistry>();
             foreach (var action in registry.Invocations)
@@ -346,6 +96,256 @@ namespace Heimdall.Server
                 => app.MapPost(pattern, invocationHandler)
                     .WithMetadata(new HeimdallContentInvocationEndpointMetadata(invocationId: null))
                     .ExcludeFromDescription();
+        }
+
+        internal static async Task<IResult> InvokeAsync(HttpContext ctx)
+        {
+            var logger = ctx.RequestServices.GetService<ILoggerFactory>()
+                ?.CreateLogger("Heimdall.Server.ContentEndpoints");
+            var registry = ctx.RequestServices.GetRequiredService<ContentInvocationRegistry>();
+            var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
+
+            using var telemetry = HeimdallTelemetry.StartContentInvocation(ctx);
+            var settings = options.Value;
+
+            var invocationId = GetInvocationId(ctx.Request);
+            var hasInvocationHeader = !string.IsNullOrWhiteSpace(invocationId);
+            ContentInvocationDescriptor? action = null;
+
+            if (hasInvocationHeader && registry.TryGet(invocationId, out var resolvedAction))
+            {
+                action = resolvedAction;
+                telemetry.SetInvocationId(action.InvocationId);
+
+                var requestLimitResult = ApplyRequestLimits(ctx, action, settings);
+                if (requestLimitResult is not null)
+                {
+                    telemetry.Complete(StatusCodes.Status413PayloadTooLarge);
+                    return requestLimitResult;
+                }
+            }
+
+            var requiresAntiforgery = settings.EnableAntiforgery &&
+                (action?.RequiresAntiforgery ?? true);
+            if (requiresAntiforgery)
+            {
+                var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
+                try
+                {
+                    await antiforgery.ValidateRequestAsync(ctx);
+                }
+                catch (Exception ex) when (IsRequestTooLargeException(ex))
+                {
+                    telemetry.RecordException(ex, StatusCodes.Status413PayloadTooLarge);
+                    logger?.LogWarning(
+                        ex,
+                        "Heimdall content invocation request body exceeded an ASP.NET Core request or form limit for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
+                    return CreateRequestTooLargeResult(settings, ex);
+                }
+                catch (AntiforgeryValidationException ex)
+                {
+                    telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
+                    logger?.LogWarning(
+                        ex,
+                        "Heimdall content invocation request failed antiforgery validation for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                        ctx.Request.Method,
+                        ctx.Request.Path,
+                        ctx.TraceIdentifier);
+
+                    if (settings.EnableDetailedErrors)
+                    {
+                        return Results.Problem(
+                            detail: ex.ToString(),
+                            title: "Invalid Heimdall antiforgery token",
+                            statusCode: StatusCodes.Status400BadRequest);
+                    }
+
+                    return Results.BadRequest("Invalid Heimdall antiforgery token.");
+                }
+            }
+
+            if (!hasInvocationHeader)
+            {
+                telemetry.SetInvocationId("missing");
+                telemetry.Complete(StatusCodes.Status400BadRequest);
+                return Results.BadRequest($"Missing {InvocationHeader} header.");
+            }
+
+            if (action is null)
+            {
+                telemetry.SetInvocationId("unknown");
+                telemetry.Complete(StatusCodes.Status404NotFound);
+                return Results.NotFound($"Unknown invocation '{invocationId}'.");
+            }
+
+            telemetry.SetInvocationId(action.InvocationId);
+
+            IResult? authorizationResult;
+            try
+            {
+                authorizationResult = await AuthorizeActionAsync(ctx, action);
+            }
+            catch (Exception ex)
+            {
+                telemetry.RecordException(ex, StatusCodes.Status500InternalServerError);
+                throw;
+            }
+
+            if (authorizationResult is not null)
+            {
+                var authorizationStatusCode = ctx.Response.StatusCode;
+                telemetry.Complete(
+                    authorizationStatusCode,
+                    outcome: authorizationStatusCode is >= 300 and < 400 ? "redirect" : null);
+                return authorizationResult;
+            }
+
+            ContentInvocationTimeoutScope timeoutScope;
+            try
+            {
+                timeoutScope = CreateRequestTimeoutScope(ctx, action);
+            }
+            catch (Exception ex)
+            {
+                telemetry.RecordException(ex, StatusCodes.Status500InternalServerError);
+                throw;
+            }
+
+            try
+            {
+                var args = await BindArgumentsAsync(
+                    ctx,
+                    action,
+                    telemetry,
+                    settings.ClientInfoLimits ?? new());
+                var raw = await action.InvokeAsync(ctx.RequestServices, args);
+
+                if (raw is null)
+                {
+                    telemetry.Complete(StatusCodes.Status204NoContent, responseBodySize: 0);
+                    return Results.NoContent();
+                }
+
+                var html = await raw.RenderHtmlAsync(ctx.RequestAborted).ConfigureAwait(false);
+                long? responseBodySize = telemetry.ShouldMeasureResponseBodySize
+                    ? Encoding.UTF8.GetByteCount(html)
+                    : null;
+                telemetry.Complete(
+                    StatusCodes.Status200OK,
+                    responseBodySize);
+                return Results.Content(html, "text/html; charset=utf-8");
+            }
+            catch (OperationCanceledException) when (timeoutScope.TimedOut)
+            {
+                var statusCode = timeoutScope.Policy?.TimeoutStatusCode ?? StatusCodes.Status504GatewayTimeout;
+                logger?.LogWarning(
+                    "Heimdall invocation {InvocationId} timed out for {Method} {Path}; returning status {StatusCode}. TraceIdentifier: {TraceIdentifier}.",
+                    invocationId,
+                    ctx.Request.Method,
+                    ctx.Request.Path,
+                    statusCode,
+                    ctx.TraceIdentifier);
+
+                var result = await CreateRequestTimeoutResultAsync(ctx, timeoutScope.Policy!);
+                telemetry.RecordCancellation("timeout", statusCode);
+                return result;
+            }
+            catch (ContentInvocationBindingException ex)
+            {
+                telemetry.RecordException(ex, ex.StatusCode);
+                logger?.LogWarning(
+                    ex,
+                    "Invalid request body for Heimdall invocation {InvocationId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                    invocationId,
+                    ctx.Request.Method,
+                    ctx.Request.Path,
+                    ctx.TraceIdentifier);
+
+                var title = ex.StatusCode == StatusCodes.Status413PayloadTooLarge
+                    ? "Heimdall invocation request body is too large"
+                    : "Invalid Heimdall invocation request body";
+
+                if (settings.EnableDetailedErrors)
+                {
+                    return Results.Problem(
+                        detail: ex.ToString(),
+                        title: title,
+                        statusCode: ex.StatusCode);
+                }
+
+                return Results.Problem(
+                    title: title,
+                    detail: ex.Message,
+                    statusCode: ex.StatusCode);
+            }
+            catch (JsonException ex)
+            {
+                telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
+                logger?.LogWarning(
+                    ex,
+                    "Invalid JSON body for Heimdall invocation {InvocationId} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                    invocationId,
+                    ctx.Request.Method,
+                    ctx.Request.Path,
+                    ctx.TraceIdentifier);
+
+                if (settings.EnableDetailedErrors)
+                {
+                    return Results.Problem(
+                        detail: ex.ToString(),
+                        title: "Invalid Heimdall invocation request body",
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                return Results.BadRequest("Invalid JSON request body.");
+            }
+            catch (Exception ex)
+            {
+                var loggedException = UnwrapInvocationException(ex);
+                if (loggedException is OperationCanceledException)
+                {
+                    var cancellationReason = ctx.RequestAborted.IsCancellationRequested
+                        ? "request_aborted"
+                        : "operation_cancelled";
+                    telemetry.RecordCancellation(
+                        cancellationReason,
+                        StatusCodes.Status500InternalServerError);
+                }
+                else
+                {
+                    telemetry.RecordException(
+                        loggedException,
+                        StatusCodes.Status500InternalServerError);
+                }
+
+                logger?.LogError(
+                    loggedException,
+                    "Heimdall invocation {InvocationId} failed for {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+                    invocationId,
+                    ctx.Request.Method,
+                    ctx.Request.Path,
+                    ctx.TraceIdentifier);
+
+                if (settings.EnableDetailedErrors)
+                {
+                    return Results.Problem(
+                        detail: loggedException.ToString(),
+                        title: "Heimdall invocation failed",
+                        statusCode: StatusCodes.Status500InternalServerError);
+                }
+
+                return Results.Problem(
+                    title: "Heimdall invocation failed",
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+            finally
+            {
+                timeoutScope.Dispose();
+            }
         }
 
         private static Exception UnwrapInvocationException(Exception ex)

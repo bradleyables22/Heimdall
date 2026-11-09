@@ -7,10 +7,10 @@
 Heimdall is an HTML-first framework for building interactive ASP.NET Core applications while keeping the server in control of the UI.
 
 ```text
-browser event -> ASP.NET action -> HTML response -> targeted DOM update
+browser event -> content invocation -> HTML response -> targeted DOM update
 ```
 
-Pages render as normal documents, interactions invoke server-side actions, and responses return HTML fragments for the browser to apply. Heimdall also supports server-rendered HTML helpers, static Razor components, real-time updates, MVC integration, and static site generation.
+Pages render as normal documents, interactions run server-side content invocations, and responses return HTML fragments for the browser to apply. Heimdall also supports server-rendered HTML helpers, static Razor components, real-time updates, MVC integration, and static site generation.
 
 > [heimdall-framework.org](https://heimdall-framework.org) is the source of truth for setup, concepts, API usage, examples, configuration, security, and deployment guidance. This README intentionally stays high level so it does not compete with the documentation.
 
@@ -18,10 +18,14 @@ Pages render as normal documents, interactions invoke server-side actions, and r
 
 | Package | Purpose |
 | --- | --- |
-| [`HeimdallFramework.Server`](https://www.nuget.org/packages/HeimdallFramework.Server) | ASP.NET Core server runtime, actions, pages, Bifrost, and static generation |
+| [`HeimdallFramework.Server`](https://www.nuget.org/packages/HeimdallFramework.Server) | ASP.NET Core server runtime, content invocations, pages, Bifrost, and static generation |
 | [`HeimdallFramework.Rendering`](https://www.nuget.org/packages/HeimdallFramework.Rendering) | HTML builders, shared Blazor/Razor fluent attributes, Tag Helpers, and typed fragments |
 | [`HeimdallFramework.Web`](https://www.nuget.org/packages/HeimdallFramework.Web) | Browser runtime distributed as Razor Class Library assets |
 | [`HeimdallFramework.Bootstrap`](https://www.nuget.org/packages/HeimdallFramework.Bootstrap) | Optional strongly typed Bootstrap class helpers |
+
+An unpublished Azure Functions isolated-worker integration is available locally in
+[`Heimdall.Functions`](Heimdall.Functions/README.md), with integration tests and a
+[real worker E2E host](Heimdall.Functions.E2E/README.md).
 
 Most interactive applications use both the Server and Web packages:
 

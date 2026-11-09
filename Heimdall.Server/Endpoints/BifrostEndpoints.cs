@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -18,210 +17,206 @@ namespace Heimdall.Server
 
 		internal static IEndpointRouteBuilder MapHeimdallBifrostEndpoints(this IEndpointRouteBuilder app)
 		{
-			var logger = app.ServiceProvider
-				.GetService<ILoggerFactory>()
-				?.CreateLogger("Heimdall.Server.BifrostEndpoints");
+			app.MapGet("__heimdall/v1/bifrost/token", (Func<HttpContext, Task<IResult>>)GetTokenAsync).ExcludeFromDescription();
+			app.MapGet("__heimdall/v1/bifrost", (Func<HttpContext, Task<IResult>>)StreamAsync).ExcludeFromDescription();
+			return app;
+		}
 
-            app.MapGet("__heimdall/v1/bifrost/token", async (
-				HttpContext ctx,
-				[FromServices] BifrostSubscribeToken tokenSvc,
-				[FromServices] IOptions<HeimdallServiceSettings> options) =>
-            {
-                var topic = ctx.Request.Query["topic"].ToString()?.Trim();
+		internal static async Task<IResult> GetTokenAsync(HttpContext ctx)
+		{
+			var tokenSvc = ctx.RequestServices.GetRequiredService<BifrostSubscribeToken>();
+			var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
+			var logger = ctx.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Heimdall.Server.BifrostEndpoints");
+			var topic = ctx.Request.Query["topic"].ToString()?.Trim();
 
-                if (string.IsNullOrWhiteSpace(topic))
-                    return Results.BadRequest("Querystring 'topic' is required.");
+			if (string.IsNullOrWhiteSpace(topic))
+				return Results.BadRequest("Querystring 'topic' is required.");
 
-                if (options.Value.EnableAntiforgery)
-                {
-                    var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
-                    try
-                    {
-                        await antiforgery.ValidateRequestAsync(ctx);
-                    }
-                    catch (AntiforgeryValidationException ex)
-                    {
-                        logger?.LogWarning(
-                            ex,
-                            "Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
-                            topic,
-                            ctx.Request.Method,
-                            ctx.Request.Path,
-                            ctx.TraceIdentifier);
-
-                        if (options.Value.EnableDetailedErrors)
-                        {
-                            return Results.Problem(
-                                detail: ex.ToString(),
-                                title: "Invalid Heimdall antiforgery token",
-                                statusCode: StatusCodes.Status400BadRequest);
-                        }
-
-                        return Results.BadRequest("Invalid Heimdall antiforgery token.");
-                    }
-                }
-
-				var authorizationResult = await AuthorizeBifrostTopicAsync(ctx, topic, options.Value);
-				if (authorizationResult is not null)
-					return authorizationResult;
-
-                var st = tokenSvc.Create(topic, ctx.User, TimeSpan.FromMinutes(2));
-                return Results.Json(new { token = st, expiresInSeconds = 120 });
-
-            }).ExcludeFromDescription();
-
-
-
-			app.MapGet("__heimdall/v1/bifrost", async (
-				HttpContext ctx,
-				[FromServices] Bifrost bifrost,
-				[FromServices] BifrostSubscribeToken tokenSvc,
-				[FromServices] IOptions<HeimdallServiceSettings> options) =>
+			if (options.Value.EnableAntiforgery)
 			{
-				var topic = ctx.Request.Query["topic"].ToString()?.Trim();
-
-				if (string.IsNullOrWhiteSpace(topic))
-					return Results.BadRequest("Querystring 'topic' is required.");
-
-				var st = ctx.Request.Query["st"].ToString()?.Trim() ?? string.Empty;
-                if (!tokenSvc.TryValidate(topic, st, ctx.User))
-                    return Results.Unauthorized();
-
-                // SSE headers
-                ctx.Response.Headers.CacheControl = "no-cache";
-				ctx.Response.Headers["X-Accel-Buffering"] = "no"; 
-				ctx.Response.ContentType = "text/event-stream";
-
-				var abort = ctx.RequestAborted;
-
-				// Subscribe to topic
-				var subscription = bifrost.Subscribe(topic);
-				var connection = BifrostConnectionInfo.Create(subscription.Id, topic, ctx.User);
-				bifrost.RegisterConnection(connection, subscription.RequestDisconnect);
-				var reader = subscription.Reader;
-				using var abortRegistration = abort.Register(subscription.Unsubscribe);
-				using var connectionTelemetry = HeimdallTelemetry.OpenBifrostConnection();
-				var disconnectReason = "client-disconnected";
-
-				var heartbeatInterval = options.Value.BifrostHeartbeatInterval;
-				if (heartbeatInterval <= TimeSpan.Zero)
-					heartbeatInterval = TimeSpan.FromSeconds(15);
-
-				async Task<bool> WriteDisconnectIfRequestedAsync()
-				{
-					if (!subscription.DisconnectRequested.IsCompleted)
-						return false;
-
-					var reason = await subscription.DisconnectRequested;
-					disconnectReason = reason;
-					await WriteEventAsync(ctx, Bifrost.DisconnectEventName, reason, null, abort);
-					return true;
-				}
-
+				var antiforgery = ctx.RequestServices.GetRequiredService<IAntiforgery>();
 				try
 				{
-					await InvokeBifrostAuthenticatedHandlersAsync(
-						ctx,
-						connection,
-						bifrost.Connections,
-						options.Value);
+					await antiforgery.ValidateRequestAsync(ctx);
+				}
+				catch (AntiforgeryValidationException ex)
+				{
+					logger?.LogWarning(
+						ex,
+						"Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",
+						topic,
+						ctx.Request.Method,
+						ctx.Request.Path,
+						ctx.TraceIdentifier);
 
+					if (options.Value.EnableDetailedErrors)
+					{
+						return Results.Problem(
+							detail: ex.ToString(),
+							title: "Invalid Heimdall antiforgery token",
+							statusCode: StatusCodes.Status400BadRequest);
+					}
+
+					return Results.BadRequest("Invalid Heimdall antiforgery token.");
+				}
+			}
+
+			var authorizationResult = await AuthorizeBifrostTopicAsync(ctx, topic, options.Value);
+			if (authorizationResult is not null)
+				return authorizationResult;
+
+			var st = tokenSvc.Create(topic, ctx.User, TimeSpan.FromMinutes(2));
+			return Results.Json(new { token = st, expiresInSeconds = 120 });
+
+		}
+
+		internal static async Task<IResult> StreamAsync(HttpContext ctx)
+		{
+			var bifrost = ctx.RequestServices.GetRequiredService<Bifrost>();
+			var tokenSvc = ctx.RequestServices.GetRequiredService<BifrostSubscribeToken>();
+			var options = ctx.RequestServices.GetRequiredService<IOptions<HeimdallServiceSettings>>();
+			var logger = ctx.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Heimdall.Server.BifrostEndpoints");
+
+			var topic = ctx.Request.Query["topic"].ToString()?.Trim();
+
+			if (string.IsNullOrWhiteSpace(topic))
+				return Results.BadRequest("Querystring 'topic' is required.");
+
+			var st = ctx.Request.Query["st"].ToString()?.Trim() ?? string.Empty;
+			if (!tokenSvc.TryValidate(topic, st, ctx.User))
+				return Results.Unauthorized();
+
+			// SSE headers
+			ctx.Response.Headers.CacheControl = "no-cache";
+			ctx.Response.Headers["X-Accel-Buffering"] = "no";
+			ctx.Response.ContentType = "text/event-stream";
+
+			var abort = ctx.RequestAborted;
+
+			// Subscribe to topic
+			var subscription = bifrost.Subscribe(topic);
+			var connection = BifrostConnectionInfo.Create(subscription.Id, topic, ctx.User);
+			bifrost.RegisterConnection(connection, subscription.RequestDisconnect);
+			var reader = subscription.Reader;
+			using var abortRegistration = abort.Register(subscription.Unsubscribe);
+			using var connectionTelemetry = HeimdallTelemetry.OpenBifrostConnection();
+			var disconnectReason = "client-disconnected";
+
+			var heartbeatInterval = options.Value.BifrostHeartbeatInterval;
+			if (heartbeatInterval <= TimeSpan.Zero)
+				heartbeatInterval = TimeSpan.FromSeconds(15);
+
+			async Task<bool> WriteDisconnectIfRequestedAsync()
+			{
+				if (!subscription.DisconnectRequested.IsCompleted)
+					return false;
+
+				var reason = await subscription.DisconnectRequested;
+				disconnectReason = reason;
+				await WriteEventAsync(ctx, Bifrost.DisconnectEventName, reason, null, abort);
+				return true;
+			}
+
+			try
+			{
+				await InvokeBifrostAuthenticatedHandlersAsync(
+					ctx,
+					connection,
+					bifrost.Connections,
+					options.Value);
+
+				if (await WriteDisconnectIfRequestedAsync())
+					return Results.Empty;
+
+				// Optional initial event (helps with debugging / client readiness)
+				await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
+
+				while (!abort.IsCancellationRequested)
+				{
 					if (await WriteDisconnectIfRequestedAsync())
-						return Results.Empty;
+						break;
 
-					// Optional initial event (helps with debugging / client readiness)
-					await WriteEventAsync(ctx, "heimdall:connected", $"topic:{topic}", null, abort);
+					// Wait for messages, but wake on idle so proxies don't close quiet streams.
+					using var idle = CancellationTokenSource.CreateLinkedTokenSource(abort);
+					idle.CancelAfter(heartbeatInterval);
+					var waitForMessages = reader.WaitToReadAsync(idle.Token).AsTask();
+					var completed = await Task.WhenAny(
+						waitForMessages,
+						subscription.DisconnectRequested);
 
-					while (!abort.IsCancellationRequested)
+					if (completed == subscription.DisconnectRequested)
+					{
+						await WriteDisconnectIfRequestedAsync();
+						break;
+					}
+
+					try
+					{
+						if (!await waitForMessages)
+							break;
+					}
+					catch (OperationCanceledException) when (!abort.IsCancellationRequested)
 					{
 						if (await WriteDisconnectIfRequestedAsync())
 							break;
 
-						// Wait for messages, but wake on idle so proxies don't close quiet streams.
-						using var idle = CancellationTokenSource.CreateLinkedTokenSource(abort);
-						idle.CancelAfter(heartbeatInterval);
-						var waitForMessages = reader.WaitToReadAsync(idle.Token).AsTask();
-						var completed = await Task.WhenAny(
-							waitForMessages,
-							subscription.DisconnectRequested);
+						await WriteCommentAsync(ctx, "ping", abort);
+						continue;
+					}
 
-						if (completed == subscription.DisconnectRequested)
+					var disconnected = false;
+					while (reader.TryRead(out var msg))
+					{
+						if (await WriteDisconnectIfRequestedAsync())
 						{
-							await WriteDisconnectIfRequestedAsync();
+							disconnected = true;
 							break;
 						}
 
-						try
+						// Drop expired messages
+						if (msg.ExpiresUtc <= DateTimeOffset.UtcNow)
 						{
-							if (!await waitForMessages)
-								break;
-						}
-						catch (OperationCanceledException) when (!abort.IsCancellationRequested)
-						{
-							if (await WriteDisconnectIfRequestedAsync())
-								break;
-
-							await WriteCommentAsync(ctx, "ping", abort);
+							HeimdallTelemetry.RecordBifrostExpired(msg.EventName);
 							continue;
 						}
 
-						var disconnected = false;
-						while (reader.TryRead(out var msg))
-						{
-							if (await WriteDisconnectIfRequestedAsync())
-							{
-								disconnected = true;
-								break;
-							}
-
-							// Drop expired messages
-							if (msg.ExpiresUtc <= DateTimeOffset.UtcNow)
-							{
-								HeimdallTelemetry.RecordBifrostExpired(msg.EventName);
-								continue;
-							}
-
-							await WriteEventAsync(
-								ctx,
-								eventName: msg.EventName,
-								data: msg.Html,
-								eventId: msg.Id,
-								ct: abort
-							);
-						}
-
-						if (disconnected)
-							break;
+						await WriteEventAsync(
+							ctx,
+							eventName: msg.EventName,
+							data: msg.Html,
+							eventId: msg.Id,
+							ct: abort
+						);
 					}
-				}
-				catch (OperationCanceledException)
-				{
-					// Expected on disconnect
-					connectionTelemetry.Complete("cancelled");
-				}
-				catch (Exception ex)
-				{
-					disconnectReason = "server-error";
-					connectionTelemetry.RecordException(ex);
-					throw;
-				}
-				finally
-				{
-					var disconnectedConnection = bifrost.RemoveConnection(connection.ConnectionId) ?? connection;
-					subscription.Unsubscribe();
-					await InvokeBifrostDisconnectedHandlersAsync(
-						ctx,
-						disconnectedConnection,
-						disconnectReason,
-						options.Value,
-						logger);
-				}
 
-				return Results.Empty;
-			})
-			.ExcludeFromDescription();
+					if (disconnected)
+						break;
+				}
+			}
+			catch (OperationCanceledException)
+			{
+				// Expected on disconnect
+				connectionTelemetry.Complete("cancelled");
+			}
+			catch (Exception ex)
+			{
+				disconnectReason = "server-error";
+				connectionTelemetry.RecordException(ex);
+				throw;
+			}
+			finally
+			{
+				var disconnectedConnection = bifrost.RemoveConnection(connection.ConnectionId) ?? connection;
+				subscription.Unsubscribe();
+				await InvokeBifrostDisconnectedHandlersAsync(
+					ctx,
+					disconnectedConnection,
+					disconnectReason,
+					options.Value,
+					logger);
+			}
 
-			return app;
+			return Results.Empty;
 		}
 
 		private static async Task InvokeBifrostAuthenticatedHandlersAsync(
