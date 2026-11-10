@@ -25,7 +25,8 @@ namespace Heimdall.Functions.Tests;
 
 public sealed partial class FunctionsIntegrationTests
 {
-    private static async Task<WebApplication> StartAsync(string? assetRoot = null)
+    private static async Task<WebApplication> StartAsync(string? assetRoot = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer();
@@ -54,6 +55,7 @@ public sealed partial class FunctionsIntegrationTests
             pages.MapPage("/configured/{id:int}", context => Html.Span($"{context.GetEndpoint()?.DisplayName}:{context.Request.RouteValues["id"]}"))
                 .WithDisplayName("configured page").RequireAuthorization();
         });
+        configureServices?.Invoke(builder.Services);
         var app = builder.Build();
         Func<IServiceProvider, HttpContext, Task<IHtmlContent>> render = (sp, _) =>
             Task.FromResult<IHtmlContent>(Html.Span(sp.GetRequiredService<ScopedValue>().Id.ToString()));
@@ -146,8 +148,10 @@ public sealed partial class FunctionsIntegrationTests
         using var client = app.GetTestClient();
         using var denied = await client.SendAsync(Invocation("test.echo"));
         Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+        Assert.Equal("invalid", denied.Headers.GetValues(HeimdallRequestPipeline.AntiforgeryFailureHeader).Single());
         using var allowed = await client.SendAsync(Invocation("test.public"));
         Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        Assert.False(allowed.Headers.Contains(HeimdallRequestPipeline.AntiforgeryFailureHeader));
     }
 
     [Fact]

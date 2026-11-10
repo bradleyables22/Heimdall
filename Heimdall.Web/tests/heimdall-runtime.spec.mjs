@@ -21,6 +21,7 @@ import { tests as mutations } from "./runtime/mutations.spec.mjs";
 import { tests as javascript } from "./runtime/javascript.spec.mjs";
 import { tests as sseSecurity } from "./runtime/sse-security.spec.mjs";
 import { tests as antiforgeryConfig } from "./runtime/antiforgery-config.spec.mjs";
+import { tests as requestSecurity } from "./runtime/request-security.spec.mjs";
 import { tests as clientInfo } from "./runtime/client-info.spec.mjs";
 import { tests as clientStorage } from "./runtime/client-storage.spec.mjs";
 import { tests as requestHeaders } from "./runtime/request-headers.spec.mjs";
@@ -55,6 +56,7 @@ const tests = [
   ...javascript,
   ...sseSecurity,
   ...antiforgeryConfig,
+  ...requestSecurity,
   ...clientInfo,
   ...clientStorage,
   ...requestHeaders,

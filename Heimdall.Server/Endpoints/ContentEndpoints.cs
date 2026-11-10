@@ -148,6 +148,7 @@ namespace Heimdall.Server
                 }
                 catch (AntiforgeryValidationException ex)
                 {
+                    ctx.Response.Headers[HeimdallRequestPipeline.AntiforgeryFailureHeader] = "invalid";
                     telemetry.RecordException(ex, StatusCodes.Status400BadRequest);
                     logger?.LogWarning(
                         ex,

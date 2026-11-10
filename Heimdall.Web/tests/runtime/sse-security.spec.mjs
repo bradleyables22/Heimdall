@@ -196,7 +196,7 @@ async function testSseTokenAntiforgeryRetry(page) {
   await installFakeServer(page, {
     csrfTokens: ["csrf-sse-old", "csrf-sse-new"],
     bifrostTokenResponses: [
-      { status: 400, body: "Invalid Heimdall antiforgery token." },
+      { status: 400, headers: { "X-Heimdall-Antiforgery": "invalid" }, body: "Invalid Heimdall antiforgery token." },
       { token: "st-sse-fresh" }
     ]
   });

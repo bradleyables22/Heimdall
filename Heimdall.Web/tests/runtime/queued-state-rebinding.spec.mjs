@@ -314,7 +314,7 @@ async function testClosestStateCsrfRetrySnapshot(page) {
     actionResponses: [
       {
         status: 400,
-        body: "Antiforgery token validation failed.",
+        body: "Antiforgery token validation failed.", headers: { "X-Heimdall-Antiforgery": "invalid" },
         delayMs: 40
       },
       { body: '<span id="state-retry-complete">Retried</span>' }

@@ -1,0 +1,6 @@
+<Project>
+  <!-- Opt in for single-app hosting; explicit-trigger applications remain supported. -->
+  <ItemGroup Condition="'$(HeimdallFunctionsHttpTrigger)' == 'true'">
+    <Compile Include="$(MSBuildThisFileDirectory)HeimdallHttp.g.cs" Visible="false" />
+  </ItemGroup>
+</Project>

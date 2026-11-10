@@ -163,6 +163,7 @@ public sealed class HeimdallFunctions
         }
         catch (AntiforgeryValidationException)
         {
+            request.HttpContext.Response.Headers[HeimdallRequestPipeline.AntiforgeryFailureHeader] = "invalid";
             return Adapt(Results.BadRequest("Invalid logout antiforgery token."));
         }
         return Adapt(Results.SignOut(new AuthenticationProperties { RedirectUri = returnUrl }, schemes));

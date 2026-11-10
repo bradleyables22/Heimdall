@@ -3,6 +3,7 @@ import {
     normalizeFollowedAuthRedirectUrl
 } from "./auth-redirects.js";
 import { emitUnauthorized } from "./unauthorized.js";
+import { getRequestCredentials, isAntiforgeryFailure } from "./request-security.js";
 
 export function createSecurityTokens({
     global,
@@ -48,7 +49,7 @@ export function createSecurityTokens({
 
                 const res = await global.fetch(url, {
                     method: "GET",
-                    credentials: "same-origin",
+                    credentials: getRequestCredentials(getConfig()),
                     headers
                 });
 
@@ -104,7 +105,10 @@ export function createSecurityTokens({
         return csrfTokenPromise;
     }
 
-    function clearCsrfToken() {
+    function clearCsrfToken(rejectedToken) {
+        // Another request may already have refreshed this token or started a refresh.
+        if (arguments.length && csrfToken !== rejectedToken)
+            return;
         csrfToken = null;
         csrfTokenPromise = null;
         _bifrostTokenByTopic.clear();
@@ -122,14 +126,6 @@ export function createSecurityTokens({
 
         _bifrostTokenByTopic.delete(t);
         _bifrostTokenPromiseByTopic.delete(t);
-    }
-
-    function isAntiforgeryFailure(status, body) {
-        if (Number(status) !== 400)
-            return false;
-
-        const lower = String(body || "").toLowerCase();
-        return lower.includes("csrf") || lower.includes("antiforgery");
     }
 
     async function fetchBifrostSubscribeToken(t, shouldRetry) {
@@ -166,7 +162,7 @@ export function createSecurityTokens({
 
         const res = await global.fetch(url.toString(), {
             method: "GET",
-            credentials: "same-origin",
+            credentials: getRequestCredentials(config),
             headers
         });
 
@@ -221,11 +217,11 @@ export function createSecurityTokens({
         if (!res.ok) {
             const body = responseBody == null ? await safeText(res) : responseBody;
 
-            if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res.status, body)) {
+            if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res)) {
                 if (typeof dbg === "function")
                     dbg("bifrost csrf validation suspected; retrying once with fresh token", { topic: t });
 
-                clearCsrfToken();
+                clearCsrfToken(csrf);
                 return fetchBifrostSubscribeToken(t, false);
             }
 

@@ -16,6 +16,9 @@ namespace Heimdall.Server;
 /// </remarks>
 public static class HeimdallRequestPipeline
 {
+    /// <summary>Response header marking antiforgery rejection before application execution. Expose through CORS for cross-origin clients.</summary>
+    public const string AntiforgeryFailureHeader = "X-Heimdall-Antiforgery";
+
     /// <summary>Executes a content invocation, including binding, authorization, antiforgery, and rendering.</summary>
     /// <remarks>Endpoint rate-limit policies require ASP.NET Core middleware and are rejected by this entry point.</remarks>
     public static Task<IResult> InvokeAsync(HttpContext context)

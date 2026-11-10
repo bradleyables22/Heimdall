@@ -9,6 +9,7 @@ import {
 } from "./auth-redirects.js";
 import { REQUEST_HEADERS_FAILED_CODE } from "./request-headers.js";
 import { emitUnauthorized } from "./unauthorized.js";
+import { getRequestCredentials, isAntiforgeryFailure } from "./request-security.js";
 
 export function createInvocationInvoker({
     global,
@@ -388,7 +389,7 @@ export function createInvocationInvoker({
             url: url.toString(),
             headers,
             body,
-            credentials: "same-origin",
+            credentials: getRequestCredentials(getConfig()),
             signal: context.signal
         };
 
@@ -466,13 +467,10 @@ export function createInvocationInvoker({
         if (!coordinator.isCurrent(context))
             return coordinator.getCancellationResult(context);
 
-        if (antiforgeryEnabled && response.status === 400 && shouldRetry) {
-            const lower = rawHtml.toLowerCase();
-            if (lower.includes("csrf") || lower.includes("antiforgery")) {
-                dbg("csrf validation suspected; retrying once with fresh token");
-                clearCsrfToken();
-                return executeRequestAttempt(context, options, false);
-            }
+        if (antiforgeryEnabled && isAntiforgeryFailure(response) && shouldRetry) {
+            dbg("antiforgery validation rejected; retrying once with fresh token");
+            clearCsrfToken(token);
+            return executeRequestAttempt(context, options, false);
         }
 
         const authRedirectUrl = getAuthRedirectUrlFromResponse(response);

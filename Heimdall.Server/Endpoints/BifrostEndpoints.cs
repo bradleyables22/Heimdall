@@ -41,6 +41,7 @@ namespace Heimdall.Server
 				}
 				catch (AntiforgeryValidationException ex)
 				{
+                    ctx.Response.Headers[HeimdallRequestPipeline.AntiforgeryFailureHeader] = "invalid";
 					logger?.LogWarning(
 						ex,
 						"Heimdall Bifrost token request failed antiforgery validation for topic {Topic} on {Method} {Path}. TraceIdentifier: {TraceIdentifier}.",

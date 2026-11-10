@@ -154,7 +154,7 @@ async function testRequestHeadersRerunForAntiforgeryRetry(page) {
   await installFakeServer(page, {
     csrfTokens: ["csrf-request-headers-old", "csrf-request-headers-new"],
     actionResponses: [
-      { status: 400, body: "antiforgery validation failed" },
+      { status: 400, headers: { "X-Heimdall-Antiforgery": "invalid" }, body: "antiforgery validation failed" },
       { status: 200, body: "" }
     ]
   });

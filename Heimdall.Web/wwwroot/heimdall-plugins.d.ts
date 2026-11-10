@@ -177,6 +177,8 @@ export interface PluginHost {
     clearCsrfToken(): void;
     invoke: PluginApi["invoke"];
     config: {
+        /** Applied to invocations, token requests, and EventSource. Configure before boot. */
+        credentials: "same-origin" | "include";
         pluginMountTimeoutMs: number;
         pluginCommandTimeoutMs: number;
         pluginCommandMaxArgsChars: number;

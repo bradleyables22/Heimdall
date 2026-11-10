@@ -7,8 +7,9 @@
     "install:browsers": "playwright install chromium",
     "test": "node tests/heimdall-runtime.spec.mjs",
     "test:package": "node tests/heimdall-package.spec.mjs",
+    "test:cross-origin": "node tests/cross-origin-security.spec.mjs",
     "verify": "node build.mjs --verify && npm run test:types && node tests/heimdall-runtime.spec.mjs",
-    "verify:all": "node build.mjs --verify && npm run test:types && node tests/heimdall-runtime.spec.mjs && node tests/heimdall-package.spec.mjs",
+    "verify:all": "node build.mjs --verify && npm run test:types && node tests/heimdall-runtime.spec.mjs && node tests/cross-origin-security.spec.mjs && node tests/heimdall-package.spec.mjs",
     "verify:package": "node tests/heimdall-package.spec.mjs",
     "test:types": "tsc -p tests/types/tsconfig.json"
   },

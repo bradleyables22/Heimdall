@@ -4,6 +4,12 @@ Notable changes to the Heimdall solution are recorded here. Package-specific det
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and released packages use semantic versioning.
 
+## [5.1.1] - Unreleased
+
+- Added the reusable `HeimdallRequestPipeline` used by the isolated-worker Azure Functions adapter.
+- Aligned `HeimdallFramework.Server` and `HeimdallFramework.Web` at 5.1.1.
+- Prepared `HeimdallFramework.Functions` 1.0.1-preview against the 5.1.1 package set.
+
 ## [5.1.0] - 2026-11-07
 
 ### Added

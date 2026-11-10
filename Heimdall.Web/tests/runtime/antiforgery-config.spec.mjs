@@ -30,7 +30,7 @@ async function testDisabledAntiforgeryAction(page) {
 
 async function testDisabledAntiforgeryDoesNotRetry(page) {
   await installFakeServer(page, {
-    actionResponses: [{ status: 400, body: "Invalid Heimdall antiforgery token." }]
+    actionResponses: [{ status: 400, headers: { "X-Heimdall-Antiforgery": "invalid" }, body: "Invalid Heimdall antiforgery token." }]
   });
 
   const result = await page.evaluate(() => {

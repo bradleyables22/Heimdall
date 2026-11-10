@@ -3,6 +3,8 @@ import {
     resolveTarget
 } from "./utils.js";
 
+import { getRequestCredentials } from "./request-security.js";
+
 const SERVER_DISCONNECT_EVENT = "heimdall:disconnect";
 
 export function createSseRuntime({
@@ -499,7 +501,7 @@ export function createSseRuntime({
 
             let es;
             try {
-                es = new global.EventSource(url);
+                es = new global.EventSource(url, { withCredentials: getRequestCredentials(getConfig()) === "include" });
             } catch (e) {
                 connection.connecting = false;
                 emitForConnectionSubscribers(connection, "heimdall:sse-error", { error: e });

@@ -118,3 +118,7 @@ example. Type declarations ship as `heimdall-plugins.d.ts` alongside the browser
 - [Source and issue tracker](https://github.com/bradleyables22/Heimdall)
 - [NuGet package](https://www.nuget.org/packages/HeimdallFramework.Web)
 - [MIT license](https://github.com/bradleyables22/Heimdall/blob/master/LICENSE)
+
+## Per-page backends
+
+Configure Heimdall.config.endpoints before DOMContentLoaded. Set Heimdall.config.credentials to include only when a trusted remote backend needs cookies; same-origin remains the default. The setting applies to content invocations, CSRF/Bifrost token requests, and EventSource. Full MPA navigation resets the token cache. See [frontend integration](https://heimdall-framework.org/distributed-frontends) for CORS, cookie policy, and explicit CSRF recovery requirements. New clients retry only HTTP 400 with X-Heimdall-Antiforgery: invalid; update Server/Functions before Web.

@@ -248,6 +248,17 @@
     );
   }
 
+  // core/request-security.js
+  function getRequestCredentials(config) {
+    const value = config.credentials ?? "same-origin";
+    if (value !== "same-origin" && value !== "include")
+      throw new TypeError('Heimdall.config.credentials must be "same-origin" or "include".');
+    return value;
+  }
+  function isAntiforgeryFailure(response) {
+    return response.status === 400 && response.headers.get("X-Heimdall-Antiforgery") === "invalid";
+  }
+
   // core/actions.js
   function createInvocationInvoker({
     global,
@@ -565,7 +576,7 @@
         url: url.toString(),
         headers,
         body,
-        credentials: "same-origin",
+        credentials: getRequestCredentials(getConfig()),
         signal: context.signal
       };
       const shouldContinue = emitLifecycle(
@@ -633,13 +644,10 @@
       context.rawHtml = rawHtml;
       if (!coordinator.isCurrent(context))
         return coordinator.getCancellationResult(context);
-      if (antiforgeryEnabled && response.status === 400 && shouldRetry) {
-        const lower = rawHtml.toLowerCase();
-        if (lower.includes("csrf") || lower.includes("antiforgery")) {
-          dbg("csrf validation suspected; retrying once with fresh token");
-          clearCsrfToken();
-          return executeRequestAttempt(context, options, false);
-        }
+      if (antiforgeryEnabled && isAntiforgeryFailure(response) && shouldRetry) {
+        dbg("antiforgery validation rejected; retrying once with fresh token");
+        clearCsrfToken(token);
+        return executeRequestAttempt(context, options, false);
       }
       const authRedirectUrl = getAuthRedirectUrlFromResponse(response);
       const normalizedAuthRedirectUrl = authRedirectUrl ? normalizeFollowedAuthRedirectUrl(global, getConfig, authRedirectUrl) : null;
@@ -4395,7 +4403,7 @@
           }
           const res = await global.fetch(url, {
             method: "GET",
-            credentials: "same-origin",
+            credentials: getRequestCredentials(getConfig()),
             headers
           });
           if (!res.ok) {
@@ -4443,7 +4451,9 @@
       })();
       return csrfTokenPromise;
     }
-    function clearCsrfToken() {
+    function clearCsrfToken(rejectedToken) {
+      if (arguments.length && csrfToken !== rejectedToken)
+        return;
       csrfToken = null;
       csrfTokenPromise = null;
       _bifrostTokenByTopic.clear();
@@ -4458,12 +4468,6 @@
       }
       _bifrostTokenByTopic.delete(t);
       _bifrostTokenPromiseByTopic.delete(t);
-    }
-    function isAntiforgeryFailure(status, body) {
-      if (Number(status) !== 400)
-        return false;
-      const lower = String(body || "").toLowerCase();
-      return lower.includes("csrf") || lower.includes("antiforgery");
     }
     async function fetchBifrostSubscribeToken(t, shouldRetry) {
       const config = getConfig();
@@ -4492,7 +4496,7 @@
       }
       const res = await global.fetch(url.toString(), {
         method: "GET",
-        credentials: "same-origin",
+        credentials: getRequestCredentials(config),
         headers
       });
       let responseBody = null;
@@ -4538,10 +4542,10 @@
       }
       if (!res.ok) {
         const body = responseBody == null ? await safeText2(res) : responseBody;
-        if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res.status, body)) {
+        if (antiforgeryEnabled && shouldRetry && isAntiforgeryFailure(res)) {
           if (typeof dbg === "function")
             dbg("bifrost csrf validation suspected; retrying once with fresh token", { topic: t });
-          clearCsrfToken();
+          clearCsrfToken(csrf);
           return fetchBifrostSubscribeToken(t, false);
         }
         const error = new Error(`Bifrost token fetch failed: ${res.status}. ${body || ""}`.trim());
@@ -4698,6 +4702,7 @@
         debug: false,
         authReturnUrlParameter: "ReturnUrl",
         requestHeaders: null,
+        credentials: "same-origin",
         antiforgery: true,
         clientInfo: false,
         clientInfoMaxAgeMs: 6e4,
@@ -5160,7 +5165,7 @@ ${topic}`;
         }
         let es;
         try {
-          es = new global.EventSource(url);
+          es = new global.EventSource(url, { withCredentials: getRequestCredentials(getConfig()) === "include" });
         } catch (e) {
           connection.connecting = false;
           emitForConnectionSubscribers(connection, "heimdall:sse-error", { error: e });

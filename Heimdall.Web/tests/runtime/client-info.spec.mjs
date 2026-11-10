@@ -245,7 +245,7 @@ async function testClientInfoLifecycleOnAntiforgeryRetry(page) {
   await installFakeServer(page, {
     csrfTokens: ["csrf-first", "csrf-second"],
     actionResponses: [
-      { status: 400, body: "antiforgery validation failed" },
+      { status: 400, headers: { "X-Heimdall-Antiforgery": "invalid" }, body: "antiforgery validation failed" },
       { status: 200, body: "" }
     ]
   });

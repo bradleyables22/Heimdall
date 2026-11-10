@@ -108,6 +108,7 @@ export async function installFakeServer(page, options = {}) {
       const fetchRecord = {
         url,
         method: init.method || "GET",
+        credentials: init.credentials,
         headers: requestHeaders,
         bodyText,
         jsonBody,

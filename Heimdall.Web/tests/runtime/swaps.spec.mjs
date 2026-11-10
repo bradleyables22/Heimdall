@@ -288,7 +288,7 @@ async function testCsrfRetry(page) {
   await installFakeServer(page, {
     csrfTokens: ["csrf-1", "csrf-2"],
     actionResponses: [
-      { status: 400, body: "csrf validation failed" },
+      { status: 400, headers: { "X-Heimdall-Antiforgery": "invalid" }, body: "csrf validation failed" },
       { status: 200, body: '<span id="retry-ok">Retried</span>' }
     ]
   });

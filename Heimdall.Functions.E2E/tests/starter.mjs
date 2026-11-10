@@ -94,9 +94,20 @@ let page;
 try {
   if (oidc) await new Promise(resolve => provider.listen(7082, '127.0.0.1', resolve));
   const executable = path.join(root, 'node_modules', 'azure-functions-core-tools', 'bin', process.platform === 'win32' ? 'func.exe' : 'func');
-  fs.copyFileSync(path.join(project, 'host.json'), path.join(project, 'bin', 'Debug', 'net10.0', 'host.json'));
-  worker = spawn(executable, ['start', '--script-root', path.join(project, 'bin', 'Debug', 'net10.0'), '--port', '7081', '--no-build', '--useHttps', '--cert', pfx, '--password', password], {
-    cwd: project, windowsHide: true, env: { ...process.env, FUNCTIONS_WORKER_RUNTIME: 'dotnet-isolated', AZURE_FUNCTIONS_CORE_TOOLS_TELEMETRY_OPTOUT: '1',
+  const publishedOutput = process.env.HEIMDALL_FUNCTIONS_STARTER_PUBLISH;
+  const outputDirectory = publishedOutput || path.join(project, 'bin', 'Debug', 'net10.0');
+  assert.ok(fs.existsSync(path.join(outputDirectory, 'host.json')), 'Build must copy host.json');
+  const workerEnvironment = { ...process.env, AZURE_FUNCTIONS_CORE_TOOLS_TELEMETRY_OPTOUT: '1' };
+  delete workerEnvironment.FUNCTIONS_WORKER_RUNTIME;
+  if (publishedOutput) {
+    assert.ok(!fs.existsSync(path.join(outputDirectory, 'local.settings.json')), 'Publish must exclude local settings');
+    workerEnvironment.FUNCTIONS_WORKER_RUNTIME = 'dotnet-isolated'; // Azure app setting in deployment.
+  } else {
+    const localSettings = JSON.parse(fs.readFileSync(path.join(outputDirectory, 'local.settings.json'), 'utf8').replace(/^\uFEFF/, ''));
+    assert.equal(localSettings.Values.FUNCTIONS_WORKER_RUNTIME, 'dotnet-isolated');
+  }
+  worker = spawn(executable, ['start', '--script-root', outputDirectory, '--port', '7081', '--no-build', '--useHttps', '--cert', pfx, '--password', password], {
+    cwd: project, windowsHide: true, env: { ...workerEnvironment,
       ...(oidc ? { Authentication__Oidc__Authority: issuer, Authentication__Oidc__ClientId: 'functions-test-client', Authentication__Oidc__ClientSecret: 'local-test-secret', Authentication__Oidc__RequireHttpsMetadata: 'false' } : {}) }
   });
   worker.stdout.on('data', data => { output = (output + data).slice(-25000); });
@@ -121,6 +132,32 @@ try {
   page.setDefaultTimeout(15000);
   await page.addInitScript(() => { window.e2eOpened = false; document.addEventListener('heimdall:sse-open', () => { window.e2eOpened = true; }); });
   await page.goto(origin + '/');
+  if (!oidc) {
+    await page.getByRole('heading', { name: 'Welcome to Heimdall' }).waitFor();
+    const assetUrls = await page.locator('script[src], link[rel="stylesheet"]').evaluateAll(nodes =>
+      nodes.map(node => node.src || node.href));
+    assetUrls.push(origin + '/assets/css/fonts/bootstrap-icons.woff2');
+    for (const url of assetUrls) {
+      const response = await context.request.get(url);
+      assert.equal(response.status(), 200, `Asset must load: ${url}`);
+      assert.ok((await response.body()).length > 0, `Asset must not be empty: ${url}`);
+      assert.equal((await context.request.head(url)).status(), 200, `HEAD must work: ${url}`);
+    }
+    assert.equal((await context.request.get(origin + '/missing-page')).status(), 404);
+    await page.goto(origin + '/state');
+    await page.getByRole('button', { name: '+', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('#counter-host .display-6')?.textContent === '1');
+    await page.getByRole('button', { name: '+', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('#counter-host .display-6')?.textContent === '2');
+    await page.goto(origin + '/out-of-band');
+    await page.waitForFunction(() => window.e2eOpened);
+    await page.getByRole('button', { name: 'Send toast via SSE', exact: true }).click();
+    await page.locator('.toast').first().waitFor();
+    for (const route of ['/forms', '/lazy']) {
+      assert.equal((await context.request.get(origin + route)).status(), 200);
+    }
+    console.log(`ok - ${publishedOutput ? 'published' : 'generated'} starter starts, serves CSS/JS/fonts, increments, and receives SSE`);
+  } else {
   await page.locator('#increment').waitFor();
   assert.equal((await context.request.get(origin + '/home', { maxRedirects: 0 })).status(), 200);
   const greeting = await context.request.get(origin + '/hello/Ada', { maxRedirects: 0 });
@@ -149,6 +186,7 @@ try {
     assert.ok(loggedOut);
     assert.equal((await context.request.get(origin + '/', { maxRedirects: 0 })).status(), 302);
     console.log('ok - generated OIDC starter completes code/PKCE login and CSRF-protected provider logout over HTTPS');
+  }
   }
   if (providerError) throw providerError;
 } catch (error) {

@@ -1,6 +1,12 @@
 # HeimdallFramework.Server changelog
 
-## [5.2.0-preview.2] - Unreleased
+## [5.1.2] - Unreleased
+
+- Added explicit antiforgery rejection signals and bounded browser recovery without replaying business-validation failures.
+- Added page-level cross-origin credentials for invocations, token requests, and SSE, retaining same-origin defaults.
+- Documented shared Functions keys and per-page endpoint configuration with cross-origin regression coverage.
+
+## [5.1.1] - Unreleased
 
 - Extracted content, antiforgery, and Bifrost HTTP handlers from ASP.NET Core endpoint registration.
 - Added `HeimdallRequestPipeline` for hosts supplying a live `HttpContext`, including the new isolated-worker Functions adapter.

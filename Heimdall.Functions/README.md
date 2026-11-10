@@ -1,6 +1,8 @@
 # HeimdallFramework.Functions
 
-The Heimdall HTTP pipeline for **.NET 10 isolated-worker Azure Functions with ASP.NET Core integration**. This is a preview package; use it with the matching `HeimdallFramework.Server` preview.
+The Heimdall HTTP pipeline for **.NET 10 isolated-worker Azure Functions with ASP.NET Core integration**. This is the `1.0.3-preview` package; use it with `HeimdallFramework.Server` and `HeimdallFramework.Web` `5.1.2`.
+
+For a single-app UI, use the Functions template and register pages in `Program.cs`. The package supplies the HTTP trigger when the project sets `<HeimdallFunctionsHttpTrigger>true</HeimdallFunctionsHttpTrigger>`. No Function class is needed. The generated trigger uses anonymous host authorization; page authorization still runs through Heimdall. Existing explicit-trigger apps are unchanged because this setting is opt-in. Remove an existing catch-all trigger before enabling it.
 
 Use `ConfigureFunctionsWebApplication()`, register `AddHeimdallFunctions`, and supply one application-owned HTTP trigger:
 
@@ -39,14 +41,13 @@ For a hand-written GET trigger, call `heimdall.RenderPageAsync(request, (service
 
 ## Single-app starter
 
-The unified `HeimdallFramework.Templates` **5.2.0-preview.2** package includes `heimdall-functions` with `--authentication none` and `--authentication oidc`. Install the locally packed template package and make matching Functions/Server previews available through a local NuGet feed:
+The unified `HeimdallFramework.Templates` **5.1.5** package includes the no-auth `heimdall-functions` starter. Install the template package and make `HeimdallFramework.Functions` `1.0.3-preview`, `HeimdallFramework.Server` `5.1.2`, and `HeimdallFramework.Web` `5.1.2` available through NuGet:
 
 ```powershell
-dotnet new heimdall-functions -n MyFunctionsUi --authentication none
-dotnet new heimdall-functions -n MyPrivateFunctionsUi --authentication oidc
+dotnet new heimdall-functions -n MyFunctionsUi
 ```
 
-The starter uses an empty route prefix, the `HeimdallFramework.Web` RCL runtime, a counter/Bifrost example, and normal DI. `UiFunctions` is the one build-time HTTP trigger; add pages in `Program.cs` without writing a Function class per page:
+The starter uses an empty route prefix, the `HeimdallFramework.Web` RCL runtime, counter/Bifrost examples, and normal DI. It intentionally has no authentication option; add application authentication separately when needed. The package supplies the build-time HTTP trigger; add pages in `Program.cs`:
 
 ```csharp
 builder.Services.AddHeimdallFunctionPages(pages =>
@@ -59,7 +60,7 @@ builder.Services.AddHeimdallFunctionPages(pages =>
 });
 ```
 
-Page patterns use ASP.NET Core route syntax, including parameters, constraints, optional segments, and catch-all paths. Renderers read values from `HttpContext.Request.RouteValues`; literal and constrained matches take precedence. The page builder accepts endpoint conventions such as `RequireAuthorization`, `WithName`, and `WithDisplayName`. The OIDC variant also includes validated provider settings, cookie sessions, a protected protocol, callback handling, and POST logout with antiforgery. No-auth output omits that scaffold and its OIDC dependency. One catch-all trigger has one Functions `AuthorizationLevel` for every route; use explicit triggers when pages and protocol need different host key levels. Follow the generated README and Authentication/README.md.
+Page patterns use ASP.NET Core route syntax, including parameters, constraints, optional segments, and catch-all paths. Renderers read values from `HttpContext.Request.RouteValues`; literal and constrained matches take precedence. The page builder accepts endpoint conventions such as `RequireAuthorization`, `WithName`, and `WithDisplayName`. One catch-all trigger has one Functions `AuthorizationLevel` for every route; use explicit triggers when pages and protocol need different host key levels. Follow the generated README for application-specific authentication and authorization.
 
 ## Static assets
 
@@ -139,3 +140,7 @@ Long-lived public SSE is **not yet verified on Azure**. Core Tools proves the lo
 ## Validation
 
 See `Heimdall.Functions.Tests` for shared-pipeline integration coverage and `Heimdall.Functions.E2E` for a real isolated worker, browser checks, and an optional SSE soak test. No deployment is required for local tests.
+
+## Page backends and scale-out
+
+See [the deployment guide](https://heimdall-framework.org/azure-functions) for the template's managed-identity Blob key store and [frontend integration](https://heimdall-framework.org/distributed-frontends) for per-page endpoint configuration, credentials, and CORS. Server/Web 5.1.2 marks antiforgery rejection with HTTP 400 plus X-Heimdall-Antiforgery: invalid; expose this header to cross-origin clients for safe one-time recovery.

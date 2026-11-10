@@ -1,5 +1,15 @@
 # HeimdallFramework.Web changelog
 
+## [5.1.2] - Unreleased
+
+- Added explicit antiforgery rejection signals and bounded browser recovery without replaying business-validation failures.
+- Added page-level cross-origin credentials for invocations, token requests, and SSE, retaining same-origin defaults.
+- Documented shared Functions keys and per-page endpoint configuration with cross-origin regression coverage.
+
+## [5.1.1] - Unreleased
+
+- Aligns the Web runtime and plugin assets with Heimdall Server 5.1.1 and the Functions 1.0.1-preview integration.
+
 ## [5.1.0] - 2026-11-07
 
 ### Added

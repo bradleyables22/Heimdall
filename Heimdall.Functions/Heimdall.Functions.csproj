@@ -8,13 +8,13 @@
     <IsPackable>true</IsPackable>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>HeimdallFramework.Functions</PackageId>
-    <Version>1.0.0-preview</Version>
+    <Version>1.0.3-preview</Version>
     <Authors>Bradley Ables</Authors>
     <Description>Azure Functions isolated-worker hosting for the Heimdall HTML-first request pipeline.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageTags>heimdall framework;html;ssr;aspnetcore;azure;azure functions;isolated worker;serverless;sse</PackageTags>
     <PackageProjectUrl>https://heimdall-framework.org</PackageProjectUrl>
-    <PackageReleaseNotes>Initial 1.0.0 preview of the isolated-worker Azure Functions adapter, including the Heimdall HTTP pipeline, page routing, static web assets, authentication helpers, and Bifrost SSE dispatch.</PackageReleaseNotes>
+    <PackageReleaseNotes>1.0.3 preview targets Server/Web 5.1.2 with explicit antiforgery rejection signals and page-level cross-origin credentials.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/bradleyables22/Heimdall</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
@@ -31,6 +31,8 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Extensions.Http.AspNetCore" Version="2.1.1" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Remove="buildTransitive/**/*.cs" />
+    <None Include="buildTransitive/**/*" Pack="true" PackagePath="buildTransitive/" />
     <None Include="Favicon.png" Pack="true" PackagePath="favicon.png" />
     <None Include="..\LICENSE" Pack="true" PackagePath="\" Link="LICENSE" />
     <None Include="README.md" Pack="true" PackagePath="\" />

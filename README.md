@@ -25,7 +25,7 @@ Pages render as normal documents, interactions run server-side content invocatio
 
 An unpublished Azure Functions isolated-worker integration is available locally in
 [`Heimdall.Functions`](Heimdall.Functions/README.md), with integration tests and a
-[real worker E2E host](Heimdall.Functions.E2E/README.md).
+[real worker E2E host](Heimdall.Functions.E2E/README.md). The current package is `1.0.3-preview` and targets Server/Web `5.1.2`.
 
 Most interactive applications use both the Server and Web packages:
 
