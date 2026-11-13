@@ -7,6 +7,27 @@ namespace Heimdall.Functions.Tests;
 public sealed partial class FunctionsIntegrationTests
 {
     [Theory]
+    [InlineData("policy-object", null, HttpStatusCode.Unauthorized)]
+    [InlineData("policy-object", "alice", HttpStatusCode.Forbidden)]
+    [InlineData("policy-object", "admin", HttpStatusCode.OK)]
+    [InlineData("policy-builder", null, HttpStatusCode.Unauthorized)]
+    [InlineData("policy-builder", "alice", HttpStatusCode.Forbidden)]
+    [InlineData("policy-builder", "admin", HttpStatusCode.OK)]
+    [InlineData("combined-policy", "admin", HttpStatusCode.Forbidden)]
+    [InlineData("anonymous-policy", null, HttpStatusCode.OK)]
+    public async Task RouterEnforcesExplicitPolicies(string route, string? user, HttpStatusCode expected)
+    {
+        await using var app = await StartAsync();
+        using var client = app.GetTestClient();
+        using var request = new HttpRequestMessage(HttpMethod.Get, "/router/" + route);
+        if (user is not null) request.Headers.Add("X-User", user);
+        using var response = await client.SendAsync(request);
+        Assert.Equal(expected, response.StatusCode);
+        if (expected != HttpStatusCode.OK)
+            Assert.DoesNotContain("protected content", await response.Content.ReadAsStringAsync());
+    }
+
+    [Theory]
     [InlineData("/router", "root page")]
     [InlineData("/router/orders", "orders page")]
     [InlineData("/router/ORDERS?sort=new", "orders page")]

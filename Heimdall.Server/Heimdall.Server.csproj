@@ -8,7 +8,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Server</PackageId>
-		<Version>5.1.2</Version>
+		<Version>5.1.3</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall server-side middleware, endpoints, and content invocation pipeline for HTML-first applications.</Description>

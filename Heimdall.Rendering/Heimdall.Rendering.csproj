@@ -8,7 +8,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Rendering</PackageId>
-		<Version>5.1.2</Version>
+		<Version>5.1.3</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Server-side HTML and FluentHtml builders, shared Heimdall fluent attributes for Blazor and Razor, Tag Helpers, and typed response directives.</Description>

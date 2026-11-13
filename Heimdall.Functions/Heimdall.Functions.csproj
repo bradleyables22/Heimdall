@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>HeimdallFramework.Functions</PackageId>
-    <Version>1.0.3-preview</Version>
+    <Version>1.0.4-preview</Version>
     <Authors>Bradley Ables</Authors>
     <Description>Azure Functions isolated-worker hosting for the Heimdall HTML-first request pipeline.</Description>
     <PackageReadmeFile>README.md</PackageReadmeFile>

@@ -54,6 +54,15 @@ public sealed partial class FunctionsIntegrationTests
             pages.MapAuthorizedPage("/private", context => Html.Span(context.User.Identity!.Name ?? "member"));
             pages.MapPage("/configured/{id:int}", context => Html.Span($"{context.GetEndpoint()?.DisplayName}:{context.Request.RouteValues["id"]}"))
                 .WithDisplayName("configured page").RequireAuthorization();
+            var adminPolicy = new AuthorizationPolicyBuilder().RequireRole("Admin").Build();
+            pages.MapPage("/policy-object", _ => Html.Span("protected content")).RequireAuthorization(adminPolicy);
+            pages.MapPage("/policy-builder", _ => Html.Span("protected content"))
+                .RequireAuthorization(policy => policy.RequireRole("Admin"));
+            pages.MapPage("/combined-policy", _ => Html.Span("protected content"))
+                .RequireAuthorization("Admin")
+                .RequireAuthorization(new AuthorizationPolicyBuilder().RequireClaim("AdditionalPermission").Build());
+            pages.MapPage("/anonymous-policy", _ => Html.Span("public content"))
+                .RequireAuthorization(adminPolicy).AllowAnonymous();
         });
         configureServices?.Invoke(builder.Services);
         var app = builder.Build();
@@ -269,14 +278,22 @@ public sealed partial class FunctionsIntegrationTests
         Assert.NotEqual(await first.Content.ReadAsStringAsync(), await second.Content.ReadAsStringAsync());
     }
 
-    [Fact]
-    public async Task PageRenderFailureUsesServerErrorResponse()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PageRenderFailureOnlyExposesDetailsWhenEnabled(bool detailedErrors)
     {
-        await using var app = await StartAsync();
+        await using var app = await StartAsync(configureServices: services =>
+            services.Configure<HeimdallServiceSettings>(options => options.EnableDetailedErrors = detailedErrors));
         using var client = app.GetTestClient();
         using var response = await client.GetAsync("/router/broken");
         Assert.Equal(HttpStatusCode.InternalServerError, response.StatusCode);
-        Assert.Contains("Heimdall page render failed.", await response.Content.ReadAsStringAsync());
+        var problem = await response.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("Heimdall page render failed.", problem.GetProperty("title").GetString());
+        if (detailedErrors)
+            Assert.Equal("render failed", problem.GetProperty("detail").GetString());
+        else
+            Assert.False(problem.TryGetProperty("detail", out _));
     }
 
     [Fact]

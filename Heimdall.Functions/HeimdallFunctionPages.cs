@@ -260,9 +260,10 @@ public sealed class HeimdallFunctionRouter
         try
         {
             var authorize = selected.Endpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
-            if (authorize.Count > 0 && selected.Endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null)
+            var policies = selected.Endpoint.Metadata.GetOrderedMetadata<AuthorizationPolicy>();
+            if ((authorize.Count > 0 || policies.Count > 0) && selected.Endpoint.Metadata.GetMetadata<IAllowAnonymous>() is null)
             {
-                var denied = await _heimdall.AuthorizeAsync(request, authorize);
+                var denied = await _heimdall.AuthorizeAsync(request, authorize, policies);
                 if (denied is not null) return denied;
             }
             return await _heimdall.RenderPageAsync(request, selected.Registration.RenderAsync);

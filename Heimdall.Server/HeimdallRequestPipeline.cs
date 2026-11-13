@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Heimdall.Server;
 
@@ -89,7 +90,8 @@ public static class HeimdallRequestPipeline
 
             return Results.Problem(
                 title: "Heimdall page render failed.",
-                detail: ex.Message,
+                detail: context.RequestServices.GetService<IOptions<HeimdallServiceSettings>>()?.Value.EnableDetailedErrors == true
+                    ? ex.Message : null,
                 statusCode: StatusCodes.Status500InternalServerError);
         }
     }

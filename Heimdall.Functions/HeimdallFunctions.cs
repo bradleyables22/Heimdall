@@ -82,11 +82,12 @@ public sealed class HeimdallFunctions
         return await AuthorizePolicyAsync(request, policy);
     }
 
-    internal async Task<IActionResult?> AuthorizeAsync(HttpRequest request, IEnumerable<IAuthorizeData> authorizeData)
+    internal async Task<IActionResult?> AuthorizeAsync(HttpRequest request, IEnumerable<IAuthorizeData> authorizeData,
+        IEnumerable<AuthorizationPolicy> policies)
     {
         ArgumentNullException.ThrowIfNull(request);
         var provider = request.HttpContext.RequestServices.GetRequiredService<IAuthorizationPolicyProvider>();
-        var policy = await AuthorizationPolicy.CombineAsync(provider, authorizeData)
+        var policy = await AuthorizationPolicy.CombineAsync(provider, authorizeData, policies)
             ?? throw new InvalidOperationException("Page authorization metadata did not produce a policy.");
         return await AuthorizePolicyAsync(request, policy);
     }

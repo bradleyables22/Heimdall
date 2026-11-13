@@ -12,7 +12,7 @@
 		<IsPackable>true</IsPackable>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 		<PackageId>HeimdallFramework.Web</PackageId>
-		<Version>5.1.2</Version>
+		<Version>5.1.3</Version>
 		<PackageReadmeFile>readme.md</PackageReadmeFile>
 		<Authors>Bradley Ables</Authors>
 		<Description>Heimdall browser runtime, frontend plugin SDK, shared attribute aliases, and optional hd attribute shortcuts as Razor Class Library assets.</Description>
